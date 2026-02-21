@@ -736,6 +736,31 @@ function loadData() {
 // Load data on startup
 loadData();
 
+// Auto-login if session exists
+(function autoLogin(){
+  try {
+    const session = localStorage.getItem('currentSession');
+    if(session) {
+      const {userId} = JSON.parse(session);
+      const user = users.find(u => u.id === userId);
+      if(user) {
+        currentUser = user;
+        document.getElementById('loginScreen').style.display='none';
+        document.getElementById('mainApp').style.display='flex';
+        document.getElementById('topbarName').textContent=user.name;
+        document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
+        document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
+        setTimeout(() => {
+          initTimeReport(); renderDashboard(); updateApprovalBadge();
+        }, 100);
+        console.log('Auto-login successful:', user.name);
+      }
+    }
+  } catch(e) {
+    console.error('Auto-login failed:', e);
+  }
+})();
+
 // Auto-save data whenever it changes
 function autoSave() {
   saveData();
@@ -875,6 +900,8 @@ function doLogin(){
   const err=document.getElementById('loginError');
   if(user){
     currentUser=user; err.style.display='none';
+    // Save session to localStorage
+    localStorage.setItem('currentSession', JSON.stringify({userId: user.id}));
     document.getElementById('loginScreen').style.display='none';
     document.getElementById('mainApp').style.display='flex';
     document.getElementById('topbarName').textContent=user.name;
@@ -885,6 +912,7 @@ function doLogin(){
 }
 document.getElementById('logoutBtn').addEventListener('click',()=>{
   currentUser=null;
+  localStorage.removeItem('currentSession');
   document.getElementById('mainApp').style.display='none';
   document.getElementById('loginScreen').style.display='flex';
   document.getElementById('loginEmail').value='';
