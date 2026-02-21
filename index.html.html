@@ -1544,6 +1544,8 @@ function runTimeReport(){
   let logs=timeLogs.filter(l=>currentUser.isAdmin||l.userId===currentUser.id);
   logs=logs.filter(l=>{ const d=new Date(l.date); return d.getFullYear()===year&&d.getMonth()>=fromM&&d.getMonth()<=toM; });
   if(userId) logs=logs.filter(l=>l.userId===userId);
+  // Filter by project: if specific project selected, show only that project
+  // If "All Projects", show everything including non-productive
   if(projId) logs=logs.filter(l=>l.projectId===projId);
 
   document.getElementById('trOutput').style.display='block';
@@ -1729,18 +1731,23 @@ document.getElementById('addUserBtn').addEventListener('click',()=>{
   if(users.find(u=>u.email===email)){ alert('Email exists'); return; }
   users.push({id:genId(),name,email,password:pass,isAdmin:false,medLeft:12,casLeft:5});
   document.getElementById('newUserName').value=''; document.getElementById('newUserEmail').value=''; document.getElementById('newUserPass').value='';
+  autoSave();
   renderManage();
 });
 document.getElementById('addClientBtn').addEventListener('click',()=>{
   const v=document.getElementById('newClient').value.trim();
   if(!v||clients.includes(v)){ alert(v?'Client already exists':'Enter client name'); return; }
   clients.push(v); clients.sort();
-  document.getElementById('newClient').value=''; renderManage();
+  document.getElementById('newClient').value='';
+  autoSave();
+  renderManage();
 });
 document.getElementById('addTypologyBtn').addEventListener('click',()=>{
   const v=document.getElementById('newTypology').value.trim();
   if(!v||typologies.includes(v)){ alert(v?'Already exists':'Enter a name'); return; }
-  typologies.push(v); document.getElementById('newTypology').value=''; renderManage();
+  typologies.push(v); document.getElementById('newTypology').value='';
+  autoSave();
+  renderManage();
 });
 
 // ═══════════════════════════════════════════════════════
