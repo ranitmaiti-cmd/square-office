@@ -627,7 +627,22 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div>
 </div>
 
-<script>
+<script type="module">
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyBi_OD42znfsYZerQ_c6RWfLIPD_GropBE",
+  authDomain: "square-office-management.firebaseapp.com",
+  projectId: "square-office-management",
+  storageBucket: "square-office-management.firebasestorage.app",
+  messagingSenderId: "99247930577",
+  appId: "1:99247930577:web:4f5137e9476349582319f0"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 // ═══════════════════════════════════════════════════════
 // CONSTANTS & DATA
 // ═══════════════════════════════════════════════════════
@@ -896,7 +911,10 @@ document.getElementById('loginPassword').addEventListener('keypress', e=>{ if(e.
 function doLogin(){
   const email=document.getElementById('loginEmail').value.trim().toLowerCase();
   const pass=document.getElementById('loginPassword').value.trim();
+  console.log('Login attempt - Email:', email, 'Pass:', pass);
+  console.log('Available users:', users.map(u => ({email: u.email, password: u.password})));
   const user=users.find(u=>u.email.toLowerCase()===email&&u.password===pass);
+  console.log('User found:', user);
   const err=document.getElementById('loginError');
   if(user){
     currentUser=user; err.style.display='none';
@@ -908,7 +926,11 @@ function doLogin(){
     document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
     initTimeReport(); renderDashboard(); updateApprovalBadge();
-  } else { err.style.display='block'; err.textContent='Invalid email or password.'; }
+  } else { 
+    err.style.display='block'; 
+    err.textContent='Invalid email or password.';
+    console.log('Login failed - no matching user found');
+  }
 }
 document.getElementById('logoutBtn').addEventListener('click',()=>{
   currentUser=null;
