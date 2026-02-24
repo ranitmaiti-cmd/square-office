@@ -707,23 +707,16 @@ async function saveData() {
   console.log("Attempting to save to cloud...");
   try {
     const dataToSave = {
-      users: users, 
-      clients: clients, 
-      typologies: typologies, 
-      projectsData: projectsData, 
-      planEntries: planEntries, 
-      timeLogs: timeLogs, 
-      leaveRequests: leaveRequests, 
-      changeRequests: changeRequests, 
-      holidays: holidays
+      users, clients, typologies, projectsData, planEntries, 
+      timeLogs, leaveRequests, changeRequests, holidays
     };
     await db.collection("companyData").doc("squareDB").set(dataToSave);
     console.log('✅ Data saved to Firebase!');
+    showSaveIndicator();
   } catch(e) {
     console.error('❌ Error saving to Firebase:', e);
-    alert('Failed to save to cloud! ' + e.message);
   }
-} // <--- Often this bracket gets accidentally deleted!
+}
 
 async function loadData() {
   console.log("Attempting to load from cloud...");
@@ -741,40 +734,33 @@ async function loadData() {
       changeRequests = data.changeRequests || [];
       holidays = data.holidays || [];
       console.log('✅ Data loaded from Firebase!');
-      autoLogin();
     } else {
       console.log("No data found in Firebase. Creating initial...");
       await saveData(); 
-      autoLogin();
     }
+    // After loading, proceed to app initialization
+    if (typeof renderManage === 'function') renderManage();
+    if (typeof renderDashboard === 'function') renderDashboard();
   } catch(e) {
     console.error('❌ Error loading from Firebase:', e);
   }
 }
 
+function showSaveIndicator() {
+  const el = document.getElementById('saveIndicator');
+  if(el) {
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2000);
+  }
+}
+
+// Ensure loadData runs immediately
+loadData();
+
+// Redirect autoSave to use Firebase
 window.autoSave = function() {
   saveData();
 };
-
-loadData();
-    // Try localStorage fallback
-    try {
-      const backup = localStorage.getItem('squareDB_backup');
-      if(backup) {
-        const data = JSON.parse(backup);
-        if(data.users && data.users.length) users = data.users;
-        if(data.clients && data.clients.length) clients = data.clients;
-        if(data.typologies && data.typologies.length) typologies = data.typologies;
-        if(data.projectsData && data.projectsData.length) projectsData = data.projectsData;
-        planEntries   = data.planEntries   || [];
-        timeLogs      = data.timeLogs      || [];
-        leaveRequests = data.leaveRequests || [];
-        changeRequests= data.changeRequests|| [];
-        holidays      = data.holidays      || [];
-        console.warn('⚠️ Loaded from localStorage fallback');
-      }
-    } catch(le) {}
-  
 
 
 // ═══════════════════════════════════════════════════════
