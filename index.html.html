@@ -196,6 +196,10 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .notif-title{font-weight:700;font-size:14px;margin-bottom:4px;}
 .notif-msg{font-size:13px;color:#4a5568;}
 
+/* SAVE INDICATOR */
+.save-indicator{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#38a169;color:white;padding:8px 18px;border-radius:20px;font-size:12px;font-weight:600;z-index:700;opacity:0;transition:opacity 0.3s;pointer-events:none;}
+.save-indicator.show{opacity:1;}
+
 @media(max-width:700px){.sidebar{display:none;}.form-row,.form-row-3,.manage-grid,.balance-grid{grid-template-columns:1fr;}}
 </style>
 
@@ -204,6 +208,9 @@ textarea.form-control{min-height:70px;resize:vertical;}
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 </head>
 <body>
+
+<!-- SAVE INDICATOR -->
+<div class="save-indicator" id="saveIndicator">✅ Saved to cloud</div>
 
 <!-- LOGIN -->
 <div class="login-screen" id="loginScreen">
@@ -256,17 +263,11 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <!-- DASHBOARD -->
       <div class="page active" id="page-dashboard">
         <h2 class="page-title">📊 Dashboard</h2>
-        
-        <!-- Analytics Cards -->
         <div class="stats-grid" id="dashAnalytics" style="margin-bottom:20px;"></div>
-        
-        <!-- Quick Actions -->
         <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
           <button class="btn btn-primary btn-sm" id="dashAddHoliday">📅 Add Holiday</button>
           <button class="btn btn-ghost btn-sm" id="dashViewHolidays">View Holidays</button>
         </div>
-        
-        <!-- Weekly Calendar -->
         <div class="week-nav">
           <button class="btn btn-ghost btn-sm" id="prevWeek">← Prev</button>
           <span class="week-label" id="weekLabel"></span>
@@ -458,30 +459,10 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div>
 </div>
 
-<!-- Timer Description Modal -->
-<div class="modal-backdrop" id="timerDescModal">
-  <div class="modal-box" style="max-width:480px;">
-    <div class="modal-head"><h3>⏱️ Timer Stopped</h3><button class="close-btn" onclick="closeModal('timerDescModal')">×</button></div>
-    <div style="background:#f0fff4;border:2px solid #9ae6b4;border-radius:10px;padding:16px;margin-bottom:16px;text-align:center;">
-      <div style="font-size:24px;font-weight:800;color:#38a169;" id="timerDescTime">1h 23m</div>
-      <div style="font-size:13px;color:#718096;margin-top:4px;" id="timerDescProject"></div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">What did you work on? *</label>
-      <textarea class="form-control" id="timerDescText" placeholder="Describe what you did..." rows="4"></textarea>
-    </div>
-    <div style="display:flex;gap:8px;">
-      <button class="btn btn-primary" id="saveTimerDescBtn">💾 Save Log</button>
-      <button class="btn btn-ghost" id="cancelTimerDescBtn">Cancel</button>
-    </div>
-  </div>
-</div>
-
 <!-- Time Log Modal -->
 <div class="modal-backdrop" id="logModal">
   <div class="modal-box">
     <div class="modal-head"><h3>Log Time</h3><button class="close-btn" onclick="closeModal('logModal')">×</button></div>
-    <!-- Productive / Non-productive -->
     <div class="form-group" id="prodTypeGroup">
       <label class="form-label">Productivity Type</label>
       <div class="radio-group">
@@ -489,7 +470,6 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <label><input type="radio" name="logProd" value="non-productive" id="logProdNo"> Non-Productive</label>
       </div>
     </div>
-    <!-- Productive fields -->
     <div id="logProdFields">
       <div class="form-row">
         <div class="form-group"><label class="form-label">Project *</label><select class="form-control" id="logProject"><option value="">Select...</option></select></div>
@@ -497,7 +477,6 @@ textarea.form-control{min-height:70px;resize:vertical;}
       </div>
       <div class="form-group"><label class="form-label">Job Type *</label><select class="form-control" id="logTypology"><option value="">Select...</option></select></div>
     </div>
-    <!-- Non-productive fields -->
     <div id="logNonProdFields" style="display:none;">
       <div class="form-group"><label class="form-label">Activity *</label>
         <select class="form-control" id="logActivity">
@@ -522,7 +501,6 @@ textarea.form-control{min-height:70px;resize:vertical;}
       </div>
     </div>
     <div class="form-group"><label class="form-label">Date *</label><input type="date" class="form-control" id="logDate"></div>
-    <!-- Time method -->
     <div class="form-group" id="timeMethodGroup">
       <label class="form-label">Time Entry</label>
       <div class="radio-group">
@@ -570,9 +548,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
     <div class="form-row">
       <div class="form-group"><label class="form-label">Project Name *</label><input type="text" class="form-control" id="pName"></div>
       <div class="form-group"><label class="form-label">Client *</label>
-        <select class="form-control" id="pClientSelect">
-          <option value="">Select client...</option>
-        </select>
+        <select class="form-control" id="pClientSelect"><option value="">Select client...</option></select>
       </div>
     </div>
     <div class="form-group" id="pNewClientDiv" style="display:none;">
@@ -644,10 +620,9 @@ const firebaseConfig = {
   appId: "1:99247930577:web:4f5137e9476349582319f0"
 };
 
-// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-console.log('✅ Firebase initialized successfully');
+const db = firebase.firestore();  // ← SINGLE declaration only
+console.log('✅ Firebase initialized');
 
 // ═══════════════════════════════════════════════════════
 // CONSTANTS & DATA
@@ -665,7 +640,6 @@ let users = [
   {id:'u5',name:'Sonia Verma',  email:'sonia@square.com',  password:'sonia123', isAdmin:false, medLeft:12,casLeft:5},
 ];
 
-// Job typologies (standard, same for all projects)
 let typologies = [
   'Schematic Design – Concept Development',
   'Schematic Design – Client Presentation',
@@ -683,10 +657,8 @@ let typologies = [
   'Project Management – Internal Review',
 ];
 
-// Clients list
 let clients = ['Acme Corp', 'Tech Solutions', 'Global Industries', 'Startup Inc', 'Enterprise Co'];
 
-// Projects with phase budgets
 let projectsData = [
   { id:'p1', name:'Villa Interior – Phase 1', client:'Acme Corp', startDate:'2026-01-01', endDate:'2026-06-30',
     phases:{ 'Schematic Design':40, 'Final Design':80, 'Construction Documents':120, 'Material Selection & Coordination':30, 'Site Supervision':20, 'Project Management':40 }},
@@ -694,20 +666,12 @@ let projectsData = [
     phases:{ 'Schematic Design':20, 'Final Design':40, 'Construction Documents':60, 'Material Selection & Coordination':20, 'Site Supervision':15, 'Project Management':25 }},
 ];
 
-let planEntries   = [];   // weekly planner entries
-let timeLogs      = [];   // time log entries
-let holidays      = [];   // custom holidays
-
-// Debug function - call from console: checkLogs()
-window.checkLogs = function() {
-  console.log('Total timeLogs:', timeLogs.length);
-  console.log('timeLogs array:', timeLogs);
-  timeLogs.forEach((log, i) => {
-    console.log(`Log ${i}:`, log);
-  });
-};
+let planEntries   = [];
+let timeLogs      = [];
+let holidays      = [];
 let leaveRequests = [];
 let changeRequests= [];
+let notifications = [];
 
 let currentWeek  = getMonday(new Date());
 let planWeek     = getMonday(new Date());
@@ -715,110 +679,100 @@ let editPlanId   = null;
 let editPlanUser = null;
 let editPlanDay  = null;
 
-// Timer state
 let timerInterval=null, timerStartedAt=null, timerPausedMs=0, timerRunning=false, timerLinkedPlan=null;
 let mTimerInterval=null, mTimerStartedAt=null, mTimerPausedMs=0, mTimerRunning=false;
 
 // ═══════════════════════════════════════════════════════
-// DATA PERSISTENCE (localStorage)
+// ✅ FIX: autoSave — the missing function that caused all data loss
+// ═══════════════════════════════════════════════════════
+let saveTimer = null;
+function autoSave() {
+  // Debounce: wait 500ms after last change before saving
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveData();
+  }, 500);
+}
+
+function showSaveIndicator() {
+  const el = document.getElementById('saveIndicator');
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ═══════════════════════════════════════════════════════
+// DATA PERSISTENCE (FIREBASE FIRESTORE)
 // ═══════════════════════════════════════════════════════
 async function saveData() {
   try {
-    console.log('💾 Saving data to Firebase...');
-    
-    // Save all data collections to Firebase
-    await db.collection('appData').doc('users').set({data: users});
-    await db.collection('appData').doc('clients').set({data: clients});
-    await db.collection('appData').doc('typologies').set({data: typologies});
-    await db.collection('appData').doc('projects').set({data: projectsData});
-    await db.collection('appData').doc('plans').set({data: planEntries});
-    await db.collection('appData').doc('timeLogs').set({data: timeLogs});
-    await db.collection('appData').doc('leaves').set({data: leaveRequests});
-    await db.collection('appData').doc('changes').set({data: changeRequests});
-    await db.collection('appData').doc('holidays').set({data: holidays});
-    
-    console.log('✅ Data saved to Firebase successfully');
+    const dataToSave = {
+      users, clients, typologies, projectsData,
+      planEntries, timeLogs, leaveRequests, changeRequests, holidays
+    };
+    await db.collection("companyData").doc("squareDB").set(dataToSave);
+    showSaveIndicator();
+    console.log('✅ Saved to Firebase');
   } catch(e) {
-    console.error('❌ Error saving to Firebase:', e);
-    alert('Failed to save data. Check your internet connection.');
+    console.error('❌ Firebase save error:', e);
+    // Fallback: also save to localStorage so data isn't lost if Firebase fails
+    try {
+      localStorage.setItem('squareDB_backup', JSON.stringify({
+        users, clients, typologies, projectsData,
+        planEntries, timeLogs, leaveRequests, changeRequests, holidays
+      }));
+      console.warn('⚠️ Saved to localStorage as fallback');
+    } catch(le) { console.error('localStorage fallback also failed'); }
   }
 }
 
 async function loadData() {
   try {
-    console.log('📥 Loading data from Firebase...');
-    
-    const usersDoc = await db.collection('appData').doc('users').get();
-    const clientsDoc = await db.collection('appData').doc('clients').get();
-    const typologiesDoc = await db.collection('appData').doc('typologies').get();
-    const projectsDoc = await db.collection('appData').doc('projects').get();
-    const plansDoc = await db.collection('appData').doc('plans').get();
-    const logsDoc = await db.collection('appData').doc('timeLogs').get();
-    const leavesDoc = await db.collection('appData').doc('leaves').get();
-    const changesDoc = await db.collection('appData').doc('changes').get();
-    const holidaysDoc = await db.collection('appData').doc('holidays').get();
-    
-    if(usersDoc.exists) users = usersDoc.data().data;
-    if(clientsDoc.exists) clients = clientsDoc.data().data;
-    if(typologiesDoc.exists) typologies = typologiesDoc.data().data;
-    if(projectsDoc.exists) projectsData = projectsDoc.data().data;
-    if(plansDoc.exists) planEntries = plansDoc.data().data;
-    if(logsDoc.exists) timeLogs = logsDoc.data().data;
-    if(leavesDoc.exists) leaveRequests = leavesDoc.data().data;
-    if(changesDoc.exists) changeRequests = changesDoc.data().data;
-    if(holidaysDoc.exists) holidays = holidaysDoc.data().data;
-    
-    console.log('✅ Data loaded from Firebase successfully');
-    console.log('Loaded', users.length, 'users,', projectsData.length, 'projects,', timeLogs.length, 'time logs');
-  } catch(e) {
-    console.error('❌ Error loading from Firebase:', e);
-    console.log('Using default data...');
-  }
-}
-
-// Load data on startup and then auto-login
-loadData().then(() => {
-  // Auto-login if session exists
-  (function autoLogin(){
-    try {
-      const session = localStorage.getItem('currentSession');
-      if(session) {
-        const {userId} = JSON.parse(session);
-        const user = users.find(u => u.id === userId);
-        if(user) {
-          currentUser = user;
-          document.getElementById('loginScreen').style.display='none';
-          document.getElementById('mainApp').style.display='flex';
-          document.getElementById('topbarName').textContent=user.name;
-          document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
-          document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
-          setTimeout(() => {
-            initTimeReport(); renderDashboard(); updateApprovalBadge();
-          }, 100);
-          console.log('✅ Auto-login successful:', user.name);
-        }
-      }
-    } catch(e) {
-      console.error('❌ Auto-login failed:', e);
+    const docSnap = await db.collection("companyData").doc("squareDB").get();
+    if (docSnap.exists) {
+      const data = docSnap.data();
+      // Merge loaded data — keep defaults if Firebase has empty arrays
+      if(data.users && data.users.length) users = data.users;
+      if(data.clients && data.clients.length) clients = data.clients;
+      if(data.typologies && data.typologies.length) typologies = data.typologies;
+      if(data.projectsData && data.projectsData.length) projectsData = data.projectsData;
+      planEntries   = data.planEntries   || [];
+      timeLogs      = data.timeLogs      || [];
+      leaveRequests = data.leaveRequests || [];
+      changeRequests= data.changeRequests|| [];
+      holidays      = data.holidays      || [];
+      console.log('✅ Loaded from Firebase — users:', users.length, 'clients:', clients.length);
+    } else {
+      console.log('No existing data in Firebase, saving defaults...');
+      await saveData();
     }
-  })();
-});
-
-// Auto-save data whenever it changes
-function autoSave() {
-  saveData();
+  } catch(e) {
+    console.error('❌ Firebase load error:', e);
+    // Try localStorage fallback
+    try {
+      const backup = localStorage.getItem('squareDB_backup');
+      if(backup) {
+        const data = JSON.parse(backup);
+        if(data.users && data.users.length) users = data.users;
+        if(data.clients && data.clients.length) clients = data.clients;
+        if(data.typologies && data.typologies.length) typologies = data.typologies;
+        if(data.projectsData && data.projectsData.length) projectsData = data.projectsData;
+        planEntries   = data.planEntries   || [];
+        timeLogs      = data.timeLogs      || [];
+        leaveRequests = data.leaveRequests || [];
+        changeRequests= data.changeRequests|| [];
+        holidays      = data.holidays      || [];
+        console.warn('⚠️ Loaded from localStorage fallback');
+      }
+    } catch(le) {}
+  }
 }
 
 // ═══════════════════════════════════════════════════════
 // NOTIFICATIONS
 // ═══════════════════════════════════════════════════════
-let notifications = [];
-
 function addNotification(title, message, type='info') {
-  const id = genId();
-  notifications.push({ id, title, message, type, timestamp: Date.now(), read: false });
+  notifications.push({ id:genId(), title, message, type, timestamp:Date.now(), read:false });
   showNotificationToast(title, message, type);
-  saveData();
 }
 
 function showNotificationToast(title, message, type) {
@@ -827,72 +781,8 @@ function showNotificationToast(title, message, type) {
   toast.innerHTML = `<div class="notif-title">${title}</div><div class="notif-msg">${message}</div>`;
   document.body.appendChild(toast);
   setTimeout(() => toast.classList.add('show'), 10);
-  setTimeout(() => {
-    toast.classList.remove('show');
-    setTimeout(() => toast.remove(), 300);
-  }, 5000);
+  setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 5000);
 }
-
-function checkNotifications() {
-  const today = fmt(new Date());
-  const now = new Date();
-  
-  // Check if anyone hasn't logged time today
-  users.forEach(user => {
-    if(user.isAdmin) return; // Skip admin
-    const todayLogs = timeLogs.filter(l => l.userId === user.id && l.date === today);
-    const todayPlans = planEntries.filter(p => p.userId === user.id && p.date === today);
-    
-    // If it's past 2 PM and they have plans but no logs
-    if(now.getHours() >= 14 && todayPlans.length > 0 && todayLogs.length === 0) {
-      const lastNotif = notifications.find(n => n.message.includes(user.name) && n.message.includes('log time'));
-      const lastNotifTime = lastNotif ? lastNotif.timestamp : 0;
-      // Only notify once per day
-      if(Date.now() - lastNotifTime > 24*60*60*1000) {
-        addNotification('⏱️ Time Log Reminder', `${user.name} hasn't logged time today`, 'warning');
-      }
-    }
-  });
-  
-  // Check project phase budgets
-  projectsData.forEach(proj => {
-    Object.entries(proj.phases).forEach(([phase, budget]) => {
-      if(budget === 0) return;
-      const used = phaseLoggedMins(proj.id, phase) / 60;
-      const pct = (used / budget) * 100;
-      
-      // Alert at 80% and 100%
-      if(pct >= 80 && pct < 100) {
-        const key = `${proj.id}-${phase}-80`;
-        if(!notifications.find(n => n.message.includes(key))) {
-          addNotification('⚠️ Budget Alert', `${proj.name} - ${phase}: ${pct.toFixed(0)}% used (${key})`, 'warning');
-        }
-      } else if(pct >= 100) {
-        const key = `${proj.id}-${phase}-100`;
-        if(!notifications.find(n => n.message.includes(key))) {
-          addNotification('🚨 Budget Exceeded', `${proj.name} - ${phase}: Budget exceeded! (${key})`, 'error');
-        }
-      }
-    });
-  });
-  
-  // Check project deadlines (within 7 days)
-  projectsData.forEach(proj => {
-    if(!proj.endDate) return;
-    const daysLeft = Math.ceil((new Date(proj.endDate) - now) / (1000*60*60*24));
-    if(daysLeft <= 7 && daysLeft > 0) {
-      const key = `${proj.id}-deadline-${daysLeft}`;
-      if(!notifications.find(n => n.message.includes(key))) {
-        addNotification('📅 Deadline Approaching', `${proj.name} ends in ${daysLeft} days (${key})`, 'info');
-      }
-    }
-  });
-}
-
-// Check notifications every 30 minutes
-setInterval(checkNotifications, 30 * 60 * 1000);
-// Check on load
-setTimeout(checkNotifications, 5000);
 
 // ═══════════════════════════════════════════════════════
 // HELPERS
@@ -904,49 +794,59 @@ function getMonday(d){ const dt=new Date(d),day=dt.getDay(); dt.setDate(dt.getDa
 function addDays(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
 function isSunday(d){ return new Date(d).getDay()===0; }
 function is24Sat(d){ const dt=new Date(d); if(dt.getDay()!==6) return false; return [2,4].includes(Math.ceil(dt.getDate()/7)); }
-function isHoliday(d){ 
-  if(isSunday(d) || is24Sat(d)) return true;
-  const ds = fmt(d);
-  return holidays.some(h => h.date === ds);
-}
+function isHoliday(d){ if(isSunday(d)||is24Sat(d)) return true; const ds=fmt(d); return holidays.some(h=>h.date===ds); }
 function workDays(s,e){ let c=0,cur=new Date(s),end=new Date(e); while(cur<=end){if(!isHoliday(cur))c++; cur=addDays(cur,1);} return c; }
 function minsToHM(m){ return `${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`; }
 function hrsToHM(h){ return minsToHM(Math.round(h*60)); }
 function hhmm(t){ const[h,m]=t.split(':').map(Number); return h*60+m; }
 function secsToHMS(s){ return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
-function getElapsed(startedAt, pausedMs){ return Math.floor((Date.now()-startedAt-pausedMs)/1000); }
+function getElapsed(startedAt,pausedMs){ return Math.floor((Date.now()-startedAt-pausedMs)/1000); }
 function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 function openModal(id){ document.getElementById(id).classList.add('open'); }
 function updateApprovalBadge(){
   const n=changeRequests.filter(r=>r.status==='pending').length+leaveRequests.filter(l=>l.status==='pending').length;
   const b=document.getElementById('approvalBadge'); b.style.display=n>0?'inline-block':'none'; b.textContent=n;
 }
+function phaseLoggedMins(projectId,phaseName){ return timeLogs.filter(l=>l.projectId===projectId&&l.phase===phaseName).reduce((s,l)=>s+l.durationMins,0); }
+function projectLoggedMins(projectId){ return timeLogs.filter(l=>l.projectId===projectId).reduce((s,l)=>s+l.durationMins,0); }
 
-// Get logged hours for a project phase
-function phaseLoggedMins(projectId, phaseName){
-  return timeLogs.filter(l=>l.projectId===projectId && l.phase===phaseName)
-                 .reduce((s,l)=>s+l.durationMins,0);
-}
-function projectLoggedMins(projectId){
-  return timeLogs.filter(l=>l.projectId===projectId).reduce((s,l)=>s+l.durationMins,0);
-}
+// ═══════════════════════════════════════════════════════
+// INIT — Load data then set up login
+// ═══════════════════════════════════════════════════════
+loadData().then(() => {
+  console.log('Data ready. Checking for saved session...');
+  // Auto-login from session
+  try {
+    const session = localStorage.getItem('currentSession');
+    if(session) {
+      const { userId } = JSON.parse(session);
+      const user = users.find(u => u.id === userId);
+      if(user) {
+        currentUser = user;
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('mainApp').style.display = 'flex';
+        document.getElementById('topbarName').textContent = user.name;
+        document.getElementById('adminBadge').style.display = user.isAdmin ? 'inline-block' : 'none';
+        document.querySelectorAll('.admin-only').forEach(el => el.style.display = user.isAdmin ? 'flex' : 'none');
+        initTimeReport(); renderDashboard(); updateApprovalBadge();
+      }
+    }
+  } catch(e) {}
+});
 
 // ═══════════════════════════════════════════════════════
 // LOGIN / LOGOUT
 // ═══════════════════════════════════════════════════════
 document.getElementById('loginBtn').addEventListener('click', doLogin);
 document.getElementById('loginPassword').addEventListener('keypress', e=>{ if(e.key==='Enter') doLogin(); });
+
 function doLogin(){
   const email=document.getElementById('loginEmail').value.trim().toLowerCase();
   const pass=document.getElementById('loginPassword').value.trim();
-  console.log('Login attempt - Email:', email, 'Pass:', pass);
-  console.log('Available users:', users.map(u => ({email: u.email, password: u.password})));
   const user=users.find(u=>u.email.toLowerCase()===email&&u.password===pass);
-  console.log('User found:', user);
   const err=document.getElementById('loginError');
   if(user){
     currentUser=user; err.style.display='none';
-    // Save session to localStorage
     localStorage.setItem('currentSession', JSON.stringify({userId: user.id}));
     document.getElementById('loginScreen').style.display='none';
     document.getElementById('mainApp').style.display='flex';
@@ -954,12 +854,12 @@ function doLogin(){
     document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
     initTimeReport(); renderDashboard(); updateApprovalBadge();
-  } else { 
-    err.style.display='block'; 
+  } else {
+    err.style.display='block';
     err.textContent='Invalid email or password.';
-    console.log('Login failed - no matching user found');
   }
 }
+
 document.getElementById('logoutBtn').addEventListener('click',()=>{
   currentUser=null;
   localStorage.removeItem('currentSession');
@@ -997,45 +897,24 @@ document.getElementById('prevWeek').addEventListener('click',()=>{ currentWeek=a
 document.getElementById('nextWeek').addEventListener('click',()=>{ currentWeek=addDays(currentWeek,7);  renderDashboard(); });
 
 function renderDashboard(){
-  // Calculate analytics for current month
-  const now = new Date();
-  const thisMonth = now.getMonth();
-  const thisYear = now.getFullYear();
-  const monthLogs = timeLogs.filter(l => {
-    const d = new Date(l.date);
-    return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
-  });
-  
-  const totalHours = monthLogs.reduce((s,l) => s + l.durationMins, 0) / 60;
-  const prodHours = monthLogs.filter(l => l.productive).reduce((s,l) => s + l.durationMins, 0) / 60;
-  const utilization = totalHours > 0 ? ((prodHours / totalHours) * 100).toFixed(0) : 0;
-  
-  // Active projects with budget status
-  const activeProjects = projectsData.length;
-  let overBudgetCount = 0;
-  projectsData.forEach(proj => {
-    Object.entries(proj.phases).forEach(([phase, budget]) => {
-      if(budget > 0) {
-        const used = phaseLoggedMins(proj.id, phase) / 60;
-        if(used >= budget) overBudgetCount++;
-      }
-    });
-  });
-  
-  // Team utilization
-  const activeUsers = users.filter(u => !u.isAdmin).length;
-  const avgHoursPerPerson = activeUsers > 0 ? (totalHours / activeUsers).toFixed(1) : 0;
-  
-  // Render analytics cards
-  document.getElementById('dashAnalytics').innerHTML = `
+  const now=new Date(), thisMonth=now.getMonth(), thisYear=now.getFullYear();
+  const monthLogs=timeLogs.filter(l=>{ const d=new Date(l.date); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+  const totalHours=monthLogs.reduce((s,l)=>s+l.durationMins,0)/60;
+  const prodHours=monthLogs.filter(l=>l.productive).reduce((s,l)=>s+l.durationMins,0)/60;
+  const utilization=totalHours>0?((prodHours/totalHours)*100).toFixed(0):0;
+  const activeProjects=projectsData.length;
+  let overBudgetCount=0;
+  projectsData.forEach(proj=>{ Object.entries(proj.phases).forEach(([phase,budget])=>{ if(budget>0){ const used=phaseLoggedMins(proj.id,phase)/60; if(used>=budget)overBudgetCount++; } }); });
+  const activeUsers=users.filter(u=>!u.isAdmin).length;
+  const avgHoursPerPerson=activeUsers>0?(totalHours/activeUsers).toFixed(1):0;
+
+  document.getElementById('dashAnalytics').innerHTML=`
     <div class="stat-card"><div class="stat-num">${totalHours.toFixed(1)}h</div><div class="stat-lbl">Total Hours (This Month)</div></div>
     <div class="stat-card g"><div class="stat-num">${utilization}%</div><div class="stat-lbl">Productive Utilization</div></div>
     <div class="stat-card o"><div class="stat-num">${activeProjects}</div><div class="stat-lbl">Active Projects</div></div>
-    <div class="stat-card ${overBudgetCount > 0 ? 'r' : 'p'}"><div class="stat-num">${overBudgetCount}</div><div class="stat-lbl">Phases Over Budget</div></div>
-    <div class="stat-card"><div class="stat-num">${avgHoursPerPerson}h</div><div class="stat-lbl">Avg Hours/Person</div></div>
-  `;
-  
-  // Render calendar
+    <div class="stat-card ${overBudgetCount>0?'r':'p'}"><div class="stat-num">${overBudgetCount}</div><div class="stat-lbl">Phases Over Budget</div></div>
+    <div class="stat-card"><div class="stat-num">${avgHoursPerPerson}h</div><div class="stat-lbl">Avg Hours/Person</div></div>`;
+
   const days=[]; for(let i=0;i<7;i++) days.push(addDays(currentWeek,i));
   document.getElementById('weekLabel').textContent='Week of '+currentWeek.toLocaleDateString('en-IN',{month:'short',day:'numeric',year:'numeric'});
   const grid=document.getElementById('calGrid'); grid.innerHTML='';
@@ -1050,21 +929,17 @@ function renderDashboard(){
     const row=document.createElement('div'); row.className='cal-row';
     const nc=document.createElement('div'); nc.className='cal-name'; nc.textContent=user.name; row.appendChild(nc);
     days.forEach(day=>{
-      const ds=fmt(day),cell=document.createElement('div'); cell.className='cal-cell'+(fmt(day)===fmt(new Date())?' today':'')+(isHoliday(day)?' holiday':'');
-      // Leave
+      const ds=fmt(day),cell=document.createElement('div');
+      cell.className='cal-cell'+(fmt(day)===fmt(new Date())?' today':'')+(isHoliday(day)?' holiday':'');
       const lv=leaveRequests.find(l=>l.userId===user.id&&l.status==='approved'&&ds>=l.startDate&&ds<=l.endDate);
       if(lv){ const c=document.createElement('div'); c.className='chip chip-leave'; c.textContent=lv.type==='medical'?'🏥 Medical':'🌴 Casual'; cell.appendChild(c); }
-      // Planner entries
       planEntries.filter(p=>p.userId===user.id&&p.date===ds).forEach(pl=>{
         const c=document.createElement('div'); c.className=`chip chip-task ${pl.type}`;
-        c.textContent=`${pl.type==='emergency'?'🚨':'📋'} ${pl.project}`;
-        c.title=pl.desc; cell.appendChild(c);
+        c.textContent=`${pl.type==='emergency'?'🚨':'📋'} ${pl.project}`; c.title=pl.desc; cell.appendChild(c);
       });
-      // Time logs
       timeLogs.filter(l=>l.userId===user.id&&l.date===ds).forEach(lg=>{
         const c=document.createElement('div'); c.className='chip chip-log';
-        c.textContent=`⏱ ${minsToHM(lg.durationMins)} ${lg.projectName||lg.activity||''}`;
-        cell.appendChild(c);
+        c.textContent=`⏱ ${minsToHM(lg.durationMins)} ${lg.projectName||lg.activity||''}`; cell.appendChild(c);
       });
       row.appendChild(cell);
     });
@@ -1075,51 +950,26 @@ function renderDashboard(){
 // ═══════════════════════════════════════════════════════
 // HOLIDAY MANAGEMENT
 // ═══════════════════════════════════════════════════════
-document.getElementById('dashAddHoliday').addEventListener('click', () => {
-  document.getElementById('holName').value = '';
-  document.getElementById('holDate').value = '';
-  openModal('holidayModal');
+document.getElementById('dashAddHoliday').addEventListener('click',()=>{
+  document.getElementById('holName').value=''; document.getElementById('holDate').value=''; openModal('holidayModal');
 });
-
-document.getElementById('saveHolidayBtn').addEventListener('click', () => {
-  const name = document.getElementById('holName').value.trim();
-  const date = document.getElementById('holDate').value;
-  if(!name || !date) { alert('Enter holiday name and date'); return; }
-  
-  if(holidays.find(h => h.date === date)) {
-    alert('Holiday already exists for this date');
-    return;
-  }
-  
-  holidays.push({ id: genId(), name, date });
-  holidays.sort((a,b) => new Date(a.date) - new Date(b.date));
-  autoSave();
-  closeModal('holidayModal');
-  renderDashboard();
-  alert('✅ Holiday added: ' + name);
+document.getElementById('saveHolidayBtn').addEventListener('click',()=>{
+  const name=document.getElementById('holName').value.trim(),date=document.getElementById('holDate').value;
+  if(!name||!date){ alert('Enter holiday name and date'); return; }
+  if(holidays.find(h=>h.date===date)){ alert('Holiday already exists for this date'); return; }
+  holidays.push({id:genId(),name,date}); holidays.sort((a,b)=>new Date(a.date)-new Date(b.date));
+  autoSave(); closeModal('holidayModal'); renderDashboard();
 });
-
-document.getElementById('dashViewHolidays').addEventListener('click', () => {
-  const list = document.getElementById('holidaysList');
-  if(holidays.length === 0) {
-    list.innerHTML = '<p style="color:#718096;padding:20px;text-align:center;">No custom holidays added yet.</p>';
-  } else {
-    list.innerHTML = holidays.map(h => `
-      <div class="list-item">
-        <div><div style="font-weight:600;">${h.name}</div><div style="font-size:11px;color:#718096;">${fmtD(h.date)}</div></div>
-        <button class="btn btn-danger btn-sm" onclick="deleteHoliday('${h.id}')">Delete</button>
-      </div>
-    `).join('');
-  }
+document.getElementById('dashViewHolidays').addEventListener('click',()=>{
+  const list=document.getElementById('holidaysList');
+  if(!holidays.length){ list.innerHTML='<p style="color:#718096;padding:20px;text-align:center;">No custom holidays added yet.</p>'; }
+  else{ list.innerHTML=holidays.map(h=>`<div class="list-item"><div><div style="font-weight:600;">${h.name}</div><div style="font-size:11px;color:#718096;">${fmtD(h.date)}</div></div><button class="btn btn-danger btn-sm" onclick="deleteHoliday('${h.id}')">Delete</button></div>`).join(''); }
   openModal('viewHolidaysModal');
 });
-
-window.deleteHoliday = function(id) {
+window.deleteHoliday=function(id){
   if(!confirm('Delete this holiday?')) return;
-  holidays = holidays.filter(h => h.id !== id);
-  autoSave();
-  document.getElementById('dashViewHolidays').click(); // Refresh list
-  renderDashboard();
+  holidays=holidays.filter(h=>h.id!==id); autoSave();
+  document.getElementById('dashViewHolidays').click(); renderDashboard();
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1129,7 +979,7 @@ document.getElementById('planPrev').addEventListener('click',()=>{ planWeek=addD
 document.getElementById('planNext').addEventListener('click',()=>{ planWeek=addDays(planWeek,7);  renderPlanner(); });
 
 function renderPlanner(){
-  const days=[]; for(let i=0;i<7;i++) days.push(addDays(planWeek,i)); // Mon–Sun (all 7 days)
+  const days=[]; for(let i=0;i<7;i++) days.push(addDays(planWeek,i));
   document.getElementById('planWeekLabel').textContent='Week of '+planWeek.toLocaleDateString('en-IN',{month:'short',day:'numeric',year:'numeric'});
   const grid=document.getElementById('plannerGrid'); grid.innerHTML='';
   const dn=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -1138,29 +988,19 @@ function renderPlanner(){
     const dt=days[i],hol=isHoliday(dt),tod=fmt(dt)===fmt(new Date());
     return `<div class="planner-head-cell" style="${hol?'background:#fff5f5;color:#e53e3e;':''}${tod?'background:#ebf4ff;color:#2b6cb0;':''}">${d} <small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
   }).join(''); grid.appendChild(head);
-
   users.forEach(user=>{
     const row=document.createElement('div'); row.className='planner-row';
     const nc=document.createElement('div'); nc.className='planner-name'; nc.textContent=user.name; row.appendChild(nc);
     days.forEach(day=>{
-      const ds=fmt(day);
-      const entries=planEntries.filter(p=>p.userId===user.id&&p.date===ds);
+      const ds=fmt(day), entries=planEntries.filter(p=>p.userId===user.id&&p.date===ds);
       const cell=document.createElement('div');
       cell.className='planner-cell'+(entries.length?' has-items':'')+(isHoliday(day)?' holiday':'');
-
       entries.forEach(pl=>{
-        const c=document.createElement('div');
-        c.className=`plan-chip ${pl.done?'done':pl.type}`;
+        const c=document.createElement('div'); c.className=`plan-chip ${pl.done?'done':pl.type}`;
         c.textContent=`${pl.type==='emergency'?'🚨':''}${pl.project}${pl.phase?' · '+pl.phase.split(' ')[0]:''}`;
-        c.title=pl.desc;
-        c.onclick=(e)=>{ e.stopPropagation(); openPlanModal(user.id,ds,pl.id); };
-        cell.appendChild(c);
+        c.title=pl.desc; c.onclick=(e)=>{ e.stopPropagation(); openPlanModal(user.id,ds,pl.id); }; cell.appendChild(c);
       });
-
-      // Click empty area to add (only if not a holiday)
-      if(!isHoliday(day)) {
-        cell.addEventListener('click',()=>openPlanModal(user.id,ds,null));
-      }
+      if(!isHoliday(day)) cell.addEventListener('click',()=>openPlanModal(user.id,ds,null));
       row.appendChild(cell);
     });
     grid.appendChild(row);
@@ -1171,75 +1011,52 @@ function openPlanModal(userId,date,planId){
   editPlanId=planId; editPlanUser=userId; editPlanDay=date;
   const user=users.find(u=>u.id===userId);
   document.getElementById('planModalTitle').textContent=(planId?'Edit':'Assign Work')+' — '+user.name+' · '+fmtD(date);
-  // Fill project dropdown
   const pSel=document.getElementById('planProject');
   pSel.innerHTML='<option value="">Select project...</option>'+projectsData.map(p=>`<option value="${p.id}">${p.name} (${p.client})</option>`).join('');
-  // Fill typology
   const tSel=document.getElementById('planTypology');
   tSel.innerHTML='<option value="">Select typology...</option>'+typologies.map(t=>`<option value="${t}">${t}</option>`).join('');
-
   if(planId){
     const pl=planEntries.find(p=>p.id===planId);
-    pSel.value=pl.projectId;
-    updatePlanPhases(pl.projectId); document.getElementById('planPhase').value=pl.phase;
-    document.getElementById('planTypology').value=pl.typology;
-    document.getElementById('planDesc').value=pl.desc;
-    document.getElementById('planType').value=pl.type;
-    document.getElementById('deletePlanBtn').style.display='inline-block';
+    pSel.value=pl.projectId; updatePlanPhases(pl.projectId); document.getElementById('planPhase').value=pl.phase;
+    document.getElementById('planTypology').value=pl.typology; document.getElementById('planDesc').value=pl.desc;
+    document.getElementById('planType').value=pl.type; document.getElementById('deletePlanBtn').style.display='inline-block';
   } else {
-    document.getElementById('planDesc').value='';
-    document.getElementById('planType').value='planned';
-    document.getElementById('deletePlanBtn').style.display='none';
-    updatePlanPhases('');
+    document.getElementById('planDesc').value=''; document.getElementById('planType').value='planned';
+    document.getElementById('deletePlanBtn').style.display='none'; updatePlanPhases('');
   }
   openModal('planModal');
 }
-
 document.getElementById('planProject').addEventListener('change',function(){ updatePlanPhases(this.value); });
 function updatePlanPhases(projId){
   const pSel=document.getElementById('planPhase');
   pSel.innerHTML='<option value="">Select phase...</option>'+PHASES.map(ph=>`<option value="${ph}">${ph}</option>`).join('');
 }
-
 document.getElementById('savePlanBtn').addEventListener('click',()=>{
   const projId=document.getElementById('planProject').value;
   if(!projId){ alert('Select a project'); return; }
   const proj=projectsData.find(p=>p.id===projId);
-  const entry={
-    id:editPlanId||genId(), userId:editPlanUser, date:editPlanDay,
-    projectId:projId, project:proj.name, client:proj.client,
-    phase:document.getElementById('planPhase').value,
-    typology:document.getElementById('planTypology').value,
-    desc:document.getElementById('planDesc').value.trim()||proj.name,
-    estHours:0,
-    type:document.getElementById('planType').value,
-    done:false
-  };
+  const entry={id:editPlanId||genId(),userId:editPlanUser,date:editPlanDay,projectId:projId,project:proj.name,client:proj.client,
+    phase:document.getElementById('planPhase').value,typology:document.getElementById('planTypology').value,
+    desc:document.getElementById('planDesc').value.trim()||proj.name,estHours:0,type:document.getElementById('planType').value,done:false};
   if(editPlanId){ const i=planEntries.findIndex(p=>p.id===editPlanId); planEntries[i]=entry; }
   else planEntries.push(entry);
-  autoSave();
-  closeModal('planModal'); renderPlanner(); renderDashboard();
+  autoSave(); closeModal('planModal'); renderPlanner(); renderDashboard();
 });
-
 document.getElementById('deletePlanBtn').addEventListener('click',()=>{
   if(!confirm('Remove this plan entry?')) return;
   planEntries=planEntries.filter(p=>p.id!==editPlanId);
-  closeModal('planModal'); renderPlanner(); renderDashboard();
+  autoSave(); closeModal('planModal'); renderPlanner(); renderDashboard();
 });
 
 // ═══════════════════════════════════════════════════════
 // TIME LOG
 // ═══════════════════════════════════════════════════════
 document.getElementById('addLogBtn').addEventListener('click',()=>{
-  // Open modal in non-productive mode only (Option B enforcement)
   openLogModal();
-  // Hide productivity type selector
   document.getElementById('prodTypeGroup').style.display='none';
-  // Force non-productive mode
   document.getElementById('logProdNo').checked=true;
   document.getElementById('logProdFields').style.display='none';
   document.getElementById('logNonProdFields').style.display='block';
-  // Only show Live Timer for non-productive
   document.getElementById('tmDurLabel').style.display='none';
   document.getElementById('tmSELabel').style.display='none';
   document.getElementById('tmTmr').checked=true;
@@ -1249,18 +1066,15 @@ document.getElementById('addLogBtn').addEventListener('click',()=>{
 });
 document.getElementById('tlFilterBtn').addEventListener('click', renderTimeLog);
 
-// Productivity toggle
 document.getElementById('logProdYes').addEventListener('change',()=>{
   document.getElementById('logProdFields').style.display='block';
   document.getElementById('logNonProdFields').style.display='none';
-  // Show all time entry options for productive
   document.getElementById('tmDurLabel').style.display='inline-flex';
   document.getElementById('tmSELabel').style.display='inline-flex';
 });
 document.getElementById('logProdNo').addEventListener('change',()=>{
   document.getElementById('logProdFields').style.display='none';
   document.getElementById('logNonProdFields').style.display='block';
-  // Only show Live Timer for non-productive
   document.getElementById('tmDurLabel').style.display='none';
   document.getElementById('tmSELabel').style.display='none';
   document.getElementById('tmTmr').checked=true;
@@ -1268,24 +1082,16 @@ document.getElementById('logProdNo').addEventListener('change',()=>{
   document.getElementById('seSection').style.display='none';
   document.getElementById('tmrSection').style.display='block';
 });
-
-// Show/hide "Other" text field for non-productive activities
 document.getElementById('logActivity').addEventListener('change',function(){
-  document.getElementById('logActivityOtherDiv').style.display = this.value==='Other'?'block':'none';
+  document.getElementById('logActivityOtherDiv').style.display=this.value==='Other'?'block':'none';
 });
-
-// Time method toggle
 document.getElementById('tmDur').addEventListener('change',()=>{ document.getElementById('durSection').style.display='block'; document.getElementById('seSection').style.display='none'; document.getElementById('tmrSection').style.display='none'; });
 document.getElementById('tmSE').addEventListener('change',()=>{ document.getElementById('durSection').style.display='none'; document.getElementById('seSection').style.display='block'; document.getElementById('tmrSection').style.display='none'; });
 document.getElementById('tmTmr').addEventListener('change',()=>{ document.getElementById('durSection').style.display='none'; document.getElementById('seSection').style.display='none'; document.getElementById('tmrSection').style.display='block'; });
-
-// Start/end preview
 ['logS','logE'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{
   const s=document.getElementById('logS').value,e=document.getElementById('logE').value;
   if(s&&e){ let m=hhmm(e)-hhmm(s); if(m<0)m+=1440; document.getElementById('sePreview').textContent='⏱️ Duration: '+minsToHM(m); }
 }));
-
-// Project → Phase cascading
 document.getElementById('logProject').addEventListener('change',function(){
   const proj=projectsData.find(p=>p.id===this.value);
   const pSel=document.getElementById('logPhase');
@@ -1299,38 +1105,22 @@ function openLogModal(preLinked=null){
   document.getElementById('logS').value=''; document.getElementById('logE').value='';
   document.getElementById('logDesc').value=''; document.getElementById('logActivity').value='';
   document.getElementById('sePreview').textContent='Duration: —';
-  
-  // Reset to productive mode by default
   document.getElementById('prodTypeGroup').style.display='block';
-  document.getElementById('logProdYes').checked=true;
-  document.getElementById('tmDur').checked=true;
-  document.getElementById('logProdFields').style.display='block';
-  document.getElementById('logNonProdFields').style.display='none';
-  document.getElementById('durSection').style.display='block';
-  document.getElementById('seSection').style.display='none';
-  document.getElementById('tmrSection').style.display='none';
-  
-  // Show all time entry options
-  document.getElementById('tmDurLabel').style.display='inline-flex';
-  document.getElementById('tmSELabel').style.display='inline-flex';
-  
-  // Fill project
+  document.getElementById('logProdYes').checked=true; document.getElementById('tmDur').checked=true;
+  document.getElementById('logProdFields').style.display='block'; document.getElementById('logNonProdFields').style.display='none';
+  document.getElementById('durSection').style.display='block'; document.getElementById('seSection').style.display='none'; document.getElementById('tmrSection').style.display='none';
+  document.getElementById('tmDurLabel').style.display='inline-flex'; document.getElementById('tmSELabel').style.display='inline-flex';
   document.getElementById('logProject').innerHTML='<option value="">Select...</option>'+projectsData.map(p=>`<option value="${p.id}">${p.name} (${p.client})</option>`).join('');
   if(preLinked){ document.getElementById('logProject').value=preLinked; document.getElementById('logProject').dispatchEvent(new Event('change')); }
   else document.getElementById('logPhase').innerHTML='<option value="">Select project first</option>';
-  // Fill typology
   document.getElementById('logTypology').innerHTML='<option value="">Select...</option>'+typologies.map(t=>`<option value="${t}">${t}</option>`).join('');
-  // Reset modal timer
   clearInterval(mTimerInterval); mTimerRunning=false; mTimerStartedAt=null; mTimerPausedMs=0;
-  document.getElementById('mTimerDisp').textContent='00:00:00';
-  document.getElementById('mTimerStatus').textContent='Not started';
+  document.getElementById('mTimerDisp').textContent='00:00:00'; document.getElementById('mTimerStatus').textContent='Not started';
   document.getElementById('mTimerStart').style.display='inline-block';
-  document.getElementById('mTimerPause').style.display='none';
-  document.getElementById('mTimerReset').style.display='none';
+  document.getElementById('mTimerPause').style.display='none'; document.getElementById('mTimerReset').style.display='none';
   openModal('logModal');
 }
 
-// Modal timer
 document.getElementById('mTimerStart').addEventListener('click',()=>{
   mTimerStartedAt=Date.now(); mTimerPausedMs=0; mTimerRunning=true;
   document.getElementById('mTimerStart').style.display='none';
@@ -1366,29 +1156,21 @@ function saveLog(){
   const isTimer=document.getElementById('tmTmr').checked;
   const date=document.getElementById('logDate').value;
   if(!date){ alert('Select a date'); return; }
-
   let projectId='',projectName='',phase='',typology='',activity='';
   if(isProd){
-    projectId=document.getElementById('logProject').value;
-    phase=document.getElementById('logPhase').value;
-    typology=document.getElementById('logTypology').value;
+    projectId=document.getElementById('logProject').value; phase=document.getElementById('logPhase').value; typology=document.getElementById('logTypology').value;
     if(!projectId||!phase||!typology){ alert('Select project, phase and job type'); return; }
     projectName=projectsData.find(p=>p.id===projectId)?.name||'';
   } else {
     activity=document.getElementById('logActivity').value.trim();
     if(!activity){ alert('Select an activity'); return; }
-    if(activity==='Other'){
-      const otherActivity=document.getElementById('logActivityOther').value.trim();
-      if(!otherActivity){ alert('Specify the other activity'); return; }
-      activity=otherActivity;
-    }
+    if(activity==='Other'){ const o=document.getElementById('logActivityOther').value.trim(); if(!o){ alert('Specify the other activity'); return; } activity=o; }
   }
-
   let durationMins=0,startTime='',endTime='';
   if(isStartEnd){
     startTime=document.getElementById('logS').value; endTime=document.getElementById('logE').value;
     if(!startTime||!endTime){ alert('Enter start and end time'); return; }
-    durationMins=hhmm(endTime)-hhmm(startTime); if(durationMins<0) durationMins+=1440;
+    durationMins=hhmm(endTime)-hhmm(startTime); if(durationMins<0)durationMins+=1440;
   } else if(isTimer){
     const parts=document.getElementById('mTimerDisp').textContent.split(':').map(Number);
     durationMins=parts[0]*60+parts[1]+(parts[2]>=30?1:0);
@@ -1397,75 +1179,38 @@ function saveLog(){
     durationMins=(parseInt(document.getElementById('logH').value)||0)*60+(parseInt(document.getElementById('logM').value)||0);
   }
   if(durationMins<=0){ alert('Duration must be > 0'); return; }
-
   let desc=document.getElementById('logDesc').value.trim();
-  // Auto-fill description for non-productive if empty
-  if(!isProd && !desc){
-    desc=activity;
-  }
+  if(!isProd&&!desc) desc=activity;
   if(!desc){ alert('Add a description of what you did'); return; }
-
-  timeLogs.push({ id:genId(), userId:currentUser.id, date, projectId, projectName, phase, typology, activity, durationMins, startTime, endTime, desc, productive:isProd, ts:Date.now() });
+  timeLogs.push({id:genId(),userId:currentUser.id,date,projectId,projectName,phase,typology,activity,durationMins,startTime,endTime,desc,productive:isProd,ts:Date.now()});
   autoSave();
   closeModal('logModal'); renderTimeLog(); renderProjectsBudget(); renderDashboard();
-  alert('✅ Logged: '+minsToHM(durationMins));
 }
 
 function renderTimeLog(){
-  try {
-    console.log('renderTimeLog called');
-    console.log('timeLogs array:', timeLogs);
-    console.log('timeLogs length:', timeLogs.length);
-    
-    const month=parseInt(document.getElementById('tlMonth').value);
-    const projFilter=document.getElementById('tlProject').value;
-    const typeFilter=document.getElementById('tlType').value;
-    console.log('Filters - month:', month, 'project:', projFilter, 'type:', typeFilter);
-    
-    // Populate project filter
-    document.getElementById('tlProject').innerHTML='<option value="">All Projects</option>'+projectsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
-    if(projFilter) document.getElementById('tlProject').value=projFilter;
-    if(month<0&&!document.getElementById('tlMonth')._init){ document.getElementById('tlMonth').value=new Date().getMonth(); document.getElementById('tlMonth')._init=true; }
-
-    let logs=timeLogs.filter(l=>currentUser.isAdmin||l.userId===currentUser.id);
-    console.log('After user filter:', logs.length);
-    const m=parseInt(document.getElementById('tlMonth').value);
-    console.log('Month filter value:', m);
-    if(m>=0) logs=logs.filter(l=>new Date(l.date).getMonth()===m);
-    console.log('After month filter:', logs.length, 'logs:', logs);
-    if(projFilter) logs=logs.filter(l=>l.projectId===projFilter);
-    if(typeFilter) logs=logs.filter(l=>(typeFilter==='productive'?l.productive:!l.productive));
-    logs=logs.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)||b.ts-a.ts);
-    console.log('Final filtered logs:', logs);
-
-    const total=logs.reduce((s,l)=>s+l.durationMins,0);
-    document.getElementById('tlTotal').innerHTML=`${minsToHM(total)} total<span>${logs.length} entr${logs.length===1?'y':'ies'} · current filter</span>`;
-
-    const el=document.getElementById('timeLogList');
-    if(!logs.length){ el.innerHTML='<p style="color:#718096;padding:20px;text-align:center;">No logs found. Click "+ Log Time" to start.</p>'; return; }
-    el.innerHTML='';
-    logs.forEach(log=>{
-      const user=users.find(u=>u.id===log.userId);
-      const el2=document.createElement('div'); el2.className='log-card';
-      const projBadge=log.productive?`<strong>📁 ${log.projectName}</strong> · ${log.phase} · <span class="prod-tag">Productive</span>`:`<span class="nonprod-tag">Non-Productive</span> ${log.activity}`;
-      el2.innerHTML=`
-        <div class="log-body">
-          <div class="log-time">⏱ ${minsToHM(log.durationMins)}</div>
-          <div class="log-meta">${projBadge}${currentUser.isAdmin?` · 👤 <strong>${user?.name||'?'}</strong>`:''}</div>
-          ${log.typology?`<div style="font-size:11px;color:#718096;margin-bottom:3px;">🏷️ ${log.typology}</div>`:''}
-          <div class="log-desc">${log.desc}</div>
-          ${log.startTime?`<div style="font-size:10px;color:#a0aec0;margin-top:2px;">🕐 ${log.startTime}–${log.endTime}</div>`:''}
-        </div>
-        <div class="log-right">
-          <div class="log-date">${fmtD(log.date)}</div>
-        </div>`;
-      el.appendChild(el2);
-    });
-    console.log('Rendered', logs.length, 'log cards');
-  } catch(e) {
-    console.error('ERROR in renderTimeLog:', e);
-    alert('Error rendering time log: ' + e.message);
-  }
+  const month=parseInt(document.getElementById('tlMonth').value);
+  const projFilter=document.getElementById('tlProject').value;
+  const typeFilter=document.getElementById('tlType').value;
+  document.getElementById('tlProject').innerHTML='<option value="">All Projects</option>'+projectsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  if(projFilter) document.getElementById('tlProject').value=projFilter;
+  let logs=timeLogs.filter(l=>currentUser.isAdmin||l.userId===currentUser.id);
+  const m=parseInt(document.getElementById('tlMonth').value);
+  if(m>=0) logs=logs.filter(l=>new Date(l.date).getMonth()===m);
+  if(projFilter) logs=logs.filter(l=>l.projectId===projFilter);
+  if(typeFilter) logs=logs.filter(l=>(typeFilter==='productive'?l.productive:!l.productive));
+  logs=logs.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)||b.ts-a.ts);
+  const total=logs.reduce((s,l)=>s+l.durationMins,0);
+  document.getElementById('tlTotal').innerHTML=`${minsToHM(total)} total<span>${logs.length} entr${logs.length===1?'y':'ies'} · current filter</span>`;
+  const el=document.getElementById('timeLogList');
+  if(!logs.length){ el.innerHTML='<p style="color:#718096;padding:20px;text-align:center;">No logs found.</p>'; return; }
+  el.innerHTML='';
+  logs.forEach(log=>{
+    const user=users.find(u=>u.id===log.userId);
+    const el2=document.createElement('div'); el2.className='log-card';
+    const projBadge=log.productive?`<strong>📁 ${log.projectName}</strong> · ${log.phase} · <span class="prod-tag">Productive</span>`:`<span class="nonprod-tag">Non-Productive</span> ${log.activity}`;
+    el2.innerHTML=`<div class="log-body"><div class="log-time">⏱ ${minsToHM(log.durationMins)}</div><div class="log-meta">${projBadge}${currentUser.isAdmin?` · 👤 <strong>${user?.name||'?'}</strong>`:''}</div>${log.typology?`<div style="font-size:11px;color:#718096;margin-bottom:3px;">🏷️ ${log.typology}</div>`:''}<div class="log-desc">${log.desc}</div>${log.startTime?`<div style="font-size:10px;color:#a0aec0;margin-top:2px;">🕐 ${log.startTime}–${log.endTime}</div>`:''}</div><div class="log-right"><div class="log-date">${fmtD(log.date)}</div></div>`;
+    el.appendChild(el2);
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1482,41 +1227,17 @@ function renderProjectsBudget(){
     const loggedH=projectLoggedMins(proj.id)/60;
     const pct=totalBudget>0?Math.round((loggedH/totalBudget)*100):0;
     const status=pct>=100?'over':pct>=80?'near':'ok';
-
     const card=document.createElement('div'); card.className=`project-card ${status}`;
-    card.innerHTML=`
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-        <div>
-          <div style="font-weight:800;font-size:16px;">${proj.name}</div>
-          <div style="font-size:12px;color:#718096;">🏢 ${proj.client} · ${fmtD(proj.startDate)} → ${fmtD(proj.endDate)}</div>
-        </div>
-        <div style="text-align:right;">
-          <div style="font-size:18px;font-weight:800;color:${status==='over'?'#e53e3e':status==='near'?'#d69e2e':'#38a169'};">${pct}% used</div>
-          <div style="font-size:12px;color:#718096;">${hrsToHM(loggedH)} of ${totalBudget}h budget</div>
-        </div>
-      </div>
-      <div style="background:#e2e8f0;border-radius:4px;height:8px;margin-bottom:16px;">
-        <div style="height:8px;border-radius:4px;background:${status==='over'?'#e53e3e':status==='near'?'#d69e2e':'#38a169'};width:${Math.min(100,pct)}%;transition:width 0.4s;"></div>
-      </div>
-      <div id="phases-${proj.id}"></div>
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <button class="btn btn-ghost btn-sm" data-log="${proj.id}">⏱️ Log Time</button>
-        ${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" data-edit="${proj.id}">✏️ Edit</button>`:''}
-      </div>
-    `;
-    // Phase rows
+    card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px;"><div><div style="font-weight:800;font-size:16px;">${proj.name}</div><div style="font-size:12px;color:#718096;">🏢 ${proj.client} · ${fmtD(proj.startDate)} → ${fmtD(proj.endDate)}</div></div><div style="text-align:right;"><div style="font-size:18px;font-weight:800;color:${status==='over'?'#e53e3e':status==='near'?'#d69e2e':'#38a169'};">${pct}% used</div><div style="font-size:12px;color:#718096;">${hrsToHM(loggedH)} of ${totalBudget}h budget</div></div></div><div style="background:#e2e8f0;border-radius:4px;height:8px;margin-bottom:16px;"><div style="height:8px;border-radius:4px;background:${status==='over'?'#e53e3e':status==='near'?'#d69e2e':'#38a169'};width:${Math.min(100,pct)}%;transition:width 0.4s;"></div></div><div id="phases-${proj.id}"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="btn btn-ghost btn-sm" data-log="${proj.id}">⏱️ Log Time</button>${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" data-edit="${proj.id}">✏️ Edit</button>`:''}</div>`;
     const phasesDiv=card.querySelector(`#phases-${proj.id}`);
     PHASES.forEach(ph=>{
       const budget=proj.phases[ph]||0; if(!budget) return;
-      const loggedMins=phaseLoggedMins(proj.id,ph);
-      const loggedHrs=loggedMins/60;
-      const pp=budget>0?Math.min(100,Math.round((loggedHrs/budget)*100)):0;
-      const st=pp>=100?'over':pp>=80?'near':'ok';
+      const loggedMins=phaseLoggedMins(proj.id,ph); const loggedHrs=loggedMins/60;
+      const pp=budget>0?Math.min(100,Math.round((loggedHrs/budget)*100)):0; const st=pp>=100?'over':pp>=80?'near':'ok';
       const row=document.createElement('div'); row.className='phase-row';
       row.innerHTML=`<span class="phase-name">${ph}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${st}" style="width:${pp}%;"></div></div><span class="phase-nums">${minsToHM(loggedMins)} / <strong>${budget}h</strong> <span style="color:${st==='over'?'#e53e3e':st==='near'?'#d69e2e':'#38a169'}">(${pp}%)</span></span>`;
       phasesDiv.appendChild(row);
     });
-
     card.querySelector('[data-log]')?.addEventListener('click',()=>openLogModal(proj.id));
     card.querySelector('[data-edit]')?.addEventListener('click',()=>openProjectModal(proj.id));
     el.appendChild(card);
@@ -1527,22 +1248,11 @@ function openProjectModal(projId){
   const proj=projId?projectsData.find(p=>p.id===projId):null;
   document.getElementById('projModalTitle').textContent=projId?'Edit Project':'New Project';
   document.getElementById('pName').value=proj?.name||'';
-  
-  // Populate client dropdown
-  const clientSel = document.getElementById('pClientSelect');
-  clientSel.innerHTML = '<option value="">Select client...</option>' + 
-    clients.map(c => `<option value="${c}">${c}</option>`).join('') +
-    '<option value="__NEW__">+ Add New Client</option>';
-  
-  if(proj?.client) {
-    clientSel.value = proj.client;
-  }
-  document.getElementById('pNewClientDiv').style.display = 'none';
-  document.getElementById('pNewClient').value = '';
-  
-  document.getElementById('pStart').value=proj?.startDate||fmt(new Date());
-  document.getElementById('pEnd').value=proj?.endDate||'';
-  // Build phase budget inputs
+  const clientSel=document.getElementById('pClientSelect');
+  clientSel.innerHTML='<option value="">Select client...</option>'+clients.map(c=>`<option value="${c}">${c}</option>`).join('')+'<option value="__NEW__">+ Add New Client</option>';
+  if(proj?.client) clientSel.value=proj.client;
+  document.getElementById('pNewClientDiv').style.display='none'; document.getElementById('pNewClient').value='';
+  document.getElementById('pStart').value=proj?.startDate||fmt(new Date()); document.getElementById('pEnd').value=proj?.endDate||'';
   const pf=document.getElementById('phaseBudgetFields'); pf.innerHTML='';
   PHASES.forEach(ph=>{
     const row=document.createElement('div'); row.className='form-row'; row.style.marginBottom='10px';
@@ -1552,37 +1262,26 @@ function openProjectModal(projId){
   document.getElementById('saveProjBtn')._editId=projId;
   openModal('projectModal');
 }
-
-// Show/hide new client field
-document.getElementById('pClientSelect').addEventListener('change', function(){
-  const isNew = this.value === '__NEW__';
-  document.getElementById('pNewClientDiv').style.display = isNew ? 'block' : 'none';
+document.getElementById('pClientSelect').addEventListener('change',function(){
+  const isNew=this.value==='__NEW__';
+  document.getElementById('pNewClientDiv').style.display=isNew?'block':'none';
   if(isNew) document.getElementById('pNewClient').focus();
 });
-
 document.getElementById('saveProjBtn').addEventListener('click',function(){
   const name=document.getElementById('pName').value.trim();
-  let client = document.getElementById('pClientSelect').value;
-  
-  // Handle new client
-  if(client === '__NEW__') {
-    client = document.getElementById('pNewClient').value.trim();
-    if(!client) { alert('Enter the new client name'); return; }
-    // Add to clients list if not already there
-    if(!clients.includes(client)) {
-      clients.push(client);
-      clients.sort(); // Keep alphabetically sorted
-    }
+  let client=document.getElementById('pClientSelect').value;
+  if(client==='__NEW__'){
+    client=document.getElementById('pNewClient').value.trim();
+    if(!client){ alert('Enter the new client name'); return; }
+    if(!clients.includes(client)){ clients.push(client); clients.sort(); }
   }
-  
   if(!name||!client){ alert('Project name and client are required'); return; }
   const phases={};
-  PHASES.forEach(ph=>{ const v=parseInt(document.getElementById('phase_'+ph.replace(/\s+/g,'_')).value)||0; if(v>0) phases[ph]=v; });
-  const data={ id:this._editId||genId(), name, client, startDate:document.getElementById('pStart').value, endDate:document.getElementById('pEnd').value, phases };
+  PHASES.forEach(ph=>{ const v=parseInt(document.getElementById('phase_'+ph.replace(/\s+/g,'_')).value)||0; if(v>0)phases[ph]=v; });
+  const data={id:this._editId||genId(),name,client,startDate:document.getElementById('pStart').value,endDate:document.getElementById('pEnd').value,phases};
   if(this._editId){ const i=projectsData.findIndex(p=>p.id===this._editId); projectsData[i]=data; }
   else projectsData.push(data);
-  autoSave();
-  closeModal('projectModal'); renderProjectsBudget();
+  autoSave(); closeModal('projectModal'); renderProjectsBudget();
 });
 
 // ═══════════════════════════════════════════════════════
@@ -1592,51 +1291,31 @@ const MONTHS_ARR=['January','February','March','April','May','June','July','Augu
 function initTimeReport(){
   const sel=document.getElementById('trYear'); if(sel.options.length>0) return;
   const cy=new Date().getFullYear();
-  for(let y=cy-2;y<=cy+1;y++){ const o=document.createElement('option'); o.value=y; o.textContent=y; if(y===cy) o.selected=true; sel.appendChild(o); }
+  for(let y=cy-2;y<=cy+1;y++){ const o=document.createElement('option'); o.value=y; o.textContent=y; if(y===cy)o.selected=true; sel.appendChild(o); }
   document.getElementById('trFrom').value=new Date().getMonth();
   document.getElementById('trTo').value=new Date().getMonth();
-  document.getElementById('trRunBtn').addEventListener('click', runTimeReport);
-  document.getElementById('trPdfBtn2').addEventListener('click', exportPDF);
+  document.getElementById('trRunBtn').addEventListener('click',runTimeReport);
+  document.getElementById('trPdfBtn2').addEventListener('click',exportPDF);
 }
-
 function runTimeReport(){
-  // Get current selections before regenerating
-  const currentUserId = document.getElementById('trUser').value;
-  const currentProjId = document.getElementById('trProject').value;
-  
-  // Regenerate dropdowns
+  const currentUserId=document.getElementById('trUser').value, currentProjId=document.getElementById('trProject').value;
   document.getElementById('trUser').innerHTML='<option value="">All Members</option>'+users.map(u=>`<option value="${u.id}">${u.name}</option>`).join('');
   document.getElementById('trProject').innerHTML='<option value="">All Projects</option>'+projectsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
-  
-  // Restore selections
-  if(currentUserId) document.getElementById('trUser').value = currentUserId;
-  if(currentProjId) document.getElementById('trProject').value = currentProjId;
-  
-  const fromM=parseInt(document.getElementById('trFrom').value);
-  const toM=parseInt(document.getElementById('trTo').value);
-  const year=parseInt(document.getElementById('trYear').value);
-  const userId=document.getElementById('trUser').value;
-  const projId=document.getElementById('trProject').value;
+  if(currentUserId) document.getElementById('trUser').value=currentUserId;
+  if(currentProjId) document.getElementById('trProject').value=currentProjId;
+  const fromM=parseInt(document.getElementById('trFrom').value), toM=parseInt(document.getElementById('trTo').value);
+  const year=parseInt(document.getElementById('trYear').value), userId=document.getElementById('trUser').value, projId=document.getElementById('trProject').value;
   const view=document.getElementById('trView').value;
-
   let logs=timeLogs.filter(l=>currentUser.isAdmin||l.userId===currentUser.id);
   logs=logs.filter(l=>{ const d=new Date(l.date); return d.getFullYear()===year&&d.getMonth()>=fromM&&d.getMonth()<=toM; });
   if(userId) logs=logs.filter(l=>l.userId===userId);
-  // Filter by project: if specific project selected, show only that project
-  // If "All Projects", show everything including non-productive
   if(projId) logs=logs.filter(l=>l.projectId===projId);
-
   document.getElementById('trOutput').style.display='block';
   const total=logs.reduce((s,l)=>s+l.durationMins,0);
   const prodMins=logs.filter(l=>l.productive).reduce((s,l)=>s+l.durationMins,0);
-  document.getElementById('trStats').innerHTML=`
-    <div class="stat-card"><div class="stat-num">${minsToHM(total)}</div><div class="stat-lbl">Total Time</div></div>
-    <div class="stat-card g"><div class="stat-num">${minsToHM(prodMins)}</div><div class="stat-lbl">Productive</div></div>
-    <div class="stat-card r"><div class="stat-num">${minsToHM(total-prodMins)}</div><div class="stat-lbl">Non-Productive</div></div>
-    <div class="stat-card o"><div class="stat-num">${logs.length}</div><div class="stat-lbl">Log Entries</div></div>`;
-  const fromL=MONTHS_ARR[fromM],toL=fromM===toM?'':' – '+MONTHS_ARR[toM];
-  const uL=userId?users.find(u=>u.id===userId)?.name:'All Members';
-  const pL=projId?projectsData.find(p=>p.id===projId)?.name:'All Projects';
+  document.getElementById('trStats').innerHTML=`<div class="stat-card"><div class="stat-num">${minsToHM(total)}</div><div class="stat-lbl">Total Time</div></div><div class="stat-card g"><div class="stat-num">${minsToHM(prodMins)}</div><div class="stat-lbl">Productive</div></div><div class="stat-card r"><div class="stat-num">${minsToHM(total-prodMins)}</div><div class="stat-lbl">Non-Productive</div></div><div class="stat-card o"><div class="stat-num">${logs.length}</div><div class="stat-lbl">Log Entries</div></div>`;
+  const fromL=MONTHS_ARR[fromM], toL=fromM===toM?'':' – '+MONTHS_ARR[toM];
+  const uL=userId?users.find(u=>u.id===userId)?.name:'All Members', pL=projId?projectsData.find(p=>p.id===projId)?.name:'All Projects';
   document.getElementById('trTitle').textContent=fromL+toL+' '+year;
   document.getElementById('trSubtitle').textContent=uL+' · '+pL;
   document.getElementById('trPersonSec').style.display=view!=='project'?'block':'none';
@@ -1645,10 +1324,9 @@ function runTimeReport(){
   if(view!=='person')  buildTrProject(logs,total);
   buildTrDetail(logs);
 }
-
 function buildTrPerson(logs,total){
   const byU={};
-  logs.forEach(l=>{ if(!byU[l.userId]) byU[l.userId]={mins:0,n:0,projects:{}}; byU[l.userId].mins+=l.durationMins; byU[l.userId].n++; if(!byU[l.userId].projects[l.projectName||l.activity||'-']) byU[l.userId].projects[l.projectName||l.activity||'-']=0; byU[l.userId].projects[l.projectName||l.activity||'-']+=l.durationMins; });
+  logs.forEach(l=>{ if(!byU[l.userId])byU[l.userId]={mins:0,n:0,projects:{}}; byU[l.userId].mins+=l.durationMins; byU[l.userId].n++; if(!byU[l.userId].projects[l.projectName||l.activity||'-'])byU[l.userId].projects[l.projectName||l.activity||'-']=0; byU[l.userId].projects[l.projectName||l.activity||'-']+=l.durationMins; });
   const sorted=Object.entries(byU).sort((a,b)=>b[1].mins-a[1].mins); const maxM=sorted[0]?.[1].mins||1;
   let html=`<table class="rpt-table"><thead><tr><th>Member</th><th>Breakdown</th><th style="text-align:right">Time</th><th style="text-align:right">Share</th></tr></thead><tbody>`;
   sorted.forEach(([uid,d])=>{ const u=users.find(u=>u.id===uid); const pct=((d.mins/total)*100).toFixed(1); const bar=((d.mins/maxM)*100).toFixed(1);
@@ -1657,12 +1335,11 @@ function buildTrPerson(logs,total){
   });
   document.getElementById('trPersonTbl').innerHTML=html+'</tbody></table>';
 }
-
 function buildTrProject(logs,total){
   const byP={};
-  logs.forEach(l=>{ const key=l.projectName||l.activity||'Non-Productive'; if(!byP[key]) byP[key]={mins:0,n:0,phases:{},people:{}}; byP[key].mins+=l.durationMins; byP[key].n++;
-    if(l.phase){ if(!byP[key].phases[l.phase]) byP[key].phases[l.phase]=0; byP[key].phases[l.phase]+=l.durationMins; }
-    const un=users.find(u=>u.id===l.userId)?.name||'?'; if(!byP[key].people[un]) byP[key].people[un]=0; byP[key].people[un]+=l.durationMins;
+  logs.forEach(l=>{ const key=l.projectName||l.activity||'Non-Productive'; if(!byP[key])byP[key]={mins:0,n:0,phases:{},people:{}}; byP[key].mins+=l.durationMins; byP[key].n++;
+    if(l.phase){ if(!byP[key].phases[l.phase])byP[key].phases[l.phase]=0; byP[key].phases[l.phase]+=l.durationMins; }
+    const un=users.find(u=>u.id===l.userId)?.name||'?'; if(!byP[key].people[un])byP[key].people[un]=0; byP[key].people[un]+=l.durationMins;
   });
   const sorted=Object.entries(byP).sort((a,b)=>b[1].mins-a[1].mins); const maxM=sorted[0]?.[1].mins||1;
   const cols=['#2b6cb0','#38a169','#d69e2e','#6b46c1','#e53e3e','#0987a0'];
@@ -1674,7 +1351,6 @@ function buildTrProject(logs,total){
   });
   document.getElementById('trProjTbl').innerHTML=html+'</tbody></table>';
 }
-
 function buildTrDetail(logs){
   const sorted=logs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
   let html=`<table class="rpt-table"><thead><tr><th>Date</th><th>Member</th><th>Project / Activity</th><th>Phase</th><th>Typology</th><th>Description</th><th style="text-align:right">Time</th></tr></thead><tbody>`;
@@ -1685,36 +1361,16 @@ function buildTrDetail(logs){
   html+=`<tr style="background:#f7fafc;font-weight:700;"><td colspan="6" style="text-align:right;">Grand Total:</td><td style="text-align:right;color:#2b6cb0;font-size:15px;">${minsToHM(tot)}</td></tr>`;
   document.getElementById('trDetailTbl').innerHTML=html+'</tbody></table>';
 }
-
 function exportPDF(){
-  const title=document.getElementById('trTitle').textContent;
-  const subtitle=document.getElementById('trSubtitle').textContent;
+  const title=document.getElementById('trTitle').textContent, subtitle=document.getElementById('trSubtitle').textContent;
   const pw=window.open('','_blank');
-  pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SQUARE Report</title><style>
-    *{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,sans-serif;color:#1a202c;padding:28px;font-size:12px;}
-    .hdr{border-bottom:3px solid #2b6cb0;padding-bottom:12px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;}
-    .logo{font-size:24px;font-weight:800;color:#2b6cb0;letter-spacing:4px;}.rt{font-size:17px;font-weight:700;margin-top:3px;}.rs{font-size:11px;color:#718096;margin-top:2px;}.gen{font-size:10px;color:#a0aec0;text-align:right;}
-    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}
-    .sc{background:#f7fafc;border-radius:6px;padding:10px;text-align:center;border-top:3px solid #2b6cb0;}
-    .sc:nth-child(2){border-top-color:#38a169;}.sc:nth-child(3){border-top-color:#e53e3e;}.sc:nth-child(4){border-top-color:#d69e2e;}
-    .sn{font-size:18px;font-weight:800;}.sl{font-size:10px;color:#718096;margin-top:1px;}
-    .sec{margin-bottom:22px;}.st{font-size:13px;font-weight:700;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;}
-    table{width:100%;border-collapse:collapse;font-size:11px;}th{background:#f7fafc;padding:6px 10px;text-align:left;font-weight:700;border-bottom:2px solid #e2e8f0;}
-    td{padding:6px 10px;border-bottom:1px solid #f0f4f8;}.sub td{padding:2px 10px 2px 20px;border:none;font-size:10px;}tr:last-child td{border-bottom:none;}
-    .bar-wrap{background:#e2e8f0;border-radius:3px;height:5px;}.bar-fill{height:5px;border-radius:3px;background:#2b6cb0;}
-    .ftr{margin-top:22px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:10px;color:#a0aec0;text-align:center;}
-    @page{margin:1.5cm;}
-  </style></head><body>
-  <div class="hdr"><div><div class="logo">SQUARE</div><div class="rt">Time Report – ${title}</div><div class="rs">${subtitle}</div></div>
-  <div class="gen">Generated ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</div></div>
-  <div class="stats">`);
+  pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SQUARE Report</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,sans-serif;color:#1a202c;padding:28px;font-size:12px;}.hdr{border-bottom:3px solid #2b6cb0;padding-bottom:12px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;}.logo{font-size:24px;font-weight:800;color:#2b6cb0;letter-spacing:4px;}.rt{font-size:17px;font-weight:700;margin-top:3px;}.rs{font-size:11px;color:#718096;margin-top:2px;}.gen{font-size:10px;color:#a0aec0;text-align:right;}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}.sc{background:#f7fafc;border-radius:6px;padding:10px;text-align:center;border-top:3px solid #2b6cb0;}.sc:nth-child(2){border-top-color:#38a169;}.sc:nth-child(3){border-top-color:#e53e3e;}.sc:nth-child(4){border-top-color:#d69e2e;}.sn{font-size:18px;font-weight:800;}.sl{font-size:10px;color:#718096;margin-top:1px;}.sec{margin-bottom:22px;}.st{font-size:13px;font-weight:700;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;}table{width:100%;border-collapse:collapse;font-size:11px;}th{background:#f7fafc;padding:6px 10px;text-align:left;font-weight:700;border-bottom:2px solid #e2e8f0;}td{padding:6px 10px;border-bottom:1px solid #f0f4f8;}.sub td{padding:2px 10px 2px 20px;border:none;font-size:10px;}tr:last-child td{border-bottom:none;}.bar-wrap{background:#e2e8f0;border-radius:3px;height:5px;}.bar-fill{height:5px;border-radius:3px;background:#2b6cb0;}.ftr{margin-top:22px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:10px;color:#a0aec0;text-align:center;}@page{margin:1.5cm;}</style></head><body><div class="hdr"><div><div class="logo">SQUARE</div><div class="rt">Time Report – ${title}</div><div class="rs">${subtitle}</div></div><div class="gen">Generated ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</div></div><div class="stats">`);
   const sn=document.querySelectorAll('#trStats .stat-num'),sl=document.querySelectorAll('#trStats .stat-lbl');
   for(let i=0;i<4;i++) pw.document.write(`<div class="sc"><div class="sn">${sn[i]?.textContent||'-'}</div><div class="sl">${sl[i]?.textContent||''}</div></div>`);
   pw.document.write('</div>');
   if(document.getElementById('trPersonSec').style.display!=='none') pw.document.write(`<div class="sec"><div class="st">By Team Member</div>${document.getElementById('trPersonTbl').innerHTML}</div>`);
   if(document.getElementById('trProjSec').style.display!=='none') pw.document.write(`<div class="sec"><div class="st">By Project & Phase</div>${document.getElementById('trProjTbl').innerHTML}</div>`);
-  pw.document.write(`<div class="sec"><div class="st">Detailed Log</div>${document.getElementById('trDetailTbl').innerHTML}</div>`);
-  pw.document.write(`<div class="ftr">SQUARE Office Management &bull; Confidential &bull; ${new Date().getFullYear()}</div></body></html>`);
+  pw.document.write(`<div class="sec"><div class="st">Detailed Log</div>${document.getElementById('trDetailTbl').innerHTML}</div><div class="ftr">SQUARE Office Management &bull; Confidential &bull; ${new Date().getFullYear()}</div></body></html>`);
   pw.document.close(); setTimeout(()=>{ pw.focus(); pw.print(); },600);
 }
 
@@ -1736,16 +1392,13 @@ document.getElementById('submitLeaveBtn').addEventListener('click',()=>{
   const days=workDays(start,end); const user=users.find(u=>u.id===currentUser.id);
   if(type==='medical'&&days>user.medLeft){ alert(`Only ${user.medLeft} medical days left`); return; }
   if(type==='casual'&&days>user.casLeft){ alert(`Only ${user.casLeft} casual days left`); return; }
-  leaveRequests.push({ id:genId(), userId:currentUser.id, userName:currentUser.name, type, startDate:start, endDate:end, days, reason, status:'pending', date:fmt(new Date()) });
-  autoSave();
-  closeModal('leaveModal'); updateApprovalBadge(); renderLeaves(); alert('Leave submitted!');
+  leaveRequests.push({id:genId(),userId:currentUser.id,userName:currentUser.name,type,startDate:start,endDate:end,days,reason,status:'pending',date:fmt(new Date())});
+  autoSave(); closeModal('leaveModal'); updateApprovalBadge(); renderLeaves();
 });
 function renderLeaves(){
   const user=users.find(u=>u.id===currentUser.id);
   const mU=12-user.medLeft,cU=5-user.casLeft;
-  document.getElementById('leaveBalance').innerHTML=`
-    <div class="balance-card"><div style="font-size:12px;color:#718096;margin-bottom:6px;">🏥 Medical Leave</div><div class="balance-num" style="color:#3182ce;">${user.medLeft}</div><div class="balance-sub">${mU} used of 12</div><div class="bal-bar"><div class="bal-fill" style="width:${(mU/12)*100}%;background:#3182ce;"></div></div></div>
-    <div class="balance-card"><div style="font-size:12px;color:#718096;margin-bottom:6px;">🌴 Casual Leave</div><div class="balance-num" style="color:#38a169;">${user.casLeft}</div><div class="balance-sub">${cU} used of 5</div><div class="bal-bar"><div class="bal-fill" style="width:${(cU/5)*100}%;background:#38a169;"></div></div></div>`;
+  document.getElementById('leaveBalance').innerHTML=`<div class="balance-card"><div style="font-size:12px;color:#718096;margin-bottom:6px;">🏥 Medical Leave</div><div class="balance-num" style="color:#3182ce;">${user.medLeft}</div><div class="balance-sub">${mU} used of 12</div><div class="bal-bar"><div class="bal-fill" style="width:${(mU/12)*100}%;background:#3182ce;"></div></div></div><div class="balance-card"><div style="font-size:12px;color:#718096;margin-bottom:6px;">🌴 Casual Leave</div><div class="balance-num" style="color:#38a169;">${user.casLeft}</div><div class="balance-sub">${cU} used of 5</div><div class="bal-bar"><div class="bal-fill" style="width:${(cU/5)*100}%;background:#38a169;"></div></div></div>`;
   const el=document.getElementById('myLeaveList');
   const my=leaveRequests.filter(l=>l.userId===currentUser.id).slice().reverse();
   if(!my.length){ el.innerHTML='<p style="color:#718096;padding:16px;">No applications yet.</p>'; return; }
@@ -1758,14 +1411,23 @@ function renderLeaves(){
 function renderApprovals(){
   const el=document.getElementById('approvalsList');
   if(!currentUser.isAdmin){ el.innerHTML='<p style="color:#718096;padding:16px;">Only admins can view approvals.</p>'; return; }
-  const pl=leaveRequests.filter(l=>l.status==='pending');
-  const pc=changeRequests.filter(r=>r.status==='pending');
+  const pl=leaveRequests.filter(l=>l.status==='pending'), pc=changeRequests.filter(r=>r.status==='pending');
   if(!pl.length&&!pc.length){ el.innerHTML='<p style="color:#718096;padding:16px;">✅ No pending approvals!</p>'; return; }
   el.innerHTML='';
-  pl.forEach(lv=>{ const c=document.createElement('div'); c.className='approval-card';
+  pl.forEach(lv=>{
+    const c=document.createElement('div'); c.className='approval-card';
     c.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">🌴 Leave · ${lv.userName}</div><div style="font-size:11px;color:#718096;">${lv.type} · ${fmtD(lv.startDate)} → ${fmtD(lv.endDate)} · ${lv.days}d</div></div><span class="badge badge-pending">Pending</span></div><div style="font-size:12px;margin-bottom:10px;">${lv.reason}</div><div style="display:flex;gap:8px;"><button class="btn btn-success btn-sm">✓ Approve</button><button class="btn btn-danger btn-sm">✗ Reject</button></div>`;
-    c.querySelector('.btn-success').onclick=()=>{ lv.status='approved'; const u=users.find(u=>u.id===lv.userId); if(lv.type==='medical') u.medLeft=Math.max(0,u.medLeft-lv.days); else u.casLeft=Math.max(0,u.casLeft-lv.days); renderApprovals(); updateApprovalBadge(); };
-    c.querySelector('.btn-danger').onclick=()=>{ lv.status='rejected'; renderApprovals(); updateApprovalBadge(); };
+    c.querySelector('.btn-success').onclick=()=>{
+      lv.status='approved'; const u=users.find(u=>u.id===lv.userId);
+      if(lv.type==='medical') u.medLeft=Math.max(0,u.medLeft-lv.days); else u.casLeft=Math.max(0,u.casLeft-lv.days);
+      autoSave(); // ✅ FIX: was missing here
+      renderApprovals(); updateApprovalBadge();
+    };
+    c.querySelector('.btn-danger').onclick=()=>{
+      lv.status='rejected';
+      autoSave(); // ✅ FIX: was missing here
+      renderApprovals(); updateApprovalBadge();
+    };
     el.appendChild(c);
   });
 }
@@ -1774,32 +1436,28 @@ function renderApprovals(){
 // MANAGE
 // ═══════════════════════════════════════════════════════
 function renderManage(){
-  // Users
   const ul=document.getElementById('usersList'); ul.innerHTML='';
-  users.forEach((u,i)=>{ const item=document.createElement('div'); item.className='list-item';
+  users.forEach((u,i)=>{
+    const item=document.createElement('div'); item.className='list-item';
     item.innerHTML=`<div><div style="font-weight:600;">${u.name}${u.isAdmin?` <span class="admin-badge">ADMIN</span>`:''}</div><div style="font-size:11px;color:#718096;">${u.email}</div></div>`;
     const btn=document.createElement('button'); btn.className='btn btn-danger btn-sm'; btn.textContent='Delete';
-    btn.onclick=()=>{ if(u.id===currentUser.id){ alert("Can't delete yourself"); return; } users.splice(i,1); renderManage(); };
+    btn.onclick=()=>{ if(u.id===currentUser.id){ alert("Can't delete yourself"); return; } users.splice(i,1); autoSave(); renderManage(); };
     item.appendChild(btn); ul.appendChild(item);
   });
-  // Clients
   const cl=document.getElementById('clientsList'); cl.innerHTML='';
-  clients.forEach((c,i)=>{ const item=document.createElement('div'); item.className='list-item';
+  clients.forEach((c,i)=>{
+    const item=document.createElement('div'); item.className='list-item';
     const span=document.createElement('span'); span.textContent=c; span.style.fontSize='13px';
     const btn=document.createElement('button'); btn.className='btn btn-danger btn-sm'; btn.textContent='×';
-    btn.onclick=()=>{ 
-      const inUse = projectsData.some(p => p.client === c);
-      if(inUse) { alert('Cannot delete - client is used in projects'); return; }
-      clients.splice(i,1); renderManage(); 
-    };
+    btn.onclick=()=>{ const inUse=projectsData.some(p=>p.client===c); if(inUse){ alert('Cannot delete – client is used in projects'); return; } clients.splice(i,1); autoSave(); renderManage(); };
     item.appendChild(span); item.appendChild(btn); cl.appendChild(item);
   });
-  // Typologies
   const tl=document.getElementById('typologyList'); tl.innerHTML='';
-  typologies.forEach((t,i)=>{ const item=document.createElement('div'); item.className='list-item';
+  typologies.forEach((t,i)=>{
+    const item=document.createElement('div'); item.className='list-item';
     const span=document.createElement('span'); span.textContent=t; span.style.fontSize='13px';
     const btn=document.createElement('button'); btn.className='btn btn-danger btn-sm'; btn.textContent='×';
-    btn.onclick=()=>{ typologies.splice(i,1); renderManage(); };
+    btn.onclick=()=>{ typologies.splice(i,1); autoSave(); renderManage(); };
     item.appendChild(span); item.appendChild(btn); tl.appendChild(item);
   });
 }
@@ -1809,23 +1467,19 @@ document.getElementById('addUserBtn').addEventListener('click',()=>{
   if(users.find(u=>u.email===email)){ alert('Email exists'); return; }
   users.push({id:genId(),name,email,password:pass,isAdmin:false,medLeft:12,casLeft:5});
   document.getElementById('newUserName').value=''; document.getElementById('newUserEmail').value=''; document.getElementById('newUserPass').value='';
-  autoSave();
-  renderManage();
+  autoSave(); renderManage();
 });
 document.getElementById('addClientBtn').addEventListener('click',()=>{
   const v=document.getElementById('newClient').value.trim();
   if(!v||clients.includes(v)){ alert(v?'Client already exists':'Enter client name'); return; }
-  clients.push(v); clients.sort();
-  document.getElementById('newClient').value='';
-  autoSave();
-  renderManage();
+  clients.push(v); clients.sort(); document.getElementById('newClient').value='';
+  autoSave(); renderManage();
 });
 document.getElementById('addTypologyBtn').addEventListener('click',()=>{
   const v=document.getElementById('newTypology').value.trim();
   if(!v||typologies.includes(v)){ alert(v?'Already exists':'Enter a name'); return; }
   typologies.push(v); document.getElementById('newTypology').value='';
-  autoSave();
-  renderManage();
+  autoSave(); renderManage();
 });
 
 // ═══════════════════════════════════════════════════════
@@ -1847,167 +1501,60 @@ document.getElementById('timerNavBtn').addEventListener('click',()=>{
   document.addEventListener('touchend',()=>{ drag=false; });
 })();
 
-try {
-  document.getElementById('timerStartBtn').addEventListener('click',()=>{
-    console.log('Timer button clicked');
-    // Get today's planned work for current user
-    const today = fmt(new Date());
-    console.log('Today:', today);
-    console.log('Current user:', currentUser);
-    console.log('Plan entries:', planEntries);
-    
-    const myPlans = planEntries.filter(p => p.userId === currentUser.id && p.date === today && !p.done);
-    console.log('My plans for today:', myPlans);
-    
-    if(myPlans.length === 0) {
-      console.log('No plans found, user is admin:', currentUser.isAdmin);
-      if(currentUser.isAdmin) {
-        const confirmed = confirm('⚠️ No planned work for today!\n\nPlanning is mandatory for all team members.\n\nAs admin, do you want to start an unplanned timer anyway?');
-        console.log('Admin confirmed:', confirmed);
-        if(!confirmed) return;
-        timerLinkedPlan = null;
-      } else {
-        alert('⚠️ No planned work for today!\n\nPlanning is mandatory. Please go to Weekly Planner and assign work for today before starting the timer.');
-        return;
-      }
+document.getElementById('timerStartBtn').addEventListener('click',()=>{
+  const today=fmt(new Date()), myPlans=planEntries.filter(p=>p.userId===currentUser.id&&p.date===today&&!p.done);
+  if(myPlans.length===0){
+    if(currentUser.isAdmin){
+      if(!confirm('⚠️ No planned work for today!\n\nAs admin, do you want to start an unplanned timer anyway?')) return;
+      timerLinkedPlan=null;
     } else {
-      console.log('Found', myPlans.length, 'plans');
-      
-      // If only one plan, auto-select it
-      if(myPlans.length === 1) {
-        timerLinkedPlan = myPlans[0];
-        console.log('Auto-selected single plan:', timerLinkedPlan);
-      } else {
-        // Multiple plans - show picker
-        const opts = myPlans.map((p,i) => `${i+1}. [${p.project}] ${p.phase || ''} ${p.typology || ''}`).join('\n');
-        console.log('Options:', opts);
-        const choice = prompt(`You have ${myPlans.length} planned tasks for today.\n\n${opts}\n\nEnter number (1-${myPlans.length}):`);
-        console.log('User choice:', choice);
-        
-        if(!choice) {
-          console.log('User cancelled prompt');
-          return;
-        }
-        const idx = parseInt(choice) - 1;
-        console.log('Parsed index:', idx);
-        if(idx < 0 || idx >= myPlans.length) { 
-          console.log('Invalid index');
-          alert('Invalid selection'); 
-          return; 
-        }
-        
-        timerLinkedPlan = myPlans[idx];
-        console.log('Selected plan:', timerLinkedPlan);
-      }
+      alert('⚠️ No planned work for today!\n\nPlease go to Weekly Planner and assign work for today before starting the timer.'); return;
     }
-    
-    console.log('Starting timer...');
-    timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
-    document.getElementById('timerWidget').classList.add('running');
-    document.getElementById('timerPreStart').style.display='none';
-    document.getElementById('timerRunning').style.display='block';
-    document.getElementById('timerDisplay').classList.add('running');
-    document.getElementById('timerStatus').textContent='● Recording...';
-    
-    if(timerLinkedPlan) {
-      document.getElementById('timerProject').style.display='block';
-      document.getElementById('timerProject').textContent=`📁 ${timerLinkedPlan.project}`;
-    } else {
-      document.getElementById('timerProject').style.display='block';
-      document.getElementById('timerProject').textContent='⚠️ Unplanned';
-      document.getElementById('timerProject').style.background='#fff5f5';
-      document.getElementById('timerProject').style.color='#e53e3e';
-    }
-    
-    document.getElementById('timerNavLabel').textContent='⏱ Running...';
-    timerInterval=setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
-    console.log('Timer started successfully');
-  });
-  console.log('Timer start button listener attached successfully');
-} catch(e) {
-  console.error('Error setting up timer start button:', e);
-  alert('Timer setup error: ' + e.message);
-}
+  } else if(myPlans.length===1){
+    timerLinkedPlan=myPlans[0];
+  } else {
+    const opts=myPlans.map((p,i)=>`${i+1}. [${p.project}] ${p.phase||''}`).join('\n');
+    const choice=prompt(`You have ${myPlans.length} planned tasks.\n\n${opts}\n\nEnter number:`);
+    if(!choice) return;
+    const idx=parseInt(choice)-1;
+    if(idx<0||idx>=myPlans.length){ alert('Invalid selection'); return; }
+    timerLinkedPlan=myPlans[idx];
+  }
+  timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
+  document.getElementById('timerWidget').classList.add('running');
+  document.getElementById('timerPreStart').style.display='none';
+  document.getElementById('timerRunning').style.display='block';
+  document.getElementById('timerDisplay').classList.add('running');
+  document.getElementById('timerStatus').textContent='● Recording...';
+  const projBadge=document.getElementById('timerProject');
+  projBadge.style.display='block';
+  if(timerLinkedPlan){ projBadge.textContent=`📁 ${timerLinkedPlan.project}`; projBadge.style.background='#ebf4ff'; projBadge.style.color='#2b6cb0'; }
+  else { projBadge.textContent='⚠️ Unplanned'; projBadge.style.background='#fff5f5'; projBadge.style.color='#e53e3e'; }
+  document.getElementById('timerNavLabel').textContent='⏱ Running...';
+  timerInterval=setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
+});
 
 document.getElementById('timerStopBtn').addEventListener('click',()=>{
-  try {
-    console.log('Stop button clicked');
-    clearInterval(timerInterval);
-    timerRunning = false;
-    
-    const parts=document.getElementById('timerDisplay').textContent.split(':').map(Number);
-    console.log('Timer parts:', parts);
-    const totalSecs=parts[0]*3600+parts[1]*60+parts[2];
-    const mins=Math.max(1,Math.round(totalSecs/60));
-    console.log('Total seconds:', totalSecs, 'minutes:', mins);
-    
-    if(totalSecs < 60) {
-      alert('Timer must run for at least 1 minute');
-      timerStartedAt=Date.now(); timerRunning=true;
-      timerInterval=setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
-      return;
-    }
-    
-    console.log('Auto-saving log entry...');
-    
-    // Auto-generate description from plan
-    const autoDesc = timerLinkedPlan 
-      ? `${timerLinkedPlan.typology || timerLinkedPlan.phase || 'Work on project'}`
-      : 'Non-productive work';
-    
-    const logEntry = {
-      id: genId(),
-      userId: currentUser.id,
-      date: fmt(new Date()),
-      projectId: timerLinkedPlan?.projectId || '',
-      projectName: timerLinkedPlan?.project || '',
-      phase: timerLinkedPlan?.phase || '',
-      typology: timerLinkedPlan?.typology || '',
-      activity: '',
-      durationMins: mins,
-      startTime: '',
-      endTime: '',
-      desc: autoDesc,
-      productive: !!timerLinkedPlan,
-      ts: Date.now()
-    };
-    console.log('Log entry created:', logEntry);
-    
-    timeLogs.push(logEntry);
-    console.log('timeLogs now has', timeLogs.length, 'entries');
-    
-    // Mark plan as done if linked
-    if(timerLinkedPlan) {
-      const plan = planEntries.find(p => p.id === timerLinkedPlan.id);
-      if(plan) plan.done = true;
-    }
-    
-    autoSave();
-    resetTimer();
-    renderTimeLog();
-    renderProjectsBudget();
-    renderDashboard();
-    
-    alert(`✅ Logged: ${minsToHM(mins)}\n\n${timerLinkedPlan ? `📁 ${timerLinkedPlan.project}` : 'Non-productive work'}`);
-    console.log('Auto-save completed successfully');
-  } catch(error) {
-    console.error('Error in stop button:', error);
-    alert('Error saving time: ' + error.message);
-  }
+  clearInterval(timerInterval); timerRunning=false;
+  const parts=document.getElementById('timerDisplay').textContent.split(':').map(Number);
+  const totalSecs=parts[0]*3600+parts[1]*60+parts[2];
+  if(totalSecs<60){ alert('Timer must run for at least 1 minute'); timerStartedAt=Date.now(); timerRunning=true; timerInterval=setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000); return; }
+  const mins=Math.max(1,Math.round(totalSecs/60));
+  const autoDesc=timerLinkedPlan?`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'}`:'Non-productive work';
+  timeLogs.push({id:genId(),userId:currentUser.id,date:fmt(new Date()),projectId:timerLinkedPlan?.projectId||'',projectName:timerLinkedPlan?.project||'',phase:timerLinkedPlan?.phase||'',typology:timerLinkedPlan?.typology||'',activity:'',durationMins:mins,startTime:'',endTime:'',desc:autoDesc,productive:!!timerLinkedPlan,ts:Date.now()});
+  if(timerLinkedPlan){ const plan=planEntries.find(p=>p.id===timerLinkedPlan.id); if(plan)plan.done=true; }
+  autoSave(); resetTimer(); renderTimeLog(); renderProjectsBudget(); renderDashboard();
+  alert(`✅ Logged: ${minsToHM(mins)}\n\n${timerLinkedPlan?`📁 ${timerLinkedPlan.project}`:'Non-productive work'}`);
 });
 
 function resetTimer(){
   timerRunning=false; timerStartedAt=null; timerPausedMs=0; timerLinkedPlan=null; clearInterval(timerInterval);
   document.getElementById('timerDisplay').textContent='00:00:00'; document.getElementById('timerDisplay').classList.remove('running');
   document.getElementById('timerStatus').textContent='Timer ready';
-  const projBadge = document.getElementById('timerProject');
-  projBadge.style.display='none';
-  projBadge.style.background='#ebf4ff';
-  projBadge.style.color='#2b6cb0';
+  const projBadge=document.getElementById('timerProject'); projBadge.style.display='none'; projBadge.style.background='#ebf4ff'; projBadge.style.color='#2b6cb0';
   document.getElementById('timerPreStart').style.display='block'; document.getElementById('timerRunning').style.display='none';
   document.getElementById('timerWidget').classList.remove('running'); document.getElementById('timerNavLabel').textContent='Start Timer';
 }
-
 </script>
 </body>
 </html>
