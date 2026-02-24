@@ -198,6 +198,10 @@ textarea.form-control{min-height:70px;resize:vertical;}
 
 @media(max-width:700px){.sidebar{display:none;}.form-row,.form-row-3,.manage-grid,.balance-grid{grid-template-columns:1fr;}}
 </style>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -629,6 +633,23 @@ textarea.form-control{min-height:70px;resize:vertical;}
 
 <script>
 // ═══════════════════════════════════════════════════════
+// FIREBASE CONFIGURATION
+// ═══════════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyBi_OD42znfsYZerQ_c6RWfLIPD_GropBE",
+  authDomain: "square-office-management.firebaseapp.com",
+  projectId: "square-office-management",
+  storageBucket: "square-office-management.firebasestorage.app",
+  messagingSenderId: "99247930577",
+  appId: "1:99247930577:web:4f5137e9476349582319f0"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+console.log('✅ Firebase initialized successfully');
+
+// ═══════════════════════════════════════════════════════
 // CONSTANTS & DATA
 // ═══════════════════════════════════════════════════════
 const PHASES = ['Schematic Design','Final Design','Construction Documents','Material Selection & Coordination','Site Supervision','Project Management'];
@@ -701,65 +722,87 @@ let mTimerInterval=null, mTimerStartedAt=null, mTimerPausedMs=0, mTimerRunning=f
 // ═══════════════════════════════════════════════════════
 // DATA PERSISTENCE (localStorage)
 // ═══════════════════════════════════════════════════════
-function saveData() {
+async function saveData() {
   try {
-    localStorage.setItem('squareData', JSON.stringify({
-      users, clients, typologies, projectsData, planEntries, timeLogs, leaveRequests, changeRequests, holidays
-    }));
-    console.log('Data saved to localStorage');
+    console.log('💾 Saving data to Firebase...');
+    
+    // Save all data collections to Firebase
+    await db.collection('appData').doc('users').set({data: users});
+    await db.collection('appData').doc('clients').set({data: clients});
+    await db.collection('appData').doc('typologies').set({data: typologies});
+    await db.collection('appData').doc('projects').set({data: projectsData});
+    await db.collection('appData').doc('plans').set({data: planEntries});
+    await db.collection('appData').doc('timeLogs').set({data: timeLogs});
+    await db.collection('appData').doc('leaves').set({data: leaveRequests});
+    await db.collection('appData').doc('changes').set({data: changeRequests});
+    await db.collection('appData').doc('holidays').set({data: holidays});
+    
+    console.log('✅ Data saved to Firebase successfully');
   } catch(e) {
-    console.error('Error saving data:', e);
+    console.error('❌ Error saving to Firebase:', e);
+    alert('Failed to save data. Check your internet connection.');
   }
 }
 
-function loadData() {
+async function loadData() {
   try {
-    const saved = localStorage.getItem('squareData');
-    if(saved) {
-      const data = JSON.parse(saved);
-      users = data.users || users;
-      clients = data.clients || clients;
-      typologies = data.typologies || typologies;
-      projectsData = data.projectsData || projectsData;
-      planEntries = data.planEntries || [];
-      timeLogs = data.timeLogs || [];
-      leaveRequests = data.leaveRequests || [];
-      changeRequests = data.changeRequests || [];
-      holidays = data.holidays || [];
-      console.log('Data loaded from localStorage');
-    }
+    console.log('📥 Loading data from Firebase...');
+    
+    const usersDoc = await db.collection('appData').doc('users').get();
+    const clientsDoc = await db.collection('appData').doc('clients').get();
+    const typologiesDoc = await db.collection('appData').doc('typologies').get();
+    const projectsDoc = await db.collection('appData').doc('projects').get();
+    const plansDoc = await db.collection('appData').doc('plans').get();
+    const logsDoc = await db.collection('appData').doc('timeLogs').get();
+    const leavesDoc = await db.collection('appData').doc('leaves').get();
+    const changesDoc = await db.collection('appData').doc('changes').get();
+    const holidaysDoc = await db.collection('appData').doc('holidays').get();
+    
+    if(usersDoc.exists) users = usersDoc.data().data;
+    if(clientsDoc.exists) clients = clientsDoc.data().data;
+    if(typologiesDoc.exists) typologies = typologiesDoc.data().data;
+    if(projectsDoc.exists) projectsData = projectsDoc.data().data;
+    if(plansDoc.exists) planEntries = plansDoc.data().data;
+    if(logsDoc.exists) timeLogs = logsDoc.data().data;
+    if(leavesDoc.exists) leaveRequests = leavesDoc.data().data;
+    if(changesDoc.exists) changeRequests = changesDoc.data().data;
+    if(holidaysDoc.exists) holidays = holidaysDoc.data().data;
+    
+    console.log('✅ Data loaded from Firebase successfully');
+    console.log('Loaded', users.length, 'users,', projectsData.length, 'projects,', timeLogs.length, 'time logs');
   } catch(e) {
-    console.error('Error loading data:', e);
+    console.error('❌ Error loading from Firebase:', e);
+    console.log('Using default data...');
   }
 }
 
-// Load data on startup
-loadData();
-
-// Auto-login if session exists
-(function autoLogin(){
-  try {
-    const session = localStorage.getItem('currentSession');
-    if(session) {
-      const {userId} = JSON.parse(session);
-      const user = users.find(u => u.id === userId);
-      if(user) {
-        currentUser = user;
-        document.getElementById('loginScreen').style.display='none';
-        document.getElementById('mainApp').style.display='flex';
-        document.getElementById('topbarName').textContent=user.name;
-        document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
-        document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
-        setTimeout(() => {
-          initTimeReport(); renderDashboard(); updateApprovalBadge();
-        }, 100);
-        console.log('Auto-login successful:', user.name);
+// Load data on startup and then auto-login
+loadData().then(() => {
+  // Auto-login if session exists
+  (function autoLogin(){
+    try {
+      const session = localStorage.getItem('currentSession');
+      if(session) {
+        const {userId} = JSON.parse(session);
+        const user = users.find(u => u.id === userId);
+        if(user) {
+          currentUser = user;
+          document.getElementById('loginScreen').style.display='none';
+          document.getElementById('mainApp').style.display='flex';
+          document.getElementById('topbarName').textContent=user.name;
+          document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
+          document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
+          setTimeout(() => {
+            initTimeReport(); renderDashboard(); updateApprovalBadge();
+          }, 100);
+          console.log('✅ Auto-login successful:', user.name);
+        }
       }
+    } catch(e) {
+      console.error('❌ Auto-login failed:', e);
     }
-  } catch(e) {
-    console.error('Auto-login failed:', e);
-  }
-})();
+  })();
+});
 
 // Auto-save data whenever it changes
 function autoSave() {
@@ -896,7 +939,10 @@ document.getElementById('loginPassword').addEventListener('keypress', e=>{ if(e.
 function doLogin(){
   const email=document.getElementById('loginEmail').value.trim().toLowerCase();
   const pass=document.getElementById('loginPassword').value.trim();
+  console.log('Login attempt - Email:', email, 'Pass:', pass);
+  console.log('Available users:', users.map(u => ({email: u.email, password: u.password})));
   const user=users.find(u=>u.email.toLowerCase()===email&&u.password===pass);
+  console.log('User found:', user);
   const err=document.getElementById('loginError');
   if(user){
     currentUser=user; err.style.display='none';
@@ -908,7 +954,11 @@ function doLogin(){
     document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
     initTimeReport(); renderDashboard(); updateApprovalBadge();
-  } else { err.style.display='block'; err.textContent='Invalid email or password.'; }
+  } else { 
+    err.style.display='block'; 
+    err.textContent='Invalid email or password.';
+    console.log('Login failed - no matching user found');
+  }
 }
 document.getElementById('logoutBtn').addEventListener('click',()=>{
   currentUser=null;
