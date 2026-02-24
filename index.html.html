@@ -1119,7 +1119,7 @@ document.getElementById('dashViewHolidays').addEventListener('click', () => {
     list.innerHTML = holidays.map(h => `
       <div class="list-item">
         <div><div style="font-weight:600;">${h.name}</div><div style="font-size:11px;color:#718096;">${fmtD(h.date)}</div></div>
-        <button class="btn btn-danger btn-sm" onclick="deleteHoliday('${h.id}')">Delete</button>
+       <button class="btn btn-primary btn-block" id="loginBtn" onclick="doLogin()">Login</button>
       </div>
     `).join('');
   }
