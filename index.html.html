@@ -627,27 +627,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div>
 </div>
 
-<<script type="module">
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyBi_OD42znfsYZerQ_c6RWfLIPD_GropBE",
-  authDomain: "square-office-management.firebaseapp.com",
-  projectId: "square-office-management",
-  storageBucket: "square-office-management.firebasestorage.app",
-  messagingSenderId: "99247930577",
-  appId: "1:99247930577:web:4f5137e9476349582319f0"
-};
-
-// Initialize Firebase and Firestore
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp);
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+<script>
 // ═══════════════════════════════════════════════════════
 // CONSTANTS & DATA
 // ═══════════════════════════════════════════════════════
@@ -719,42 +699,16 @@ let timerInterval=null, timerStartedAt=null, timerPausedMs=0, timerRunning=false
 let mTimerInterval=null, mTimerStartedAt=null, mTimerPausedMs=0, mTimerRunning=false;
 
 // ═══════════════════════════════════════════════════════
-// DATA PERSISTENCE (FIREBASE FIRESTORE)
+// DATA PERSISTENCE (localStorage)
 // ═══════════════════════════════════════════════════════
-async function saveData() {
+function saveData() {
   try {
-    const dataToSave = {
+    localStorage.setItem('squareData', JSON.stringify({
       users, clients, typologies, projectsData, planEntries, timeLogs, leaveRequests, changeRequests, holidays
-    };
-    // Save everything to a single document called 'squareDB' in the 'companyData' collection
-    await setDoc(doc(db, "companyData", "squareDB"), dataToSave);
-    console.log('✅ Data saved to Firebase!');
+    }));
+    console.log('Data saved to localStorage');
   } catch(e) {
-    console.error('❌ Error saving data to Firebase:', e);
-  }
-}
-
-async function loadData() {
-  try {
-    const docSnap = await getDoc(doc(db, "companyData", "squareDB"));
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      users = data.users || users;
-      clients = data.clients || clients;
-      typologies = data.typologies || typologies;
-      projectsData = data.projectsData || projectsData;
-      planEntries = data.planEntries || [];
-      timeLogs = data.timeLogs || [];
-      leaveRequests = data.leaveRequests || [];
-      changeRequests = data.changeRequests || [];
-      holidays = data.holidays || [];
-      console.log('✅ Data loaded from Firebase!');
-    } else {
-      console.log("No data found in Firebase. Creating initial database...");
-      await saveData(); // Push the default code arrays to Firebase for the first time
-    }
-  } catch(e) {
-    console.error('❌ Error loading data from Firebase:', e);
+    console.error('Error saving data:', e);
   }
 }
 
@@ -783,7 +737,7 @@ function loadData() {
 loadData();
 
 // Auto-login if session exists
-function autoLogin(){
+(function autoLogin(){
   try {
     const session = localStorage.getItem('currentSession');
     if(session) {
@@ -805,17 +759,8 @@ function autoLogin(){
   } catch(e) {
     console.error('Auto-login failed:', e);
   }
-}
+})();
 
-// Startup Sequence: Load from Firebase FIRST, then try to auto-login
-loadData().then(() => {
-  autoLogin();
-});
-
-// Auto-save data whenever it changes
-window.autoSave = function() {
-  saveData();
-};
 // Auto-save data whenever it changes
 function autoSave() {
   saveData();
@@ -948,13 +893,10 @@ function projectLoggedMins(projectId){
 // ═══════════════════════════════════════════════════════
 document.getElementById('loginBtn').addEventListener('click', doLogin);
 document.getElementById('loginPassword').addEventListener('keypress', e=>{ if(e.key==='Enter') doLogin(); });
-window.doLogin = function(){
+function doLogin(){
   const email=document.getElementById('loginEmail').value.trim().toLowerCase();
   const pass=document.getElementById('loginPassword').value.trim();
-  console.log('Login attempt - Email:', email, 'Pass:', pass);
-  console.log('Available users:', users.map(u => ({email: u.email, password: u.password})));
   const user=users.find(u=>u.email.toLowerCase()===email&&u.password===pass);
-  console.log('User found:', user);
   const err=document.getElementById('loginError');
   if(user){
     currentUser=user; err.style.display='none';
@@ -966,11 +908,7 @@ window.doLogin = function(){
     document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
     initTimeReport(); renderDashboard(); updateApprovalBadge();
-  } else { 
-    err.style.display='block'; 
-    err.textContent='Invalid email or password.';
-    console.log('Login failed - no matching user found');
-  }
+  } else { err.style.display='block'; err.textContent='Invalid email or password.'; }
 }
 document.getElementById('logoutBtn').addEventListener('click',()=>{
   currentUser=null;
@@ -1119,7 +1057,7 @@ document.getElementById('dashViewHolidays').addEventListener('click', () => {
     list.innerHTML = holidays.map(h => `
       <div class="list-item">
         <div><div style="font-weight:600;">${h.name}</div><div style="font-size:11px;color:#718096;">${fmtD(h.date)}</div></div>
-       <button class="btn btn-primary btn-block" id="loginBtn" onclick="doLogin()">Login</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteHoliday('${h.id}')">Delete</button>
       </div>
     `).join('');
   }
