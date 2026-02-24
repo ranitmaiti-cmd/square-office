@@ -948,7 +948,7 @@ function projectLoggedMins(projectId){
 // ═══════════════════════════════════════════════════════
 document.getElementById('loginBtn').addEventListener('click', doLogin);
 document.getElementById('loginPassword').addEventListener('keypress', e=>{ if(e.key==='Enter') doLogin(); });
-function doLogin(){
+window.doLogin = function(){
   const email=document.getElementById('loginEmail').value.trim().toLowerCase();
   const pass=document.getElementById('loginPassword').value.trim();
   console.log('Login attempt - Email:', email, 'Pass:', pass);
