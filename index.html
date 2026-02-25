@@ -685,14 +685,15 @@ let mTimerInterval=null, mTimerStartedAt=null, mTimerPausedMs=0, mTimerRunning=f
 // ═══════════════════════════════════════════════════════
 // ✅ FIX: autoSave — the missing function that caused all data loss
 // ═══════════════════════════════════════════════════════
-let saveTimer = null;
-function autoSave() {
-  // Debounce: wait 500ms after last change before saving
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    saveData();
-  }, 500);
-}
+
+document.getElementById('addClientBtn').addEventListener('click',()=>{
+  const v=document.getElementById('newClient').value.trim();
+  if(!v||clients.includes(v)){ alert(v?'Client already exists':'Enter client name'); return; }
+  clients.push(v); clients.sort();
+  document.getElementById('newClient').value='';
+  autoSave(); // This triggers the saveData() function above
+  renderManage();
+});
 
 function showSaveIndicator() {
   const el = document.getElementById('saveIndicator');
@@ -1543,14 +1544,78 @@ document.getElementById('timerStopBtn').addEventListener('click',()=>{
   alert(`✅ Logged: ${minsToHM(mins)}\n\n${timerLinkedPlan?`📁 ${timerLinkedPlan.project}`:'Non-productive work'}`);
 });
 
-function resetTimer(){
-  timerRunning=false; timerStartedAt=null; timerPausedMs=0; timerLinkedPlan=null; clearInterval(timerInterval);
-  document.getElementById('timerDisplay').textContent='00:00:00'; document.getElementById('timerDisplay').classList.remove('running');
-  document.getElementById('timerStatus').textContent='Timer ready';
-  const projBadge=document.getElementById('timerProject'); projBadge.style.display='none'; projBadge.style.background='#ebf4ff'; projBadge.style.color='#2b6cb0';
-  document.getElementById('timerPreStart').style.display='block'; document.getElementById('timerRunning').style.display='none';
-  document.getElementById('timerWidget').classList.remove('running'); document.getElementById('timerNavLabel').textContent='Start Timer';
+function resetTimer() {
+  timerRunning = false;
+  timerStartedAt = null;
+  timerPausedMs = 0;
+  timerLinkedPlan = null;
+  clearInterval(timerInterval);
+  document.getElementById('timerDisplay').textContent = '00:00:00';
+  document.getElementById('timerDisplay').classList.remove('running');
+  document.getElementById('timerStatus').textContent = 'Timer ready';
+  const projBadge = document.getElementById('timerProject');
+  projBadge.style.display = 'none';
+  document.getElementById('timerPreStart').style.display = 'block';
+  document.getElementById('timerRunning').style.display = 'none';
+  document.getElementById('timerWidget').classList.remove('running');
 }
+
+// ═══════════════════════════════════════════════════════
+// CLOUD DATA PERSISTENCE (FIREBASE)
+// ═══════════════════════════════════════════════════════
+async function saveData() {
+  console.log("Attempting to save to cloud...");
+  try {
+    const dataToSave = {
+      users, clients, typologies, projectsData, planEntries, 
+      timeLogs, leaveRequests, changeRequests, holidays
+    };
+    await db.collection("companyData").doc("squareDB").set(dataToSave);
+    console.log('✅ Data saved to Firebase!');
+    const el = document.getElementById('saveIndicator');
+    if(el) { el.classList.add('show'); setTimeout(()=>el.classList.remove('show'), 2000); }
+  } catch(e) {
+    console.error('❌ Error saving to Firebase:', e);
+  }
+}
+
+async function loadData() {
+  console.log("Attempting to load from cloud...");
+  try {
+    const docSnap = await db.collection("companyData").doc("squareDB").get();
+    if (docSnap.exists) {
+      const data = docSnap.data();
+      users = data.users || users;
+      clients = data.clients || clients;
+      typologies = data.typologies || typologies;
+      projectsData = data.projectsData || projectsData;
+      planEntries = data.planEntries || [];
+      timeLogs = data.timeLogs || [];
+      leaveRequests = data.leaveRequests || [];
+      changeRequests = data.changeRequests || [];
+      holidays = data.holidays || [];
+      console.log('✅ Data loaded from Firebase!');
+    } else {
+      console.log("No data found. Seeding admin...");
+      users = [{id: 'admin', name: 'Admin', role: 'admin', pin: '1234'}];
+      await saveData();
+    }
+    // Refresh the UI after loading
+    if(typeof renderManage === 'function') renderManage();
+  } catch(e) {
+    console.error('❌ Error loading from Firebase:', e);
+  }
+}
+
+let saveTimer = null;
+function autoSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { saveData(); }, 500);
+}
+
+// Start the app
+loadData();
+
 </script>
 </body>
 </html>
