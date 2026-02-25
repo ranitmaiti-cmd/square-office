@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQUARE - Office Management System</title>
+
+<!-- Firebase SDK v9 -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getFirestore, doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBi_OD42znfsYZerQ_c6RWfLIPD_GropBE",
+  authDomain: "square-office-management.firebaseapp.com",
+  projectId: "square-office-management",
+  storageBucket: "square-office-management.firebasestorage.app",
+  messagingSenderId: "99247930577",
+  appId: "1:99247930577:web:4f5137e9476349582319f0"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+window.firebaseDb = db;
+window.firebaseDoc = doc;
+window.firebaseGetDoc = getDoc;
+window.firebaseSetDoc = setDoc;
+console.log('🔥 Firebase ready');
+</script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f4f8;color:#2d3748;}
+.login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#1a365d,#2b6cb0);}
+.login-card{background:white;padding:40px;border-radius:16px;width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.3);}
+.login-logo{text-align:center;margin-bottom:30px;}
+.login-logo h1{font-size:32px;font-weight:800;color:#2b6cb0;letter-spacing:4px;}
+.login-logo p{color:#718096;font-size:14px;margin-top:4px;}
+.login-error{background:#fed7d7;color:#9b2c2c;padding:10px;border-radius:6px;margin-bottom:16px;font-size:13px;display:none;}
+.app{display:flex;flex-direction:column;min-height:100vh;}
+.topbar{background:white;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.08);position:sticky;top:0;z-index:100;}
+.app-logo{font-size:20px;font-weight:800;color:#2b6cb0;letter-spacing:3px;}
+.user-badge{background:#ebf4ff;color:#2b6cb0;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;}
+.admin-badge{background:#faf5ff;color:#6b46c1;padding:3px 8px;border-radius:10px;font-size:11px;font-weight:600;margin-left:6px;}
+.main{display:flex;flex:1;}
+.sidebar{width:220px;background:white;padding:16px 0;box-shadow:2px 0 8px rgba(0,0,0,0.05);flex-shrink:0;overflow-y:auto;}
+.nav-section{padding:6px 20px 4px;font-size:10px;font-weight:700;text-transform:uppercase;color:#a0aec0;letter-spacing:1px;margin-top:8px;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;cursor:pointer;font-size:13px;font-weight:500;color:#4a5568;transition:all 0.2s;border-left:3px solid transparent;}
+.nav-item:hover{background:#f7fafc;color:#2b6cb0;}
+.nav-item.active{background:#ebf4ff;color:#2b6cb0;border-left-color:#2b6cb0;font-weight:600;}
+.nav-icon{font-size:15px;width:20px;text-align:center;}
+.content{flex:1;padding:24px;overflow-y:auto;max-height:calc(100vh - 60px);}
+.page{display:none;}.page.active{display:block;}
+.form-group{margin-bottom:14px;}
+.form-label{display:block;margin-bottom:5px;font-weight:500;font-size:13px;color:#4a5568;}
+.form-control{width:100%;padding:9px 12px;border:2px solid #e2e8f0;border-radius:8px;font-size:13px;transition:border 0.2s;background:white;}
+.form-control:focus{outline:none;border-color:#2b6cb0;}
+textarea.form-control{min-height:70px;resize:vertical;}
+.btn{padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.2s;}
+.btn-primary{background:#2b6cb0;color:white;}.btn-primary:hover{background:#2c5282;}
+.btn-success{background:#38a169;color:white;}.btn-success:hover{background:#276749;}
+.btn-danger{background:#e53e3e;color:white;}.btn-danger:hover{background:#9b2c2c;}
+.btn-ghost{background:#edf2f7;color:#4a5568;}.btn-ghost:hover{background:#e2e8f0;}
+.btn-sm{padding:5px 11px;font-size:12px;}
+.btn-block{width:100%;padding:12px;font-size:14px;}
+.card{background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:16px;}
+.page-title{font-size:20px;font-weight:700;margin-bottom:20px;}
+.save-indicator{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#38a169;color:white;padding:8px 18px;border-radius:20px;font-size:12px;font-weight:600;z-index:700;opacity:0;transition:opacity 0.3s;pointer-events:none;}
+.save-indicator.show{opacity:1;}
+.loading-screen{position:fixed;inset:0;background:linear-gradient(135deg,#1a365d,#2b6cb0);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;color:white;}
+.loading-spinner{width:50px;height:50px;border:4px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:20px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.manage-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.add-row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+.add-row .form-control{flex:1;min-width:120px;}
+.list-item{display:flex;justify-content:space-between;align-items:center;padding:9px 4px;border-bottom:1px solid #f0f4f8;}
+.list-item:last-child{border-bottom:none;}
+.cal-grid{display:grid;grid-template-columns:150px repeat(7,1fr);gap:4px;}
+.cal-head-cell{text-align:center;font-size:11px;font-weight:700;padding:7px 4px;background:#f7fafc;border-radius:6px;color:#4a5568;}
+.cal-name{font-size:12px;font-weight:600;padding:8px 6px;}
+.cal-cell{background:#f7fafc;border-radius:6px;padding:4px;min-height:52px;border:1px solid #e2e8f0;}
+.chip{font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:block;border-left:3px solid;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.chip-task{background:#ebf4ff;border-color:#2b6cb0;}
+.chip-log{background:#faf5ff;border-color:#6b46c1;}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
+.stat-card{background:white;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-top:4px solid #2b6cb0;}
+.stat-num{font-size:26px;font-weight:800;}
+.stat-lbl{font-size:11px;color:#718096;margin-top:2px;}
+.log-card{background:white;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:8px;}
+.log-time{display:inline-flex;align-items:center;gap:4px;background:#ebf4ff;color:#2b6cb0;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:500;align-items:center;justify-content:center;display:none;}
+.modal.open{display:flex;}
+.modal-box{background:white;border-radius:16px;padding:24px;width:90%;max-width:580px;max-height:90vh;overflow-y:auto;}
+.modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
+.close-btn{background:none;border:none;font-size:22px;cursor:pointer;color:#718096;}
+</style>
+</head>
+<body>
+
+<div class="save-indicator" id="saveIndicator">✅ Saved to cloud</div>
+
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-spinner"></div>
+  <h2 style="font-size:24px;font-weight:800;letter-spacing:4px;margin-bottom:8px;">SQUARE</h2>
+  <p style="font-size:14px;color:rgba(255,255,255,0.8);">Loading workspace...</p>
+</div>
+
+<div class="login-screen" id="loginScreen" style="display:none;">
+  <div class="login-card">
+    <div class="login-logo"><h1>SQUARE</h1><p>Office Management System</p></div>
+    <div class="login-error" id="loginError"></div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" class="form-control" id="loginEmail" placeholder="your@square.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input type="password" class="form-control" id="loginPassword" placeholder="Password">
+    </div>
+    <button class="btn btn-primary btn-block" id="loginBtn">Login</button>
+    <p style="text-align:center;margin-top:12px;font-size:12px;color:#a0aec0;">admin@square.com / admin123</p>
+  </div>
+</div>
+
+<div class="app" id="mainApp" style="display:none;">
+  <div class="topbar">
+    <span class="app-logo">SQUARE</span>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span class="user-badge"><span id="topbarName"></span><span class="admin-badge" id="adminBadge" style="display:none;">ADMIN</span></span>
+      <button class="btn btn-ghost btn-sm" id="logoutBtn">Logout</button>
+    </div>
+  </div>
+  
+  <div class="main">
+    <div class="sidebar">
+      <div class="nav-section">Planning</div>
+      <div class="nav-item active" data-page="dashboard"><span class="nav-icon">📊</span>Dashboard</div>
+      <div class="nav-item" data-page="planner"><span class="nav-icon">📅</span>Weekly Planner</div>
+      <div class="nav-section">Work</div>
+      <div class="nav-item" data-page="timelog"><span class="nav-icon">⏱️</span>Time Log</div>
+      <div class="nav-item" data-page="projects"><span class="nav-icon">📁</span>Projects</div>
+      <div class="nav-section">Admin</div>
+      <div class="nav-item" data-page="reports"><span class="nav-icon">📈</span>Reports</div>
+      <div class="nav-item" data-page="leaves"><span class="nav-icon">🌴</span>Leave</div>
+      <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">⚙️</span>Manage</div>
+    </div>
+
+    <div class="content">
+      <div class="page active" id="page-dashboard">
+        <h2 class="page-title">📊 Dashboard</h2>
+        <div class="stats-grid" id="dashStats"></div>
+        <div class="card">
+          <div style="font-weight:700;margin-bottom:12px;">📅 Team Calendar (This Week)</div>
+          <div id="calendarView"></div>
+        </div>
+      </div>
+
+      <div class="page" id="page-planner">
+        <h2 class="page-title">📅 Weekly Planner</h2>
+        <button class="btn btn-primary btn-sm" id="addPlanBtn" style="margin-bottom:16px;">+ Add Task</button>
+        <div class="card"><div id="plannerView">No tasks planned yet. Click "Add Task" to start.</div></div>
+      </div>
+
+      <div class="page" id="page-timelog">
+        <h2 class="page-title">⏱️ Time Log</h2>
+        <button class="btn btn-primary" id="addTimeBtn" style="margin-bottom:16px;">+ Log Time</button>
+        <div id="timeLogList"></div>
+      </div>
+
+      <div class="page" id="page-projects">
+        <h2 class="page-title">📁 Projects & Budget</h2>
+        <button class="btn btn-primary admin-only" id="addProjectBtn" style="margin-bottom:16px;display:none;">+ New Project</button>
+        <div id="projectsList"></div>
+      </div>
+
+      <div class="page" id="page-reports">
+        <h2 class="page-title">📈 Time Reports</h2>
+        <div class="card">
+          <button class="btn btn-primary" id="generateReportBtn">Generate Report</button>
+          <div id="reportOutput" style="margin-top:20px;"></div>
+        </div>
+      </div>
+
+      <div class="page" id="page-leaves">
+        <h2 class="page-title">🌴 Leave Management</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+          <div class="card">
+            <div style="text-align:center;">
+              <div style="font-size:12px;color:#718096;margin-bottom:6px;">🏥 Medical Leave</div>
+              <div style="font-size:34px;font-weight:800;color:#3182ce;" id="medLeave">12</div>
+              <div style="font-size:12px;color:#718096;">days remaining</div>
+            </div>
+          </div>
+          <div class="card">
+            <div style="text-align:center;">
+              <div style="font-size:12px;color:#718096;margin-bottom:6px;">🌴 Casual Leave</div>
+              <div style="font-size:34px;font-weight:800;color:#38a169;" id="casLeave">5</div>
+              <div style="font-size:12px;color:#718096;">days remaining</div>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="applyLeaveBtn" style="margin-bottom:16px;">+ Apply for Leave</button>
+        <div id="leaveList"></div>
+      </div>
+
+      <div class="page" id="page-manage">
+        <h2 class="page-title">⚙️ Manage</h2>
+        <div class="manage-grid">
+          <div class="card">
+            <div style="font-weight:700;margin-bottom:14px;">👥 Team Members</div>
+            <div class="add-row">
+              <input class="form-control" id="newUserName" placeholder="Full name">
+              <input class="form-control" id="newUserEmail" placeholder="Email">
+              <input class="form-control" id="newUserPass" placeholder="Password">
+              <button class="btn btn-primary btn-sm" id="addUserBtn">Add</button>
+            </div>
+            <div id="usersList"></div>
+          </div>
+          <div class="card">
+            <div style="font-weight:700;margin-bottom:14px;">🏢 Clients</div>
+            <div class="add-row">
+              <input class="form-control" id="newClient" placeholder="New client name">
+              <button class="btn btn-primary btn-sm" id="addClientBtn">Add</button>
+            </div>
+            <div id="clientsList"></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px;">
+          <div style="font-weight:700;margin-bottom:14px;">🏷️ Job Typologies</div>
+          <div class="add-row">
+            <input class="form-control" id="newTypology" placeholder="New typology name">
+            <button class="btn btn-primary btn-sm" id="addTypologyBtn">Add</button>
+          </div>
+          <div id="typologyList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODALS -->
+<div class="modal" id="planModal">
+  <div class="modal-box">
+    <div class="modal-head"><h3>Add Task</h3><button class="close-btn" onclick="document.getElementById('planModal').classList.remove('open')">×</button></div>
+    <div class="form-group"><label class="form-label">Team Member</label><select class="form-control" id="planUser"></select></div>
+    <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-control" id="planDate"></div>
+    <div class="form-group"><label class="form-label">Description</label><textarea class="form-control" id="planDesc"></textarea></div>
+    <button class="btn btn-primary" id="savePlanBtn">Save Task</button>
+  </div>
+</div>
+
+<div class="modal" id="timeModal">
+  <div class="modal-box">
+    <div class="modal-head"><h3>Log Time</h3><button class="close-btn" onclick="document.getElementById('timeModal').classList.remove('open')">×</button></div>
+    <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-control" id="timeDate"></div>
+    <div class="form-group"><label class="form-label">Hours</label><input type="number" class="form-control" id="timeHours" min="0" max="24" value="1"></div>
+    <div class="form-group"><label class="form-label">Description</label><textarea class="form-control" id="timeDesc"></textarea></div>
+    <div class="form-group">
+      <label class="form-label">Type</label>
+      <select class="form-control" id="timeType">
+        <option value="productive">Productive</option>
+        <option value="non-productive">Non-Productive</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" id="saveTimeBtn">Save Log</button>
+  </div>
+</div>
+
+<div class="modal" id="leaveModal">
+  <div class="modal-box">
+    <div class="modal-head"><h3>Apply for Leave</h3><button class="close-btn" onclick="document.getElementById('leaveModal').classList.remove('open')">×</button></div>
+    <div class="form-group">
+      <label class="form-label">Leave Type</label>
+      <select class="form-control" id="leaveType">
+        <option value="medical">Medical Leave</option>
+        <option value="casual">Casual Leave</option>
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">Start Date</label><input type="date" class="form-control" id="leaveStart"></div>
+    <div class="form-group"><label class="form-label">End Date</label><input type="date" class="form-control" id="leaveEnd"></div>
+    <div class="form-group"><label class="form-label">Reason</label><textarea class="form-control" id="leaveReason"></textarea></div>
+    <button class="btn btn-primary" id="saveLeaveBtn">Submit Application</button>
+  </div>
+</div>
+
+<script>
+let currentUser=null,dataLoaded=false,saveTimer=null;
+let appData={
+  users:[
+    {id:'u1',name:'Admin User',email:'admin@square.com',password:'admin123',isAdmin:true,medLeft:12,casLeft:5},
+    {id:'u2',name:'Rajesh Kumar',email:'rajesh@square.com',password:'rajesh123',isAdmin:false,medLeft:12,casLeft:5},
+    {id:'u3',name:'Priya Sharma',email:'priya@square.com',password:'priya123',isAdmin:false,medLeft:12,casLeft:5},
+    {id:'u4',name:'Amit Patel',email:'amit@square.com',password:'amit123',isAdmin:false,medLeft:12,casLeft:5}
+  ],
+  clients:['Acme Corp','Tech Solutions','Global Industries'],
+  typologies:['Schematic Design','Final Design','Construction Documents','Material Selection','Site Supervision'],
+  projectsData:[],
+  planEntries:[],
+  timeLogs:[],
+  leaveRequests:[],
+  holidays:[]
+};
+
+async function loadData(){
+  try{
+    console.log('📥 Loading...');
+    const docRef=window.firebaseDoc(window.firebaseDb,'companyData','squareDB');
+    const docSnap=await window.firebaseGetDoc(docRef);
+    if(docSnap.exists()){
+      appData=docSnap.data();
+      console.log('✅ Loaded');
+    }else{
+      console.log('⚠️ Creating initial');
+      await saveData();
+    }
+    dataLoaded=true;
+    return true;
+  }catch(e){
+    console.error('❌ Load error:',e.message);
+    dataLoaded=true;
+    return false;
+  }
+}
+
+async function saveData(){
+  if(!dataLoaded)return;
+  try{
+    const docRef=window.firebaseDoc(window.firebaseDb,'companyData','squareDB');
+    await window.firebaseSetDoc(docRef,appData);
+    console.log('💾 Saved');
+    showSave();
+  }catch(e){
+    console.error('❌ Save error:',e.message);
+  }
+}
+
+function autoSave(){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>saveData(),1000);
+}
+
+function showSave(){
+  const el=document.getElementById('saveIndicator');
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),2000);
+}
+
+async function initApp(){
+  await new Promise(r=>{
+    const c=setInterval(()=>{
+      if(window.firebaseDb){clearInterval(c);r();}
+    },100);
+  });
+  await loadData();
+  try{
+    const s=localStorage.getItem('squareSession');
+    if(s){
+      const{userId}=JSON.parse(s);
+      const u=appData.users.find(u=>u.id===userId);
+      if(u){
+        currentUser=u;
+        showApp();
+        return;
+      }
+    }
+  }catch(e){}
+  document.getElementById('loadingScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+}
+
+function showApp(){
+  document.getElementById('loadingScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('mainApp').style.display='flex';
+  document.getElementById('topbarName').textContent=currentUser.name;
+  document.getElementById('adminBadge').style.display=currentUser.isAdmin?'inline-block':'none';
+  document.querySelectorAll('.admin-only').forEach(el=>el.style.display=currentUser.isAdmin?'flex':'none');
+  renderDashboard();
+  renderManage();
+}
+
+document.getElementById('loginBtn').addEventListener('click',()=>{
+  const email=document.getElementById('loginEmail').value.trim().toLowerCase();
+  const pass=document.getElementById('loginPassword').value.trim();
+  const user=appData.users.find(u=>u.email.toLowerCase()===email&&u.password===pass);
+  const err=document.getElementById('loginError');
+  if(user){
+    currentUser=user;
+    localStorage.setItem('squareSession',JSON.stringify({userId:user.id}));
+    err.style.display='none';
+    showApp();
+  }else{
+    err.style.display='block';
+    err.textContent='Invalid email or password';
+  }
+});
+
+document.getElementById('logoutBtn').addEventListener('click',()=>{
+  currentUser=null;
+  localStorage.removeItem('squareSession');
+  location.reload();
+});
+
+document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
+  item.addEventListener('click',function(){
+    const page=this.dataset.page;
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    this.classList.add('active');
+    document.getElementById('page-'+page).classList.add('active');
+    if(page==='dashboard')renderDashboard();
+    if(page==='planner')renderPlanner();
+    if(page==='timelog')renderTimeLog();
+    if(page==='projects')renderProjects();
+    if(page==='leaves')renderLeaves();
+    if(page==='manage')renderManage();
+  });
+});
+
+function renderDashboard(){
+  const now=new Date(),m=now.getMonth(),y=now.getFullYear();
+  const logs=appData.timeLogs.filter(l=>{const d=new Date(l.date);return d.getMonth()===m&&d.getFullYear()===y;});
+  const total=logs.reduce((s,l)=>s+l.hours,0);
+  const prod=logs.filter(l=>l.type==='productive').reduce((s,l)=>s+l.hours,0);
+  document.getElementById('dashStats').innerHTML=`
+    <div class="stat-card"><div class="stat-num">${total.toFixed(1)}h</div><div class="stat-lbl">Total Hours</div></div>
+    <div class="stat-card"><div class="stat-num">${prod.toFixed(1)}h</div><div class="stat-lbl">Productive</div></div>
+    <div class="stat-card"><div class="stat-num">${appData.users.length}</div><div class="stat-lbl">Team Members</div></div>
+    <div class="stat-card"><div class="stat-num">${appData.projectsData.length}</div><div class="stat-lbl">Projects</div></div>
+  `;
+  const days=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  let html='<div class="cal-grid"><div class="cal-head-cell">Member</div>';
+  days.forEach(d=>html+=`<div class="cal-head-cell">${d}</div>`);
+  html+='</div>';
+  appData.users.forEach(u=>{
+    html+=`<div class="cal-grid"><div class="cal-name">${u.name}</div>`;
+    for(let i=0;i<7;i++){
+      const entries=appData.planEntries.filter(p=>p.userId===u.id);
+      html+=`<div class="cal-cell">`;
+      if(entries.length>0){
+        entries.slice(0,2).forEach(e=>{
+          html+=`<div class="chip chip-task" title="${e.desc}">${e.desc.substring(0,15)}...</div>`;
+        });
+      }
+      html+=`</div>`;
+    }
+    html+='</div>';
+  });
+  document.getElementById('calendarView').innerHTML=html;
+}
+
+function renderPlanner(){
+  if(!appData.planEntries.length){
+    document.getElementById('plannerView').innerHTML='No tasks yet. Click "Add Task" to begin.';
+    return;
+  }
+  let html='<div style="max-height:400px;overflow-y:auto;">';
+  appData.planEntries.forEach(p=>{
+    const user=appData.users.find(u=>u.id===p.userId);
+    html+=`<div class="log-card"><div style="font-weight:600;margin-bottom:4px;">${user?.name||'?'} - ${p.date}</div><div style="font-size:13px;color:#4a5568;">${p.desc}</div></div>`;
+  });
+  html+='</div>';
+  document.getElementById('plannerView').innerHTML=html;
+}
+
+function renderTimeLog(){
+  if(!appData.timeLogs.length){
+    document.getElementById('timeLogList').innerHTML='<div class="card">No time logs yet.</div>';
+    return;
+  }
+  let html='';
+  appData.timeLogs.slice().reverse().forEach(l=>{
+    html+=`<div class="log-card"><span class="log-time">⏱ ${l.hours}h</span> <span style="margin-left:8px;font-size:13px;">${l.desc}</span> <span style="font-size:11px;color:#718096;margin-left:8px;">${l.date}</span></div>`;
+  });
+  document.getElementById('timeLogList').innerHTML=html;
+}
+
+function renderProjects(){
+  if(!appData.projectsData.length){
+    document.getElementById('projectsList').innerHTML='<div class="card">No projects yet. Admins can add projects.</div>';
+    return;
+  }
+  let html='';
+  appData.projectsData.forEach(p=>{
+    html+=`<div class="card"><div style="font-weight:700;font-size:16px;margin-bottom:8px;">${p.name}</div><div style="font-size:13px;color:#718096;">${p.client}</div></div>`;
+  });
+  document.getElementById('projectsList').innerHTML=html;
+}
+
+function renderLeaves(){
+  document.getElementById('medLeave').textContent=currentUser.medLeft;
+  document.getElementById('casLeave').textContent=currentUser.casLeft;
+  const myLeaves=appData.leaveRequests.filter(l=>l.userId===currentUser.id);
+  if(!myLeaves.length){
+    document.getElementById('leaveList').innerHTML='<div class="card">No leave applications yet.</div>';
+    return;
+  }
+  let html='';
+  myLeaves.forEach(l=>{
+    html+=`<div class="card"><div style="font-weight:600;margin-bottom:4px;">${l.type} - ${l.status}</div><div style="font-size:13px;color:#718096;">${l.startDate} to ${l.endDate}</div><div style="font-size:13px;margin-top:4px;">${l.reason}</div></div>`;
+  });
+  document.getElementById('leaveList').innerHTML=html;
+}
+
+function renderManage(){
+  document.getElementById('usersList').innerHTML=appData.users.map((u,i)=>`
+    <div class="list-item"><div><div style="font-weight:600;">${u.name}${u.isAdmin?' <span class="admin-badge">ADMIN</span>':''}</div><div style="font-size:11px;color:#718096;">${u.email}</div></div><button class="btn btn-danger btn-sm" onclick="delUser(${i})" ${u.id===currentUser.id?'disabled':''}>Delete</button></div>
+  `).join('');
+  document.getElementById('clientsList').innerHTML=appData.clients.map((c,i)=>`
+    <div class="list-item"><span>${c}</span><button class="btn btn-danger btn-sm" onclick="delClient(${i})">×</button></div>
+  `).join('');
+  document.getElementById('typologyList').innerHTML=appData.typologies.map((t,i)=>`
+    <div class="list-item"><span>${t}</span><button class="btn btn-danger btn-sm" onclick="delTypology(${i})">×</button></div>
+  `).join('');
+}
+
+document.getElementById('addUserBtn').addEventListener('click',()=>{
+  const n=document.getElementById('newUserName').value.trim();
+  const e=document.getElementById('newUserEmail').value.trim().toLowerCase();
+  const p=document.getElementById('newUserPass').value.trim();
+  if(!n||!e||!p){alert('Fill all fields');return;}
+  if(appData.users.find(u=>u.email===e)){alert('Email exists');return;}
+  appData.users.push({id:'u'+Date.now(),name:n,email:e,password:p,isAdmin:false,medLeft:12,casLeft:5});
+  document.getElementById('newUserName').value='';
+  document.getElementById('newUserEmail').value='';
+  document.getElementById('newUserPass').value='';
+  autoSave();renderManage();
+});
+
+document.getElementById('addClientBtn').addEventListener('click',()=>{
+  const v=document.getElementById('newClient').value.trim();
+  if(!v||appData.clients.includes(v)){alert(v?'Exists':'Enter name');return;}
+  appData.clients.push(v);appData.clients.sort();
+  document.getElementById('newClient').value='';
+  autoSave();renderManage();
+});
+
+document.getElementById('addTypologyBtn').addEventListener('click',()=>{
+  const v=document.getElementById('newTypology').value.trim();
+  if(!v||appData.typologies.includes(v)){alert(v?'Exists':'Enter name');return;}
+  appData.typologies.push(v);
+  document.getElementById('newTypology').value='';
+  autoSave();renderManage();
+});
+
+window.delUser=i=>{if(confirm('Delete?')){appData.users.splice(i,1);autoSave();renderManage();}};
+window.delClient=i=>{if(confirm('Delete?')){appData.clients.splice(i,1);autoSave();renderManage();}};
+window.delTypology=i=>{if(confirm('Delete?')){appData.typologies.splice(i,1);autoSave();renderManage();}};
+
+document.getElementById('addPlanBtn').addEventListener('click',()=>{
+  document.getElementById('planUser').innerHTML=appData.users.map(u=>`<option value="${u.id}">${u.name}</option>`).join('');
+  document.getElementById('planDate').value=new Date().toISOString().split('T')[0];
+  document.getElementById('planDesc').value='';
+  document.getElementById('planModal').classList.add('open');
+});
+
+document.getElementById('savePlanBtn').addEventListener('click',()=>{
+  const userId=document.getElementById('planUser').value;
+  const date=document.getElementById('planDate').value;
+  const desc=document.getElementById('planDesc').value.trim();
+  if(!userId||!date||!desc){alert('Fill all fields');return;}
+  appData.planEntries.push({id:'p'+Date.now(),userId,date,desc});
+  autoSave();
+  document.getElementById('planModal').classList.remove('open');
+  renderPlanner();renderDashboard();
+});
+
+document.getElementById('addTimeBtn').addEventListener('click',()=>{
+  document.getElementById('timeDate').value=new Date().toISOString().split('T')[0];
+  document.getElementById('timeHours').value=1;
+  document.getElementById('timeDesc').value='';
+  document.getElementById('timeType').value='productive';
+  document.getElementById('timeModal').classList.add('open');
+});
+
+document.getElementById('saveTimeBtn').addEventListener('click',()=>{
+  const date=document.getElementById('timeDate').value;
+  const hours=parseFloat(document.getElementById('timeHours').value)||0;
+  const desc=document.getElementById('timeDesc').value.trim();
+  const type=document.getElementById('timeType').value;
+  if(!date||hours<=0||!desc){alert('Fill all fields');return;}
+  appData.timeLogs.push({id:'t'+Date.now(),userId:currentUser.id,date,hours,desc,type});
+  autoSave();
+  document.getElementById('timeModal').classList.remove('open');
+  renderTimeLog();renderDashboard();
+});
+
+document.getElementById('applyLeaveBtn').addEventListener('click',()=>{
+  document.getElementById('leaveType').value='medical';
+  document.getElementById('leaveStart').value=new Date().toISOString().split('T')[0];
+  document.getElementById('leaveEnd').value=new Date().toISOString().split('T')[0];
+  document.getElementById('leaveReason').value='';
+  document.getElementById('leaveModal').classList.add('open');
+});
+
+document.getElementById('saveLeaveBtn').addEventListener('click',()=>{
+  const type=document.getElementById('leaveType').value;
+  const start=document.getElementById('leaveStart').value;
+  const end=document.getElementById('leaveEnd').value;
+  const reason=document.getElementById('leaveReason').value.trim();
+  if(!type||!start||!end||!reason){alert('Fill all fields');return;}
+  appData.leaveRequests.push({id:'l'+Date.now(),userId:currentUser.id,type,startDate:start,endDate:end,reason,status:'pending'});
+  autoSave();
+  document.getElementById('leaveModal').classList.remove('open');
+  renderLeaves();
+});
+
+document.getElementById('generateReportBtn').addEventListener('click',()=>{
+  const total=appData.timeLogs.reduce((s,l)=>s+l.hours,0);
+  const prod=appData.timeLogs.filter(l=>l.type==='productive').reduce((s,l)=>s+l.hours,0);
+  document.getElementById('reportOutput').innerHTML=`
+    <div class="card"><h3 style="margin-bottom:12px;">Time Report Summary</h3>
+    <p>Total Hours: <strong>${total.toFixed(1)}h</strong></p>
+    <p>Productive: <strong>${prod.toFixed(1)}h</strong> (${total>0?((prod/total)*100).toFixed(0):0}%)</p>
+    <p>Non-Productive: <strong>${(total-prod).toFixed(1)}h</strong></p>
+    <p>Total Entries: <strong>${appData.timeLogs.length}</strong></p></div>
+  `;
+});
+
+initApp();
+</script>
+</body>
+</html>
