@@ -716,7 +716,9 @@ async function saveData() {
       projects: projectsData.length,
       clients: clients.length,
       users: users.length,
-      timeLogs: timeLogs.length
+      planEntries: planEntries.length,
+      timeLogs: timeLogs.length,
+      leaveRequests: leaveRequests.length
     });
     
     await db.collection("companyData").doc("squareDB").set(dataToSave);
@@ -1093,6 +1095,10 @@ document.getElementById('savePlanBtn').addEventListener('click',()=>{
     desc:document.getElementById('planDesc').value.trim()||proj.name,estHours:0,type:document.getElementById('planType').value,done:false};
   if(editPlanId){ const i=planEntries.findIndex(p=>p.id===editPlanId); planEntries[i]=entry; }
   else planEntries.push(entry);
+  
+  console.log('📅 Plan saved:', entry);
+  console.log('📊 Total plan entries:', planEntries.length);
+  
   autoSave(); closeModal('planModal'); renderPlanner(); renderDashboard();
 });
 document.getElementById('deletePlanBtn').addEventListener('click',()=>{
