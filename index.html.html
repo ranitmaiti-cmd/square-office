@@ -702,8 +702,11 @@ function showSaveIndicator() {
 // ═══════════════════════════════════════════════════════
 async function saveData() {
   if (!dataLoaded) {
+    console.error('⏸️ SAVE BLOCKED - Data not loaded yet!');
     return;
   }
+  
+  console.log('💾 saveData() called, dataLoaded:', dataLoaded);
   
   try {
     const dataToSave = {
@@ -720,6 +723,8 @@ async function saveData() {
       timeLogs: timeLogs.length,
       leaveRequests: leaveRequests.length
     });
+    
+    console.log('📋 Plan Entries to Save:', planEntries);
     
     await db.collection("companyData").doc("squareDB").set(dataToSave);
     console.log('✅ Save complete');
@@ -748,8 +753,12 @@ async function loadData() {
         projects: projectsData.length,
         clients: clients.length,
         users: users.length,
-        timeLogs: timeLogs.length
+        planEntries: planEntries.length,
+        timeLogs: timeLogs.length,
+        leaveRequests: leaveRequests.length
       });
+      
+      console.log('📋 Plan Entries Detail:', planEntries);
     } else {
       console.log('⚠️ No data in Firebase, creating initial');
       dataLoaded = true;
@@ -780,6 +789,7 @@ loadData();
 
 // Redirect autoSave to use Firebase
 window.autoSave = function() {
+  console.log('🔄 autoSave() triggered');
   saveData();
 };
 
