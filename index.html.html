@@ -226,9 +226,41 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <input type="password" class="form-control" id="loginPassword" placeholder="Enter password" autocomplete="off">
     </div>
     <button class="btn btn-primary btn-block" id="loginBtn">Login</button>
-    <p style="text-align:center;margin-top:12px;font-size:12px;color:#a0aec0;">
-      <strong>Username:</strong> admin | <strong>Password:</strong> admin123
+    <p style="text-align:center;margin-top:12px;font-size:12px;">
+      <a href="#" id="forgotPasswordLink" style="color:#2b6cb0;text-decoration:none;">Forgot Password?</a>
     </p>
+  </div>
+</div>
+
+<!-- Forgot Password Modal -->
+<div class="modal-backdrop" id="forgotPasswordModal">
+  <div class="modal-box" style="max-width:400px;">
+    <div class="modal-head"><h3>🔑 Reset Password</h3><button class="close-btn" onclick="closeModal('forgotPasswordModal')">×</button></div>
+    <div style="background:#fff5f5;border:1px solid #feb2b2;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#9b2c2c;">
+      ⚠️ <strong>Admin only:</strong> Only administrators can reset passwords. Contact your admin if you've forgotten yours.
+    </div>
+    <div class="form-group">
+      <label class="form-label">Admin Username</label>
+      <input type="text" class="form-control" id="fpAdminUser" placeholder="Enter admin username">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Admin Password</label>
+      <input type="password" class="form-control" id="fpAdminPass" placeholder="Enter admin password">
+    </div>
+    <div class="form-group">
+      <label class="form-label">User to Reset</label>
+      <select class="form-control" id="fpUserSelect">
+        <option value="">Select user...</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">New Password</label>
+      <input type="text" class="form-control" id="fpNewPass" placeholder="Enter new password">
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" id="resetPasswordBtn">Reset Password</button>
+      <button class="btn btn-ghost" onclick="closeModal('forgotPasswordModal')">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -253,6 +285,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="nav-section">Admin</div>
       <div class="nav-item" data-page="timereport"><span class="nav-icon">📈</span>Time Report</div>
       <div class="nav-item" data-page="leaves"><span class="nav-icon">🌴</span>Leave</div>
+      <div class="nav-item" data-page="teamleave"><span class="nav-icon">📆</span>Team Leave</div>
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✅</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
       <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">⚙️</span>Manage</div>
       <div style="border-top:1px solid #e2e8f0;margin:10px 0;"></div>
@@ -383,6 +416,29 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div id="myLeaveList"></div>
       </div>
 
+      <!-- TEAM LEAVE CALENDAR -->
+      <div class="page" id="page-teamleave">
+        <div class="section-header">
+          <h2 class="page-title" style="margin:0;">📆 Team Leave Calendar</h2>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-ghost btn-sm" id="teamLeavePrev">← Prev</button>
+            <span id="teamLeaveMonth" style="font-weight:700;font-size:14px;"></span>
+            <button class="btn btn-ghost btn-sm" id="teamLeaveNext">Next →</button>
+          </div>
+        </div>
+        <div style="background:#ebf4ff;border:2px solid #2b6cb0;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;">
+          <div style="font-weight:700;margin-bottom:4px;">📅 Who's Out?</div>
+          <div id="teamLeaveSummary" style="font-size:12px;color:#2d3748;"></div>
+        </div>
+        <div class="cal-wrap">
+          <div id="teamLeaveCalendar"></div>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#fed7d7;border:1px solid #e53e3e;display:inline-block;border-radius:3px;"></span> On Leave</span>
+          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#fef3c7;border:1px solid #f59e0b;display:inline-block;border-radius:3px;"></span> Half Day</span>
+        </div>
+      </div>
+
       <!-- APPROVALS -->
       <div class="page" id="page-approvals">
         <h2 class="page-title">✅ Pending Approvals</h2>
@@ -419,6 +475,20 @@ textarea.form-control{min-height:70px;resize:vertical;}
             <button class="btn btn-primary btn-sm" id="addTypologyBtn">Add</button>
           </div>
           <div id="typologyList"></div>
+        </div>
+        
+        <!-- DATA BACKUP & SECURITY -->
+        <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
+          <div class="card-title">💾 Data Backup & Security</div>
+          <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
+            📌 <strong>Important:</strong> Regularly backup your data to prevent loss. Export creates a downloadable JSON file with all your data.
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+            <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
+            <button class="btn btn-warning" id="importDataBtn">⬆️ Import Data (Restore)</button>
+            <input type="file" id="importFileInput" accept=".json" style="display:none;">
+          </div>
+          <div id="lastSavedInfo" style="font-size:11px;color:#718096;"></div>
         </div>
       </div>
 
@@ -575,9 +645,16 @@ textarea.form-control{min-height:70px;resize:vertical;}
   <div class="modal-box">
     <div class="modal-head"><h3>Apply for Leave</h3><button class="close-btn" onclick="closeModal('leaveModal')">×</button></div>
     <div class="form-group"><label class="form-label">Leave Type *</label><select class="form-control" id="lType"><option value="">Select...</option><option value="medical">Medical Leave</option><option value="casual">Casual Leave</option></select></div>
+    <div class="form-group">
+      <label class="form-label">Duration *</label>
+      <div class="radio-group">
+        <label><input type="radio" name="lDuration" value="full" id="lFull" checked> Full Day</label>
+        <label><input type="radio" name="lDuration" value="half" id="lHalf"> Half Day</label>
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Start *</label><input type="date" class="form-control" id="lStart"></div>
-      <div class="form-group"><label class="form-label">End *</label><input type="date" class="form-control" id="lEnd"></div>
+      <div class="form-group" id="lEndGroup"><label class="form-label">End *</label><input type="date" class="form-control" id="lEnd"></div>
     </div>
     <div class="info-box" id="lDayInfo">Working days: —</div>
     <div class="form-group"><label class="form-label">Reason *</label><textarea class="form-control" id="lReason"></textarea></div>
@@ -703,6 +780,7 @@ function showSaveIndicator() {
 async function saveData() {
   if (!dataLoaded) {
     console.error('⏸️ SAVE BLOCKED - Data not loaded yet!');
+    alert('⚠️ Cannot save: Data is still loading. Please wait a moment and try again.');
     return;
   }
   
@@ -731,6 +809,7 @@ async function saveData() {
     showSaveIndicator();
   } catch(e) {
     console.error('❌ Save error:', e.message);
+    alert(`❌ Failed to save data to cloud!\n\nError: ${e.message}\n\nYour changes may be lost. Please try again or contact support.`);
   }
 }
 
@@ -906,9 +985,57 @@ function doLogin(){
     initTimeReport(); renderDashboard(); updateApprovalBadge();
   } else {
     err.style.display='block';
-    err.textContent='Invalid username or password. Try: admin / admin123';
+    err.textContent='Invalid username or password.';
   }
 }
+
+// Forgot Password
+document.getElementById('forgotPasswordLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('fpUserSelect').innerHTML = '<option value="">Select user...</option>' + 
+    users.filter(u => !u.isAdmin).map(u => `<option value="${u.id}">${u.name} (${u.username || u.email})</option>`).join('');
+  openModal('forgotPasswordModal');
+});
+
+document.getElementById('resetPasswordBtn').addEventListener('click', () => {
+  const adminUser = document.getElementById('fpAdminUser').value.trim().toLowerCase();
+  const adminPass = document.getElementById('fpAdminPass').value.trim();
+  const userId = document.getElementById('fpUserSelect').value;
+  const newPass = document.getElementById('fpNewPass').value.trim();
+  
+  if (!adminUser || !adminPass || !userId || !newPass) {
+    alert('Fill all fields');
+    return;
+  }
+  
+  // Verify admin credentials
+  const admin = users.find(u => {
+    const userUsername = (u.username || u.email?.split('@')[0] || '').toLowerCase();
+    return userUsername === adminUser && u.password === adminPass && u.isAdmin;
+  });
+  
+  if (!admin) {
+    alert('❌ Invalid admin credentials');
+    return;
+  }
+  
+  // Reset password
+  const user = users.find(u => u.id === userId);
+  if (!user) {
+    alert('User not found');
+    return;
+  }
+  
+  user.password = newPass;
+  autoSave();
+  closeModal('forgotPasswordModal');
+  alert(`✅ Password reset successful for ${user.name}\n\nNew password: ${newPass}`);
+  
+  // Clear form
+  document.getElementById('fpAdminUser').value = '';
+  document.getElementById('fpAdminPass').value = '';
+  document.getElementById('fpNewPass').value = '';
+});
 
 document.getElementById('logoutBtn').addEventListener('click',()=>{
   currentUser=null;
@@ -935,6 +1062,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='projects')   renderProjectsBudget();
     if(page==='timereport') initTimeReport();
     if(page==='leaves')     renderLeaves();
+    if(page==='teamleave')  renderTeamLeave();
     if(page==='approvals')  renderApprovals();
     if(page==='manage')     renderManage();
   });
@@ -1477,19 +1605,44 @@ function exportPDF(){
 document.getElementById('applyLeaveBtn').addEventListener('click',()=>{
   document.getElementById('lType').value=''; document.getElementById('lStart').value=fmt(new Date());
   document.getElementById('lEnd').value=fmt(new Date()); document.getElementById('lReason').value='';
+  document.getElementById('lFull').checked=true; document.getElementById('lEndGroup').style.display='block';
   document.getElementById('lDayInfo').textContent='Working days: —'; openModal('leaveModal');
 });
-['lStart','lEnd'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{
+
+// Half-day toggle
+document.getElementById('lHalf').addEventListener('change',()=>{
+  document.getElementById('lEndGroup').style.display='none';
+  document.getElementById('lEnd').value=document.getElementById('lStart').value;
+  document.getElementById('lDayInfo').textContent='📅 0.5 days (Half Day)';
+});
+document.getElementById('lFull').addEventListener('change',()=>{
+  document.getElementById('lEndGroup').style.display='block';
   const s=document.getElementById('lStart').value,e=document.getElementById('lEnd').value;
   if(s&&e&&e>=s){ const d=workDays(s,e); document.getElementById('lDayInfo').textContent=`📅 ${d} working day${d!==1?'s':''} (Sundays & 2nd/4th Saturdays excluded)`; }
+});
+
+['lStart','lEnd'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{
+  const isHalf=document.getElementById('lHalf').checked;
+  if(isHalf){
+    document.getElementById('lEnd').value=document.getElementById('lStart').value;
+    document.getElementById('lDayInfo').textContent='📅 0.5 days (Half Day)';
+  } else {
+    const s=document.getElementById('lStart').value,e=document.getElementById('lEnd').value;
+    if(s&&e&&e>=s){ const d=workDays(s,e); document.getElementById('lDayInfo').textContent=`📅 ${d} working day${d!==1?'s':''} (Sundays & 2nd/4th Saturdays excluded)`; }
+  }
 }));
+
 document.getElementById('submitLeaveBtn').addEventListener('click',()=>{
   const type=document.getElementById('lType').value,start=document.getElementById('lStart').value,end=document.getElementById('lEnd').value,reason=document.getElementById('lReason').value.trim();
-  if(!type||!start||!end||!reason){ alert('Fill all fields'); return; }
-  const days=workDays(start,end); const user=users.find(u=>u.id===currentUser.id);
+  const isHalf=document.getElementById('lHalf').checked;
+  if(!type||!start||!reason){ alert('Fill all required fields'); return; }
+  
+  let days = isHalf ? 0.5 : workDays(start, end);
+  const user=users.find(u=>u.id===currentUser.id);
   if(type==='medical'&&days>user.medLeft){ alert(`Only ${user.medLeft} medical days left`); return; }
   if(type==='casual'&&days>user.casLeft){ alert(`Only ${user.casLeft} casual days left`); return; }
-  leaveRequests.push({id:genId(),userId:currentUser.id,userName:currentUser.name,type,startDate:start,endDate:end,days,reason,status:'pending',date:fmt(new Date())});
+  
+  leaveRequests.push({id:genId(),userId:currentUser.id,userName:currentUser.name,type,startDate:start,endDate:end,days,isHalf,reason,status:'pending',date:fmt(new Date())});
   autoSave(); closeModal('leaveModal'); updateApprovalBadge(); renderLeaves();
 });
 function renderLeaves(){
@@ -1499,12 +1652,157 @@ function renderLeaves(){
   const el=document.getElementById('myLeaveList');
   const my=leaveRequests.filter(l=>l.userId===currentUser.id).slice().reverse();
   if(!my.length){ el.innerHTML='<p style="color:#718096;padding:16px;">No applications yet.</p>'; return; }
-  el.innerHTML=my.map(lv=>`<div class="approval-card"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">${lv.type==='medical'?'🏥 Medical':'🌴 Casual'} Leave</div><div style="font-size:11px;color:#718096;">${fmtD(lv.startDate)} → ${fmtD(lv.endDate)} · ${lv.days} day${lv.days!==1?'s':''}</div></div><span class="badge badge-${lv.status}">${lv.status}</span></div><div style="font-size:12px;color:#4a5568;">${lv.reason}</div></div>`).join('');
+  el.innerHTML=my.map(lv=>{
+    const dateRange = lv.isHalf ? fmtD(lv.startDate) + ' (Half Day)' : `${fmtD(lv.startDate)} → ${fmtD(lv.endDate)}`;
+    const cancelBtn = lv.status==='pending' ? `<button class="btn btn-danger btn-sm" onclick="cancelLeave('${lv.id}')" style="margin-left:8px;">Cancel</button>` : '';
+    return `<div class="approval-card"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">${lv.type==='medical'?'🏥 Medical':'🌴 Casual'} Leave${lv.isHalf?' 🕐':''}</div><div style="font-size:11px;color:#718096;">${dateRange} · ${lv.days} day${lv.days!==1?'s':''}</div></div><span class="badge badge-${lv.status}">${lv.status}${cancelBtn}</span></div><div style="font-size:12px;color:#4a5568;">${lv.reason}</div></div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════
+// TEAM LEAVE CALENDAR
+// ═══════════════════════════════════════════════════════
+let teamLeaveViewDate = new Date();
+
+document.getElementById('teamLeavePrev').addEventListener('click', () => {
+  teamLeaveViewDate = new Date(teamLeaveViewDate.getFullYear(), teamLeaveViewDate.getMonth() - 1, 1);
+  renderTeamLeave();
+});
+
+document.getElementById('teamLeaveNext').addEventListener('click', () => {
+  teamLeaveViewDate = new Date(teamLeaveViewDate.getFullYear(), teamLeaveViewDate.getMonth() + 1, 1);
+  renderTeamLeave();
+});
+
+function renderTeamLeave() {
+  const year = teamLeaveViewDate.getFullYear();
+  const month = teamLeaveViewDate.getMonth();
+  const monthName = MONTHS_L[month];
+  
+  document.getElementById('teamLeaveMonth').textContent = `${monthName} ${year}`;
+  
+  // Get all approved leaves for this month
+  const approvedLeaves = leaveRequests.filter(l => {
+    if (l.status !== 'approved') return false;
+    const start = new Date(l.startDate);
+    const end = new Date(l.endDate);
+    const monthStart = new Date(year, month, 1);
+    const monthEnd = new Date(year, month + 1, 0);
+    return (start <= monthEnd && end >= monthStart);
+  });
+  
+  // Build calendar
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startDayOfWeek = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1; // Mon=0
+  const daysInMonth = lastDay.getDate();
+  
+  let calHTML = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">';
+  
+  // Header
+  ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(day => {
+    calHTML += `<div style="text-align:center;font-size:11px;font-weight:700;padding:8px;background:#f7fafc;border-radius:6px;color:#4a5568;">${day}</div>`;
+  });
+  
+  // Empty cells before month starts
+  for (let i = 0; i < startDayOfWeek; i++) {
+    calHTML += '<div></div>';
+  }
+  
+  // Days of month
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(year, month, day);
+    const dateStr = fmt(date);
+    const isToday = dateStr === fmt(new Date());
+    const isWeekendDay = date.getDay() === 0 || date.getDay() === 6;
+    
+    // Find who's on leave this day
+    const onLeaveToday = approvedLeaves.filter(l => {
+      return dateStr >= l.startDate && dateStr <= l.endDate;
+    });
+    
+    let bgColor = '#f7fafc';
+    let borderColor = '#e2e8f0';
+    if (isToday) {
+      bgColor = '#ebf4ff';
+      borderColor = '#2b6cb0';
+    } else if (onLeaveToday.length > 0) {
+      const hasHalfDay = onLeaveToday.some(l => l.isHalf);
+      bgColor = hasHalfDay ? '#fef3c7' : '#fed7d7';
+      borderColor = hasHalfDay ? '#f59e0b' : '#e53e3e';
+    }
+    
+    let leaveInfo = '';
+    if (onLeaveToday.length > 0) {
+      leaveInfo = onLeaveToday.map(l => {
+        const user = users.find(u => u.id === l.userId);
+        const halfIcon = l.isHalf ? ' 🕐' : '';
+        return `<div style="font-size:10px;color:#1a202c;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${user?.name} - ${l.type}${l.isHalf ? ' (Half Day)' : ''}">${user?.name}${halfIcon}</div>`;
+      }).join('');
+    }
+    
+    calHTML += `<div style="background:${bgColor};border:2px solid ${borderColor};border-radius:8px;padding:8px;min-height:80px;${isWeekendDay ? 'opacity:0.6;' : ''}">
+      <div style="font-weight:700;font-size:14px;color:#1a202c;margin-bottom:4px;">${day}</div>
+      ${leaveInfo}
+    </div>`;
+  }
+  
+  calHTML += '</div>';
+  document.getElementById('teamLeaveCalendar').innerHTML = calHTML;
+  
+  // Summary - who's out today and this week
+  const today = fmt(new Date());
+  const outToday = approvedLeaves.filter(l => today >= l.startDate && today <= l.endDate);
+  
+  let summary = '';
+  if (outToday.length === 0) {
+    summary = '✅ Everyone is in the office today!';
+  } else {
+    const names = outToday.map(l => {
+      const user = users.find(u => u.id === l.userId);
+      return `${user?.name}${l.isHalf ? ' (Half Day)' : ''}`;
+    }).join(', ');
+    summary = `🏖️ Out today: ${names}`;
+  }
+  
+  // Upcoming leaves this month
+  const upcoming = approvedLeaves.filter(l => l.startDate > today).slice(0, 3);
+  if (upcoming.length > 0) {
+    summary += '<br><br><strong>Upcoming:</strong><br>';
+    summary += upcoming.map(l => {
+      const user = users.find(u => u.id === l.userId);
+      const dateRange = l.isHalf ? fmtD(l.startDate) : `${fmtD(l.startDate)} - ${fmtD(l.endDate)}`;
+      return `• ${user?.name}: ${dateRange}${l.isHalf ? ' (Half Day)' : ''}`;
+    }).join('<br>');
+  }
+  
+  document.getElementById('teamLeaveSummary').innerHTML = summary;
 }
 
 // ═══════════════════════════════════════════════════════
 // APPROVALS
 // ═══════════════════════════════════════════════════════
+// Leave Cancellation
+window.cancelLeave = function(leaveId) {
+  const leave = leaveRequests.find(l => l.id === leaveId);
+  if(!leave) return;
+  
+  if(leave.status !== 'pending') {
+    alert('⚠️ Only pending leave requests can be cancelled');
+    return;
+  }
+  
+  if(!confirm(`Cancel this leave request?\n\n${leave.type} leave\n${fmtD(leave.startDate)} → ${fmtD(leave.endDate)}\n${leave.days} day(s)`)) {
+    return;
+  }
+  
+  leaveRequests = leaveRequests.filter(l => l.id !== leaveId);
+  autoSave();
+  renderLeaves();
+  updateApprovalBadge();
+  alert('✅ Leave request cancelled');
+};
+
 function renderApprovals(){
   const el=document.getElementById('approvalsList');
   if(!currentUser.isAdmin){ el.innerHTML='<p style="color:#718096;padding:16px;">Only admins can view approvals.</p>'; return; }
@@ -1519,12 +1817,14 @@ function renderApprovals(){
   el.innerHTML='';
   pl.forEach(lv=>{
     const c=document.createElement('div'); c.className='approval-card';
-    c.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">🌴 Leave · ${lv.userName}</div><div style="font-size:11px;color:#718096;">${lv.type} · ${fmtD(lv.startDate)} → ${fmtD(lv.endDate)} · ${lv.days}d</div></div><span class="badge badge-pending">Pending</span></div><div style="font-size:12px;margin-bottom:10px;">${lv.reason}</div><div style="display:flex;gap:8px;"><button class="btn btn-success btn-sm">✓ Approve</button><button class="btn btn-danger btn-sm">✗ Reject</button></div>`;
+    const dateRange = lv.isHalf ? `${fmtD(lv.startDate)} (Half Day)` : `${fmtD(lv.startDate)} → ${fmtD(lv.endDate)}`;
+    const halfIcon = lv.isHalf ? ' 🕐' : '';
+    c.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">🌴 Leave · ${lv.userName}${halfIcon}</div><div style="font-size:11px;color:#718096;">${lv.type} · ${dateRange} · ${lv.days}d</div></div><span class="badge badge-pending">Pending</span></div><div style="font-size:12px;margin-bottom:10px;">${lv.reason}</div><div style="display:flex;gap:8px;"><button class="btn btn-success btn-sm">✓ Approve</button><button class="btn btn-danger btn-sm">✗ Reject</button></div>`;
     c.querySelector('.btn-success').onclick=()=>{
       lv.status='approved'; const u=users.find(u=>u.id===lv.userId);
       if(lv.type==='medical') u.medLeft=Math.max(0,u.medLeft-lv.days); else u.casLeft=Math.max(0,u.casLeft-lv.days);
       autoSave();
-      renderApprovals(); updateApprovalBadge();
+      renderApprovals(); updateApprovalBadge(); renderDashboard();
     };
     c.querySelector('.btn-danger').onclick=()=>{
       lv.status='rejected';
@@ -1585,6 +1885,101 @@ document.getElementById('addTypologyBtn').addEventListener('click',()=>{
   typologies.push(v); document.getElementById('newTypology').value='';
   autoSave(); renderManage();
 });
+
+// ═══════════════════════════════════════════════════════
+// DATA BACKUP & RESTORE
+// ═══════════════════════════════════════════════════════
+document.getElementById('exportDataBtn').addEventListener('click', () => {
+  const backup = {
+    exportDate: new Date().toISOString(),
+    version: 'V7',
+    data: {
+      users,
+      clients,
+      typologies,
+      projectsData,
+      planEntries,
+      timeLogs,
+      leaveRequests,
+      changeRequests,
+      holidays
+    }
+  };
+  
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `SQUARE-Backup-${new Date().toISOString().split('T')[0]}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  
+  alert('✅ Backup downloaded successfully!\n\nKeep this file safe - it contains all your data.');
+});
+
+document.getElementById('importDataBtn').addEventListener('click', () => {
+  document.getElementById('importFileInput').click();
+});
+
+document.getElementById('importFileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  if (!confirm('⚠️ WARNING: This will REPLACE all current data!\n\nMake sure you have a backup first. Continue?')) {
+    e.target.value = '';
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = async (event) => {
+    try {
+      const backup = JSON.parse(event.target.result);
+      
+      if (!backup.data) {
+        alert('❌ Invalid backup file format');
+        return;
+      }
+      
+      // Restore data
+      users = backup.data.users || users;
+      clients = backup.data.clients || clients;
+      typologies = backup.data.typologies || typologies;
+      projectsData = backup.data.projectsData || projectsData;
+      planEntries = backup.data.planEntries || [];
+      timeLogs = backup.data.timeLogs || [];
+      leaveRequests = backup.data.leaveRequests || [];
+      changeRequests = backup.data.changeRequests || [];
+      holidays = backup.data.holidays || [];
+      
+      await saveData();
+      
+      alert(`✅ Data restored successfully!\n\nBackup from: ${new Date(backup.exportDate).toLocaleString()}\n\nPlease refresh the page.`);
+      
+      location.reload();
+    } catch (err) {
+      alert('❌ Error reading backup file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// Update "Last Saved" indicator
+function updateLastSaved() {
+  const el = document.getElementById('lastSavedInfo');
+  if (el) {
+    el.textContent = `💾 Last saved: ${new Date().toLocaleTimeString()}`;
+  }
+}
+
+// Call this after every save
+const originalAutoSave = window.autoSave;
+window.autoSave = function() {
+  originalAutoSave();
+  updateLastSaved();
+};
 
 // ═══════════════════════════════════════════════════════
 // FLOATING TIMER
