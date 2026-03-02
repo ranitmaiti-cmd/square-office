@@ -1698,51 +1698,6 @@ function resetTimer() {
 }
 
 // ═══════════════════════════════════════════════════════
-// CLOUD SYNC & INITIALIZATION
-// ═══════════════════════════════════════════════════════
-
-// ... existing timer functions ...
-
-async function saveData() {
-  console.log("Saving to Cloud...");
-  try {
-    const dataToSave = {
-      users, clients, typologies, projectsData, planEntries, 
-      timeLogs, leaveRequests, changeRequests, holidays
-    };
-    await db.collection("companyData").doc("squareDB").set(dataToSave);
-    console.log('✅ Cloud Sync Complete');
-  } catch(e) {
-    console.error('❌ Cloud Save Error:', e);
-  }
-}
-
-async function loadData() {
-  console.log("Fetching from Cloud...");
-  try {
-    const docSnap = await db.collection("companyData").doc("squareDB").get();
-    if (docSnap.exists) {
-      const data = docSnap.data();
-      users = data.users || users;
-      clients = data.clients || clients;
-      // ... (rest of loading logic)
-      console.log('✅ Data Loaded');
-    } else {
-      console.log("Cloud is empty. Creating initial Admin...");
-      users = [{id:'u1', name:'Admin User', email:'admin@square.com', password:'admin123', isAdmin:true, medLeft:12, casLeft:5}];
-      await saveData();
-    }
-    if (typeof renderManage === 'function') renderManage();
-  } catch(e) {
-    console.error('❌ Load error:', e.message);
-    dataLoaded = true; // Allow saves even if load fails
-  }
-}
-</script>
-</body>
-</html>
-
-// ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
 // INITIALIZE APP
 // ═══════════════════════════════════════════════════════
@@ -1771,3 +1726,6 @@ loadData().then(() => {
   // Show login screen
   document.getElementById('loginScreen').style.display = 'flex';
 });
+</script>
+</body>
+</html>
