@@ -703,6 +703,7 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 let dataLoaded = false; // Prevent saves before load completes
+let dataLoadedAt = null; // Track when data was loaded to detect stale tabs
 
 // ═══════════════════════════════════════════════════════
 // CONSTANTS & DATA
@@ -783,33 +784,37 @@ async function saveData() {
     alert('⚠️ Cannot save: Data is still loading. Please wait a moment and try again.');
     return;
   }
-  
   console.log('💾 saveData() called, dataLoaded:', dataLoaded);
-  
   try {
+    // STALE-TAB PROTECTION: Check Firebase timestamp before saving
+    const currentDoc = await db.collection("companyData").doc("squareDB").get();
+    if (currentDoc.exists && dataLoadedAt) {
+      const serverTimestamp = currentDoc.data().timestamp;
+      if (serverTimestamp) {
+        const serverTime = new Date(serverTimestamp).getTime();
+        const loadedTime = dataLoadedAt.getTime();
+        if (serverTime > loadedTime + 2000) {
+          console.warn('SAVE BLOCKED: Server data is newer. Reloading...');
+          alert('⚠️ Data conflict detected!\n\nAnother browser tab saved more recent data.\n\nThe page will reload to get the latest data. Please make your changes again after reload.');
+          location.reload();
+          return;
+        }
+      }
+    }
     const dataToSave = {
-      users, clients, typologies, projectsData, planEntries, 
+      users, clients, typologies, projectsData, planEntries,
       timeLogs, leaveRequests, changeRequests, holidays,
       timestamp: new Date().toISOString()
     };
-    
-    console.log('💾 Saving to Firebase:', {
-      projects: projectsData.length,
-      clients: clients.length,
-      users: users.length,
-      planEntries: planEntries.length,
-      timeLogs: timeLogs.length,
-      leaveRequests: leaveRequests.length
-    });
-    
+    console.log('💾 Saving to Firebase:', { projects: projectsData.length, clients: clients.length, users: users.length, planEntries: planEntries.length, timeLogs: timeLogs.length, leaveRequests: leaveRequests.length });
     console.log('📋 Plan Entries to Save:', planEntries);
-    
     await db.collection("companyData").doc("squareDB").set(dataToSave);
+    dataLoadedAt = new Date();
     console.log('✅ Save complete');
     showSaveIndicator();
   } catch(e) {
     console.error('❌ Save error:', e.message);
-    alert(`❌ Failed to save data to cloud!\n\nError: ${e.message}\n\nYour changes may be lost. Please try again or contact support.`);
+    alert('❌ Failed to save data to cloud!\n\nError: ' + e.message + '\n\nYour changes may be lost. Please try again or contact support.');
   }
 }
 
@@ -841,10 +846,12 @@ async function loadData() {
     } else {
       console.log('⚠️ No data in Firebase, creating initial');
       dataLoaded = true;
+      dataLoadedAt = new Date();
       await saveData(); 
     }
     
     dataLoaded = true;
+    dataLoadedAt = new Date();
     
     // After loading, proceed to app initialization
     if (typeof renderManage === 'function') renderManage();
@@ -2093,34 +2100,6 @@ function resetTimer() {
 }
 
 // ═══════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════
-// INITIALIZE APP
-// ═══════════════════════════════════════════════════════
-loadData().then(() => {
-  // Check for saved session
-  const session = localStorage.getItem('currentSession');
-  if (session) {
-    try {
-      const {userId} = JSON.parse(session);
-      const user = users.find(u => u.id === userId);
-      if (user) {
-        currentUser = user;
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('mainApp').style.display = 'flex';
-        document.getElementById('topbarName').textContent = user.name;
-        document.getElementById('adminBadge').style.display = user.isAdmin ? 'inline-block' : 'none';
-        document.querySelectorAll('.admin-only').forEach(el => el.style.display = user.isAdmin ? 'flex' : 'none');
-        initTimeReport(); renderDashboard(); updateApprovalBadge();
-        return;
-      }
-    } catch(e) {
-      console.error('Session restore failed:', e);
-    }
-  }
-  
-  // Show login screen
-  document.getElementById('loginScreen').style.display = 'flex';
-});
 </script>
 </body>
 </html>
