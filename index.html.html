@@ -481,14 +481,23 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>Important:</strong> Regularly backup your data to prevent loss. Export creates a downloadable JSON file with all your data.
+            📌 <strong>V8 Safety:</strong> Auto-backup before every save + Conflict detection + Multi-tab warning
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
             <button class="btn btn-warning" id="importDataBtn">⬆️ Import Data (Restore)</button>
+            <button class="btn btn-ghost" id="viewAutoBackupsBtn">📜 View Auto-Backups (Last 5)</button>
             <input type="file" id="importFileInput" accept=".json" style="display:none;">
           </div>
-          <div id="lastSavedInfo" style="font-size:11px;color:#718096;"></div>
+          <div id="lastSavedInfo" style="font-size:11px;color:#718096;margin-bottom:8px;"></div>
+          <div id="instanceInfo" style="font-size:10px;color:#a0aec0;"></div>
+        </div>
+        
+        <!-- CHANGE LOG -->
+        <div class="card" style="margin-top:16px;border:2px solid #6b46c1;">
+          <div class="card-title">📋 Change Log (Recent Activity)</div>
+          <div id="changeLogList" style="font-size:12px;max-height:200px;overflow-y:auto;"></div>
+          <button class="btn btn-ghost btn-sm" id="clearChangeLogBtn" style="margin-top:10px;">Clear Log</button>
         </div>
       </div>
 
@@ -703,7 +712,6 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 let dataLoaded = false; // Prevent saves before load completes
-let dataLoadedAt = null; // Track when data was loaded to detect stale tabs
 
 // ═══════════════════════════════════════════════════════
 // CONSTANTS & DATA
@@ -754,6 +762,12 @@ let leaveRequests = [];
 let changeRequests= [];
 let notifications = [];
 
+// V8 Safety Features
+let lastKnownTimestamp = null;
+let instanceId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+let autoBackupEnabled = true;
+let changeLog = [];
+
 let currentWeek  = getMonday(new Date());
 let planWeek     = getMonday(new Date());
 let editPlanId   = null;
@@ -784,37 +798,88 @@ async function saveData() {
     alert('⚠️ Cannot save: Data is still loading. Please wait a moment and try again.');
     return;
   }
+  
   console.log('💾 saveData() called, dataLoaded:', dataLoaded);
+  
   try {
-    // STALE-TAB PROTECTION: Check Firebase timestamp before saving
+    // CONFLICT DETECTION - Check if data changed since we loaded
     const currentDoc = await db.collection("companyData").doc("squareDB").get();
-    if (currentDoc.exists && dataLoadedAt) {
-      const serverTimestamp = currentDoc.data().timestamp;
-      if (serverTimestamp) {
-        const serverTime = new Date(serverTimestamp).getTime();
-        const loadedTime = dataLoadedAt.getTime();
-        if (serverTime > loadedTime + 2000) {
-          console.warn('SAVE BLOCKED: Server data is newer. Reloading...');
-          alert('⚠️ Data conflict detected!\n\nAnother browser tab saved more recent data.\n\nThe page will reload to get the latest data. Please make your changes again after reload.');
+    if (currentDoc.exists) {
+      const currentData = currentDoc.data();
+      const currentTimestamp = currentData.timestamp;
+      
+      if (lastKnownTimestamp && currentTimestamp && currentTimestamp !== lastKnownTimestamp) {
+        const shouldContinue = confirm(
+          '⚠️ CONFLICT DETECTED!\n\n' +
+          'Someone else saved changes while you were working.\n\n' +
+          'Last known save: ' + new Date(lastKnownTimestamp).toLocaleString() + '\n' +
+          'Current save: ' + new Date(currentTimestamp).toLocaleString() + '\n\n' +
+          '⚠️ Continuing will OVERWRITE their changes!\n\n' +
+          'Click OK to overwrite (DANGEROUS)\n' +
+          'Click Cancel to reload and see their changes (SAFE)'
+        );
+        
+        if (!shouldContinue) {
+          alert('✅ Save cancelled. Reloading page to get latest data...');
           location.reload();
           return;
         }
       }
     }
+    
+    // AUTO-BACKUP before save
+    if (autoBackupEnabled) {
+      const backup = {
+        timestamp: new Date().toISOString(),
+        data: { users, clients, typologies, projectsData, planEntries, timeLogs, leaveRequests, changeRequests, holidays }
+      };
+      const backups = JSON.parse(localStorage.getItem('autoBackups') || '[]');
+      backups.unshift(backup);
+      // Keep only last 5 backups
+      localStorage.setItem('autoBackups', JSON.stringify(backups.slice(0, 5)));
+      console.log('💾 Auto-backup created');
+    }
+    
+    const saveTimestamp = new Date().toISOString();
     const dataToSave = {
-      users, clients, typologies, projectsData, planEntries,
+      users, clients, typologies, projectsData, planEntries, 
       timeLogs, leaveRequests, changeRequests, holidays,
-      timestamp: new Date().toISOString()
+      timestamp: saveTimestamp,
+      instanceId: instanceId,
+      savedBy: currentUser?.name || 'Unknown'
     };
-    console.log('💾 Saving to Firebase:', { projects: projectsData.length, clients: clients.length, users: users.length, planEntries: planEntries.length, timeLogs: timeLogs.length, leaveRequests: leaveRequests.length });
+    
+    console.log('💾 Saving to Firebase:', {
+      projects: projectsData.length,
+      clients: clients.length,
+      users: users.length,
+      planEntries: planEntries.length,
+      timeLogs: timeLogs.length,
+      leaveRequests: leaveRequests.length,
+      savedBy: dataToSave.savedBy,
+      instanceId: instanceId
+    });
+    
     console.log('📋 Plan Entries to Save:', planEntries);
+    
     await db.collection("companyData").doc("squareDB").set(dataToSave);
-    dataLoadedAt = new Date();
+    
+    // Update our known timestamp
+    lastKnownTimestamp = saveTimestamp;
+    
+    // Log the change
+    changeLog.push({
+      timestamp: saveTimestamp,
+      user: currentUser?.name || 'Unknown',
+      action: 'Data Saved',
+      details: `${users.length} users, ${projectsData.length} projects, ${timeLogs.length} logs`
+    });
+    
     console.log('✅ Save complete');
     showSaveIndicator();
   } catch(e) {
     console.error('❌ Save error:', e.message);
-    alert('❌ Failed to save data to cloud!\n\nError: ' + e.message + '\n\nYour changes may be lost. Please try again or contact support.');
+    alert(`❌ Failed to save data to cloud!\n\nError: ${e.message}\n\nYour changes may be lost. Please try again or contact support.`);
   }
 }
 
@@ -843,15 +908,17 @@ async function loadData() {
       });
       
       console.log('📋 Plan Entries Detail:', planEntries);
+      
+      // Store timestamp for conflict detection
+      lastKnownTimestamp = data.timestamp;
+      console.log('🔒 Tracking timestamp:', lastKnownTimestamp);
     } else {
       console.log('⚠️ No data in Firebase, creating initial');
       dataLoaded = true;
-      dataLoadedAt = new Date();
       await saveData(); 
     }
     
     dataLoaded = true;
-    dataLoadedAt = new Date();
     
     // After loading, proceed to app initialization
     if (typeof renderManage === 'function') renderManage();
@@ -1870,6 +1937,10 @@ function renderManage(){
     btn.onclick=()=>{ typologies.splice(i,1); autoSave(); renderManage(); };
     item.appendChild(span); item.appendChild(btn); tl.appendChild(item);
   });
+  
+  // Update change log and instance info
+  renderChangeLog();
+  updateLastSaved();
 }
 document.getElementById('addUserBtn').addEventListener('click',()=>{
   const name=document.getElementById('newUserName').value.trim(),email=document.getElementById('newUserEmail').value.trim().toLowerCase(),pass=document.getElementById('newUserPass').value.trim();
@@ -1973,12 +2044,69 @@ document.getElementById('importFileInput').addEventListener('change', (e) => {
   e.target.value = '';
 });
 
-// Update "Last Saved" indicator
+// View Auto-Backups
+document.getElementById('viewAutoBackupsBtn').addEventListener('click', () => {
+  const backups = JSON.parse(localStorage.getItem('autoBackups') || '[]');
+  
+  if (backups.length === 0) {
+    alert('No auto-backups found.\n\nAuto-backups are created before each save.');
+    return;
+  }
+  
+  let msg = '📜 AUTO-BACKUPS (Last 5)\n\n';
+  msg += 'These are created automatically before saves.\n\n';
+  
+  backups.forEach((b, i) => {
+    msg += `${i + 1}. ${new Date(b.timestamp).toLocaleString()}\n`;
+    msg += `   Users: ${b.data.users?.length || 0}, Logs: ${b.data.timeLogs?.length || 0}\n\n`;
+  });
+  
+  msg += 'To restore: Use Import Data and select a manual backup.\n';
+  msg += 'Auto-backups are for emergency recovery only.';
+  
+  alert(msg);
+});
+
+// Clear Change Log
+document.getElementById('clearChangeLogBtn').addEventListener('click', () => {
+  if (!confirm('Clear change log?')) return;
+  changeLog = [];
+  renderChangeLog();
+});
+
+// Render Change Log
+function renderChangeLog() {
+  const el = document.getElementById('changeLogList');
+  if (!el) return;
+  
+  if (changeLog.length === 0) {
+    el.innerHTML = '<p style="color:#718096;padding:12px;">No changes logged yet.</p>';
+    return;
+  }
+  
+  const recent = changeLog.slice(-10).reverse();
+  el.innerHTML = recent.map(c => 
+    `<div style="border-bottom:1px solid #e2e8f0;padding:8px 4px;">
+      <div style="font-weight:600;color:#2d3748;">${c.action}</div>
+      <div style="font-size:10px;color:#718096;">${new Date(c.timestamp).toLocaleString()} · ${c.user}</div>
+      ${c.details ? `<div style="font-size:11px;color:#4a5568;margin-top:2px;">${c.details}</div>` : ''}
+    </div>`
+  ).join('');
+}
+
+// Update "Last Saved" and instance info
 function updateLastSaved() {
   const el = document.getElementById('lastSavedInfo');
   if (el) {
     el.textContent = `💾 Last saved: ${new Date().toLocaleTimeString()}`;
   }
+  
+  const infoEl = document.getElementById('instanceInfo');
+  if (infoEl) {
+    infoEl.textContent = `Instance ID: ${instanceId.slice(0, 8)}... · Conflict detection: ON · Auto-backup: ON`;
+  }
+  
+  renderChangeLog();
 }
 
 // Call this after every save
@@ -2100,6 +2228,66 @@ function resetTimer() {
 }
 
 // ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// INITIALIZE APP
+// ═══════════════════════════════════════════════════════
+
+// Multi-Tab Detection
+window.addEventListener('storage', (e) => {
+  if (e.key === 'squareActiveTab' && e.newValue && e.newValue !== instanceId) {
+    const shouldContinue = confirm(
+      '⚠️ MULTIPLE TABS DETECTED!\n\n' +
+      'SQUARE is open in another tab/window.\n\n' +
+      '🚨 Using multiple tabs can cause DATA LOSS!\n\n' +
+      'Click OK to continue anyway (DANGEROUS)\n' +
+      'Click Cancel to close this tab (SAFE)'
+    );
+    
+    if (!shouldContinue) {
+      alert('✅ This tab will close for safety.\n\nUse only ONE tab at a time!');
+      window.close();
+      if (!window.closed) {
+        // If window.close() didn't work (some browsers block it)
+        document.body.innerHTML = '<div style="padding:40px;text-align:center;font-family:sans-serif;"><h1 style="color:#e53e3e;">⚠️ Tab Closed for Safety</h1><p>Please close this tab manually and use only ONE tab.</p></div>';
+      }
+    }
+  }
+});
+
+// Register this tab
+localStorage.setItem('squareActiveTab', instanceId);
+
+// Ping every 5 seconds to show this tab is active
+setInterval(() => {
+  if (document.hidden) return; // Don't ping if tab is hidden
+  localStorage.setItem('squareActiveTab', instanceId);
+}, 5000);
+
+loadData().then(() => {
+  // Check for saved session
+  const session = localStorage.getItem('currentSession');
+  if (session) {
+    try {
+      const {userId} = JSON.parse(session);
+      const user = users.find(u => u.id === userId);
+      if (user) {
+        currentUser = user;
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('mainApp').style.display = 'flex';
+        document.getElementById('topbarName').textContent = user.name;
+        document.getElementById('adminBadge').style.display = user.isAdmin ? 'inline-block' : 'none';
+        document.querySelectorAll('.admin-only').forEach(el => el.style.display = user.isAdmin ? 'flex' : 'none');
+        initTimeReport(); renderDashboard(); updateApprovalBadge();
+        return;
+      }
+    } catch(e) {
+      console.error('Session restore failed:', e);
+    }
+  }
+  
+  // Show login screen
+  document.getElementById('loginScreen').style.display = 'flex';
+});
 </script>
 </body>
 </html>
