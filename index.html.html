@@ -211,6 +211,8 @@ textarea.form-control{min-height:70px;resize:vertical;}
 
 <!-- SAVE INDICATOR -->
 <div class="save-indicator" id="saveIndicator">✅ Saved to cloud</div>
+<div class="save-indicator" id="savingIndicator" style="background:#4299e1;">💾 Saving...</div>
+<div class="save-indicator" id="unsavedIndicator" style="background:#ed8936;">⚠️ Unsaved changes</div>
 
 <!-- LOGIN -->
 <div class="login-screen" id="loginScreen">
@@ -481,7 +483,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V8 Safety:</strong> Auto-backup before every save + Conflict detection + Multi-tab warning
+            📌 <strong>V9 Aggressive Auto-Save:</strong> Saves every 30 sec + Before tab close + Conflict detection + Multi-tab warning + Auto-backup
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -768,6 +770,11 @@ let instanceId = Date.now().toString(36) + Math.random().toString(36).slice(2);
 let autoBackupEnabled = true;
 let changeLog = [];
 
+// V9 Aggressive Auto-Save
+let periodicSaveInterval = null;
+let lastSaveTime = Date.now();
+let hasUnsavedChanges = false;
+
 let currentWeek  = getMonday(new Date());
 let planWeek     = getMonday(new Date());
 let editPlanId   = null;
@@ -798,6 +805,9 @@ async function saveData() {
     alert('⚠️ Cannot save: Data is still loading. Please wait a moment and try again.');
     return;
   }
+  
+  // Show saving indicator
+  showSavingIndicator();
   
   console.log('💾 saveData() called, dataLoaded:', dataLoaded);
   
@@ -866,6 +876,8 @@ async function saveData() {
     
     // Update our known timestamp
     lastKnownTimestamp = saveTimestamp;
+    lastSaveTime = Date.now();
+    hasUnsavedChanges = false;
     
     // Log the change
     changeLog.push({
@@ -930,11 +942,34 @@ async function loadData() {
 }
 
 function showSaveIndicator() {
+  hideAllIndicators();
   const el = document.getElementById('saveIndicator');
   if(el) {
     el.classList.add('show');
     setTimeout(() => el.classList.remove('show'), 2000);
   }
+}
+
+function showSavingIndicator() {
+  hideAllIndicators();
+  const el = document.getElementById('savingIndicator');
+  if(el) {
+    el.classList.add('show');
+  }
+}
+
+function showUnsavedIndicator() {
+  hideAllIndicators();
+  const el = document.getElementById('unsavedIndicator');
+  if(el) {
+    el.classList.add('show');
+  }
+}
+
+function hideAllIndicators() {
+  document.getElementById('saveIndicator')?.classList.remove('show');
+  document.getElementById('savingIndicator')?.classList.remove('show');
+  document.getElementById('unsavedIndicator')?.classList.remove('show');
 }
 
 // Ensure loadData runs immediately
@@ -943,6 +978,7 @@ loadData();
 // Redirect autoSave to use Firebase
 window.autoSave = function() {
   console.log('🔄 autoSave() triggered');
+  hasUnsavedChanges = true;
   saveData();
 };
 
@@ -2103,7 +2139,7 @@ function updateLastSaved() {
   
   const infoEl = document.getElementById('instanceInfo');
   if (infoEl) {
-    infoEl.textContent = `Instance ID: ${instanceId.slice(0, 8)}... · Conflict detection: ON · Auto-backup: ON`;
+    infoEl.textContent = `Instance ID: ${instanceId.slice(0, 8)}... · V9 Auto-save: Every 30s · Conflict detection: ON · Auto-backup: ON`;
   }
   
   renderChangeLog();
@@ -2288,6 +2324,65 @@ loadData().then(() => {
   // Show login screen
   document.getElementById('loginScreen').style.display = 'flex';
 });
+
+// ═══════════════════════════════════════════════════════
+// V9 AGGRESSIVE AUTO-SAVE
+// ═══════════════════════════════════════════════════════
+
+// Periodic Auto-Save (every 30 seconds)
+periodicSaveInterval = setInterval(() => {
+  if (!dataLoaded || !currentUser) return;
+  
+  const timeSinceLastSave = Date.now() - lastSaveTime;
+  
+  // Save if there are unsaved changes OR if it's been more than 30 seconds
+  if (hasUnsavedChanges || timeSinceLastSave > 30000) {
+    console.log('⏰ Periodic auto-save triggered');
+    saveData();
+  }
+}, 30000); // Every 30 seconds
+
+// Save before page unload
+window.addEventListener('beforeunload', (e) => {
+  if (hasUnsavedChanges && dataLoaded) {
+    // Try to save immediately
+    saveData();
+    
+    // Show warning
+    e.preventDefault();
+    e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+    return e.returnValue;
+  }
+});
+
+// Save when browser tab becomes hidden (user switches tabs)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && hasUnsavedChanges && dataLoaded) {
+    console.log('👁️ Tab hidden - auto-saving');
+    saveData();
+  }
+});
+
+// Mark as having changes when user types in any input
+let unsavedTimeout = null;
+document.addEventListener('input', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+    hasUnsavedChanges = true;
+    
+    // Show unsaved indicator after 2 seconds of no typing
+    clearTimeout(unsavedTimeout);
+    unsavedTimeout = setTimeout(() => {
+      if (hasUnsavedChanges) {
+        showUnsavedIndicator();
+      }
+    }, 2000);
+  }
+});
+
+console.log('✅ V9 Aggressive Auto-Save initialized');
+console.log('⏰ Auto-save interval: Every 30 seconds');
+console.log('💾 Save on: tab close, tab switch, periodic, manual actions');
+
 </script>
 </body>
 </html>
