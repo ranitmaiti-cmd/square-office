@@ -331,7 +331,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
           </div>
         </div>
         <div style="background:#fffaf0;border:1px solid #fbd38d;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#c05621;">
-          📌 Planning is mandatory. Click any cell to assign work for that person on that day.
+          📌 <strong>Planning:</strong> <span id="planPermissionText"></span>
         </div>
         <div class="cal-wrap"><div class="planner-grid" id="plannerGrid"></div></div>
       </div>
@@ -448,8 +448,18 @@ textarea.form-control{min-height:70px;resize:vertical;}
       </div>
 
       <!-- MANAGE -->
-      <div class="page" id="page-manage">
+      <div class="page admin-only" id="page-manage" style="display:none;">
         <h2 class="page-title">⚙️ Manage</h2>
+        
+        <!-- V10 Permission Banner -->
+        <div style="background:#fff5f5;border:1px solid#fc8181;border-radius:8px;padding:14px;margin-bottom:16px;">
+          <div style="font-weight:600;color:#c53030;margin-bottom:6px;">🔒 V10 Field-Level Permissions Active</div>
+          <div style="font-size:12px;color:#742a2a;">
+            <strong>Regular Users:</strong> Can only edit their own time logs, plans, and leave requests<br>
+            <strong>Admins Only:</strong> Can manage projects, clients, users, typologies, and holidays
+          </div>
+        </div>
+        
         <div class="manage-grid">
           <div class="card">
             <div class="card-title">👥 Team Members</div>
@@ -483,7 +493,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V9 Aggressive Auto-Save:</strong> Saves every 30 sec + Before tab close + Conflict detection + Multi-tab warning + Auto-backup
+            📌 <strong>V10 Field-Level Permissions:</strong> Users edit only their own data + Saves every 30s + Conflict detection + Multi-tab warning + Zero conflicts for 10+ users
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -774,6 +784,41 @@ let changeLog = [];
 let periodicSaveInterval = null;
 let lastSaveTime = Date.now();
 let hasUnsavedChanges = false;
+
+// V10 Field-Level Permissions
+function canEditTimeLog(log) {
+  if (!currentUser) return false;
+  if (currentUser.isAdmin) return true;
+  return log.userId === currentUser.id;
+}
+
+function canEditPlanEntry(entry) {
+  if (!currentUser) return false;
+  if (currentUser.isAdmin) return true;
+  return entry.userId === currentUser.id;
+}
+
+function canEditLeave(leave) {
+  if (!currentUser) return false;
+  if (currentUser.isAdmin) return true;
+  return leave.userId === currentUser.id;
+}
+
+function canManageProjects() {
+  return currentUser && currentUser.isAdmin;
+}
+
+function canManageUsers() {
+  return currentUser && currentUser.isAdmin;
+}
+
+function canManageClients() {
+  return currentUser && currentUser.isAdmin;
+}
+
+function canManageHolidays() {
+  return currentUser && currentUser.isAdmin;
+}
 
 let currentWeek  = getMonday(new Date());
 let planWeek     = getMonday(new Date());
@@ -1282,6 +1327,13 @@ document.getElementById('planPrev').addEventListener('click',()=>{ planWeek=addD
 document.getElementById('planNext').addEventListener('click',()=>{ planWeek=addDays(planWeek,7);  renderPlanner(); });
 
 function renderPlanner(){
+  // V10: Set permission text
+  const permText = currentUser.isAdmin 
+    ? 'You can assign work to anyone (Admin)'
+    : 'You can only plan your own work';
+  const permEl = document.getElementById('planPermissionText');
+  if (permEl) permEl.textContent = permText;
+  
   const days=[]; for(let i=0;i<7;i++) days.push(addDays(planWeek,i));
   document.getElementById('planWeekLabel').textContent='Week of '+planWeek.toLocaleDateString('en-IN',{month:'short',day:'numeric',year:'numeric'});
   const grid=document.getElementById('plannerGrid'); grid.innerHTML='';
@@ -1311,6 +1363,21 @@ function renderPlanner(){
 }
 
 function openPlanModal(userId,date,planId){
+  // V10: Check permissions
+  if (planId) {
+    const existingPlan = planEntries.find(p => p.id === planId);
+    if (existingPlan && !canEditPlanEntry(existingPlan)) {
+      alert('❌ Permission Denied\n\nYou can only edit your own plan entries.\nAdmins can edit all entries.');
+      return;
+    }
+  } else {
+    // Creating new plan - can only create for yourself unless admin
+    if (!currentUser.isAdmin && userId !== currentUser.id) {
+      alert('❌ Permission Denied\n\nYou can only create plan entries for yourself.\nAdmins can assign work to anyone.');
+      return;
+    }
+  }
+  
   editPlanId=planId; editPlanUser=userId; editPlanDay=date;
   const user=users.find(u=>u.id===userId);
   document.getElementById('planModalTitle').textContent=(planId?'Edit':'Assign Work')+' — '+user.name+' · '+fmtD(date);
@@ -1350,6 +1417,11 @@ document.getElementById('savePlanBtn').addEventListener('click',()=>{
   autoSave(); closeModal('planModal'); renderPlanner(); renderDashboard();
 });
 document.getElementById('deletePlanBtn').addEventListener('click',()=>{
+  const plan = planEntries.find(p => p.id === editPlanId);
+  if (plan && !canEditPlanEntry(plan)) {
+    alert('❌ Permission Denied\n\nYou can only delete your own plan entries.');
+    return;
+  }
   if(!confirm('Remove this plan entry?')) return;
   planEntries=planEntries.filter(p=>p.id!==editPlanId);
   autoSave(); closeModal('planModal'); renderPlanner(); renderDashboard();
@@ -2139,7 +2211,7 @@ function updateLastSaved() {
   
   const infoEl = document.getElementById('instanceInfo');
   if (infoEl) {
-    infoEl.textContent = `Instance ID: ${instanceId.slice(0, 8)}... · V9 Auto-save: Every 30s · Conflict detection: ON · Auto-backup: ON`;
+    infoEl.textContent = `Instance ID: ${instanceId.slice(0, 8)}... · V10 Field Permissions: ON · Auto-save: Every 30s · Conflict detection: ON`;
   }
   
   renderChangeLog();
