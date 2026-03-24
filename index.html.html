@@ -796,6 +796,7 @@ let lastConnectionCheck = Date.now();
 // V12 Granular Saves
 let useGranularSaves = true;
 let saveInProgress = false;
+let skipNextConflictCheck = false; // V12.1: Skip conflicts when adding new data
 
 // V12 Granular Save Functions
 async function saveTimeLog(log) {
@@ -980,11 +981,11 @@ async function saveData() {
       
       // V11.1: Only show conflict if DIFFERENT user saved
       // Skip conflict popup if same user (auto-save vs manual save)
-      // V12: Skip conflict detection for non-admin users
-      // Regular users only edit their own data (time logs, plans, leaves)
-      // So their saves won't actually conflict with others
-      // Only check conflicts for admin users (who edit shared data)
-      if (lastKnownTimestamp && currentTimestamp && currentTimestamp !== lastKnownTimestamp) {
+      // V12.1: Skip conflict check if adding new data
+      if (skipNextConflictCheck) {
+        console.log('✅ Conflict check skipped - adding new data');
+        skipNextConflictCheck = false; // Reset flag
+      } else if (lastKnownTimestamp && currentTimestamp && currentTimestamp !== lastKnownTimestamp) {
         const isSameUser = savedByUser === currentUser?.name;
         const isAdmin = currentUser?.isAdmin;
         
@@ -1819,7 +1820,10 @@ document.getElementById('saveProjBtn').addEventListener('click',function(){
   PHASES.forEach(ph=>{ const v=parseInt(document.getElementById('phase_'+ph.replace(/\s+/g,'_')).value)||0; if(v>0)phases[ph]=v; });
   const data={id:this._editId||genId(),name,client,startDate:document.getElementById('pStart').value,endDate:document.getElementById('pEnd').value,phases};
   if(this._editId){ const i=projectsData.findIndex(p=>p.id===this._editId); projectsData[i]=data; }
-  else projectsData.push(data);
+  else {
+    projectsData.push(data);
+    skipNextConflictCheck = true; // V12.1: Skip conflict for adding new project
+  }
   
   console.log('💾 Project saved:', data.name, '| Total projects:', projectsData.length);
   
@@ -2191,6 +2195,7 @@ document.getElementById('addUserBtn').addEventListener('click',()=>{
   if(users.find(u=>u.email===email)){ alert('Email exists'); return; }
   users.push({id:genId(),name,email,password:pass,isAdmin:false,medLeft:12,casLeft:5});
   document.getElementById('newUserName').value=''; document.getElementById('newUserEmail').value=''; document.getElementById('newUserPass').value='';
+  skipNextConflictCheck = true; // V12.1: Skip conflict for adding new user
   autoSave(); renderManage();
 });
 document.getElementById('addClientBtn').addEventListener('click',()=>{
@@ -2198,12 +2203,14 @@ document.getElementById('addClientBtn').addEventListener('click',()=>{
   if(!v) return; // Silently ignore empty input
   if(clients.includes(v)){ alert('Client already exists'); return; }
   clients.push(v); clients.sort(); document.getElementById('newClient').value='';
+  skipNextConflictCheck = true; // V12.1: Skip conflict for adding new client
   autoSave(); renderManage();
 });
 document.getElementById('addTypologyBtn').addEventListener('click',()=>{
   const v=document.getElementById('newTypology').value.trim();
   if(!v||typologies.includes(v)){ alert(v?'Already exists':'Enter a name'); return; }
   typologies.push(v); document.getElementById('newTypology').value='';
+  skipNextConflictCheck = true; // V12.1: Skip conflict for adding new typology
   autoSave(); renderManage();
 });
 
