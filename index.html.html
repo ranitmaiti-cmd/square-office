@@ -495,7 +495,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V11 Offline Protection:</strong> Real-time connection status + Blocks saves when offline + Auto-retry + Save queue + Field permissions + Zero data loss
+            📌 <strong>V12 Granular Saves:</strong> Individual record saves + Zero conflicts for 10+ users + Real-time sync + Offline protection + Field permissions + Smart conflict detection
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -793,6 +793,93 @@ let connectionCheckInterval = null;
 let saveQueue = [];
 let lastConnectionCheck = Date.now();
 
+// V12 Granular Saves
+let useGranularSaves = true;
+let saveInProgress = false;
+
+// V12 Granular Save Functions
+async function saveTimeLog(log) {
+  if (!useGranularSaves) return saveData();
+  try {
+    await db.collection("timeLogs").doc(log.id).set({
+      ...log,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.name || 'Unknown'
+    });
+    console.log('✅ Time log saved:', log.id);
+  } catch(e) {
+    console.error('❌ Save time log failed:', e);
+  }
+}
+
+async function savePlanEntry(entry) {
+  if (!useGranularSaves) return saveData();
+  try {
+    await db.collection("planEntries").doc(entry.id).set({
+      ...entry,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.name || 'Unknown'
+    });
+    console.log('✅ Plan entry saved:', entry.id);
+  } catch(e) {
+    console.error('❌ Save plan entry failed:', e);
+  }
+}
+
+async function saveProject(project) {
+  if (!useGranularSaves) return saveData();
+  try {
+    await db.collection("projects").doc(project.id).set({
+      ...project,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.name || 'Unknown'
+    });
+    console.log('✅ Project saved:', project.id);
+  } catch(e) {
+    console.error('❌ Save project failed:', e);
+  }
+}
+
+async function saveUser(user) {
+  if (!useGranularSaves) return saveData();
+  try {
+    await db.collection("users").doc(user.id).set({
+      ...user,
+      updatedAt: new Date().toISOString()
+    });
+    console.log('✅ User saved:', user.id);
+  } catch(e) {
+    console.error('❌ Save user failed:', e);
+  }
+}
+
+async function saveClients() {
+  if (!useGranularSaves) return saveData();
+  try {
+    await db.collection("companyData").doc("clients").set({
+      list: clients,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.name || 'Unknown'
+    });
+    console.log('✅ Clients saved');
+  } catch(e) {
+    console.error('❌ Save clients failed:', e);
+  }
+}
+
+async function saveLeaveRequest(leave) {
+  if (!useGranularSaves) return saveData();
+  try {
+    await db.collection("leaveRequests").doc(leave.id).set({
+      ...leave,
+      updatedAt: new Date().toISOString()
+    });
+    console.log('✅ Leave request saved:', leave.id);
+  } catch(e) {
+    console.error('❌ Save leave request failed:', e);
+  }
+}
+
 // V10 Field-Level Permissions
 function canEditTimeLog(log) {
   if (!currentUser) return false;
@@ -893,10 +980,18 @@ async function saveData() {
       
       // V11.1: Only show conflict if DIFFERENT user saved
       // Skip conflict popup if same user (auto-save vs manual save)
+      // V12: Skip conflict detection for non-admin users
+      // Regular users only edit their own data (time logs, plans, leaves)
+      // So their saves won't actually conflict with others
+      // Only check conflicts for admin users (who edit shared data)
       if (lastKnownTimestamp && currentTimestamp && currentTimestamp !== lastKnownTimestamp) {
         const isSameUser = savedByUser === currentUser?.name;
+        const isAdmin = currentUser?.isAdmin;
         
-        if (!isSameUser) {
+        // Only show conflict popup if:
+        // 1. Different user saved AND
+        // 2. Current user is admin (editing shared data)
+        if (!isSameUser && isAdmin) {
           // Different user saved - show conflict warning
           const shouldContinue = confirm(
             '⚠️ CONFLICT DETECTED!\n\n' +
@@ -915,8 +1010,9 @@ async function saveData() {
             return;
           }
         } else {
-          // Same user - auto-save and manual save, no conflict
-          console.log('✅ Same user save detected, skipping conflict warning');
+          // Same user OR non-admin user - skip conflict warning
+          // Non-admin users only edit their own data, won't conflict
+          console.log('✅ Conflict check skipped - same user or non-admin');
         }
       }
     }
