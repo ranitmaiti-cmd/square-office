@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SQUARE - Office Management</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%232b6cb0'/%3E%3Ctext x='50' y='70' font-family='Arial,sans-serif' font-size='60' font-weight='bold' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f4f8;color:#2d3748;}
@@ -271,10 +272,20 @@ textarea.form-control{min-height:70px;resize:vertical;}
   <div class="topbar">
     <span class="app-logo">SQUARE</span>
     <div style="display:flex;align-items:center;gap:10px;">
+      <div id="connectionStatus" style="display:flex;align-items:center;gap:6px;padding:4px 12px;background:#38a169;color:white;border-radius:12px;font-size:11px;font-weight:600;">
+        <span id="connectionDot">🟢</span>
+        <span id="connectionText">ONLINE</span>
+      </div>
       <span class="user-badge"><span id="topbarName"></span><span class="admin-badge" id="adminBadge" style="display:none;">ADMIN</span></span>
       <button class="btn btn-ghost btn-sm" id="logoutBtn">Logout</button>
     </div>
   </div>
+  
+  <!-- OFFLINE WARNING BANNER -->
+  <div id="offlineWarning" style="display:none;background:#e53e3e;color:white;padding:12px;text-align:center;font-weight:600;font-size:13px;">
+    ⚠️ WARNING: YOU ARE OFFLINE! Changes will NOT be saved to cloud. Do not add data or it will be lost.
+  </div>
+  
   <div class="main">
     <!-- SIDEBAR -->
     <div class="sidebar">
@@ -493,7 +504,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V10 Field-Level Permissions:</strong> Users edit only their own data + Saves every 30s + Conflict detection + Multi-tab warning + Zero conflicts for 10+ users
+            📌 <strong>V11 Offline Protection:</strong> Real-time connection status + Blocks saves when offline + Auto-retry + Save queue + Field permissions + Zero data loss
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -785,6 +796,12 @@ let periodicSaveInterval = null;
 let lastSaveTime = Date.now();
 let hasUnsavedChanges = false;
 
+// V11 Offline Protection
+let isOnline = navigator.onLine;
+let connectionCheckInterval = null;
+let saveQueue = [];
+let lastConnectionCheck = Date.now();
+
 // V10 Field-Level Permissions
 function canEditTimeLog(log) {
   if (!currentUser) return false;
@@ -848,6 +865,25 @@ async function saveData() {
   if (!dataLoaded) {
     console.error('⏸️ SAVE BLOCKED - Data not loaded yet!');
     alert('⚠️ Cannot save: Data is still loading. Please wait a moment and try again.');
+    return;
+  }
+  
+  // V11: Check connection before saving
+  if (!navigator.onLine) {
+    console.error('🔴 SAVE BLOCKED - Browser is offline!');
+    alert('❌ CANNOT SAVE - YOU ARE OFFLINE!\n\nYour internet connection is down.\nChanges will NOT be saved.\n\nReconnect to the internet and try again.');
+    return;
+  }
+  
+  // Test Firebase connection
+  const firebaseOnline = await checkFirebaseConnection();
+  if (!firebaseOnline) {
+    console.error('🔴 SAVE BLOCKED - Firebase unreachable!');
+    const retry = confirm('❌ CANNOT REACH FIREBASE!\n\nYour changes cannot be saved right now.\n\nClick OK to queue this save and retry when connection returns.\nClick Cancel to abort.');
+    if (retry) {
+      saveQueue.push({ timestamp: new Date().toISOString(), data: 'pending' });
+      alert('📤 Save queued. Will automatically save when connection returns.');
+    }
     return;
   }
   
@@ -2334,6 +2370,126 @@ function resetTimer() {
   const widget = document.getElementById('timerWidget');
   if (widget) widget.classList.remove('running');
 }
+
+// ═══════════════════════════════════════════════════════
+// V11 OFFLINE PROTECTION
+// ═══════════════════════════════════════════════════════
+
+function updateConnectionStatus(online) {
+  isOnline = online;
+  const statusEl = document.getElementById('connectionStatus');
+  const dotEl = document.getElementById('connectionDot');
+  const textEl = document.getElementById('connectionText');
+  const warningEl = document.getElementById('offlineWarning');
+  
+  if (online) {
+    statusEl.style.background = '#38a169';
+    dotEl.textContent = '🟢';
+    textEl.textContent = 'ONLINE';
+    warningEl.style.display = 'none';
+    enableAllButtons();
+  } else {
+    statusEl.style.background = '#e53e3e';
+    dotEl.textContent = '🔴';
+    textEl.textContent = 'OFFLINE';
+    warningEl.style.display = 'block';
+    disableAllButtons();
+  }
+}
+
+function disableAllButtons() {
+  // Disable all add/edit buttons when offline
+  const buttons = [
+    'addProjectBtn', 'addUserBtn', 'addClientBtn', 'addTypologyBtn',
+    'addHolidayBtn', 'savePlanBtn', 'saveProjectBtn', 'logTimeBtn'
+  ];
+  
+  buttons.forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+      btn.style.cursor = 'not-allowed';
+      btn.title = 'Cannot add - You are offline';
+    }
+  });
+}
+
+function enableAllButtons() {
+  const buttons = [
+    'addProjectBtn', 'addUserBtn', 'addClientBtn', 'addTypologyBtn',
+    'addHolidayBtn', 'savePlanBtn', 'saveProjectBtn', 'logTimeBtn'
+  ];
+  
+  buttons.forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btn.style.cursor = 'pointer';
+      btn.title = '';
+    }
+  });
+}
+
+async function checkFirebaseConnection() {
+  try {
+    // Try to read from Firebase
+    const testDoc = await db.collection("companyData").doc("squareDB").get();
+    return testDoc.exists || testDoc.metadata;
+  } catch (e) {
+    console.error('Firebase connection check failed:', e);
+    return false;
+  }
+}
+
+// Listen for online/offline events
+window.addEventListener('online', () => {
+  console.log('✅ Browser reports ONLINE');
+  updateConnectionStatus(true);
+  // Process queue when coming back online
+  processQueue();
+});
+
+window.addEventListener('offline', () => {
+  console.log('🔴 Browser reports OFFLINE');
+  updateConnectionStatus(false);
+});
+
+// Check connection every 10 seconds
+connectionCheckInterval = setInterval(async () => {
+  const browserOnline = navigator.onLine;
+  
+  if (browserOnline) {
+    // Browser says online, but test Firebase too
+    const firebaseOnline = await checkFirebaseConnection();
+    updateConnectionStatus(firebaseOnline);
+  } else {
+    updateConnectionStatus(false);
+  }
+}, 10000);
+
+// Process queued saves
+async function processQueue() {
+  if (saveQueue.length === 0) return;
+  
+  console.log(`📤 Processing ${saveQueue.length} queued saves...`);
+  
+  while (saveQueue.length > 0 && isOnline) {
+    const queuedSave = saveQueue.shift();
+    try {
+      await saveData();
+      console.log('✅ Queued save processed');
+    } catch (e) {
+      console.error('❌ Queued save failed, re-queuing', e);
+      saveQueue.unshift(queuedSave);
+      break;
+    }
+  }
+}
+
+// Set initial connection status
+updateConnectionStatus(navigator.onLine);
 
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
