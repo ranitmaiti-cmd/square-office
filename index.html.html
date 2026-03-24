@@ -462,15 +462,6 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="page admin-only" id="page-manage" style="display:none;">
         <h2 class="page-title">⚙️ Manage</h2>
         
-        <!-- V10 Permission Banner -->
-        <div style="background:#fff5f5;border:1px solid#fc8181;border-radius:8px;padding:14px;margin-bottom:16px;">
-          <div style="font-weight:600;color:#c53030;margin-bottom:6px;">🔒 V10 Field-Level Permissions Active</div>
-          <div style="font-size:12px;color:#742a2a;">
-            <strong>Regular Users:</strong> Can only edit their own time logs, plans, and leave requests<br>
-            <strong>Admins Only:</strong> Can manage projects, clients, users, typologies, and holidays
-          </div>
-        </div>
-        
         <div class="manage-grid">
           <div class="card">
             <div class="card-title">👥 Team Members</div>
@@ -898,22 +889,34 @@ async function saveData() {
     if (currentDoc.exists) {
       const currentData = currentDoc.data();
       const currentTimestamp = currentData.timestamp;
+      const savedByUser = currentData.savedBy;
       
+      // V11.1: Only show conflict if DIFFERENT user saved
+      // Skip conflict popup if same user (auto-save vs manual save)
       if (lastKnownTimestamp && currentTimestamp && currentTimestamp !== lastKnownTimestamp) {
-        const shouldContinue = confirm(
-          '⚠️ CONFLICT DETECTED!\n\n' +
-          'Someone else saved changes while you were working.\n\n' +
-          'Last known save: ' + new Date(lastKnownTimestamp).toLocaleString() + '\n' +
-          'Current save: ' + new Date(currentTimestamp).toLocaleString() + '\n\n' +
-          '⚠️ Continuing will OVERWRITE their changes!\n\n' +
-          'Click OK to overwrite (DANGEROUS)\n' +
-          'Click Cancel to reload and see their changes (SAFE)'
-        );
+        const isSameUser = savedByUser === currentUser?.name;
         
-        if (!shouldContinue) {
-          alert('✅ Save cancelled. Reloading page to get latest data...');
-          location.reload();
-          return;
+        if (!isSameUser) {
+          // Different user saved - show conflict warning
+          const shouldContinue = confirm(
+            '⚠️ CONFLICT DETECTED!\n\n' +
+            'Someone else saved changes while you were working.\n\n' +
+            'Last known save: ' + new Date(lastKnownTimestamp).toLocaleString() + '\n' +
+            'Current save: ' + new Date(currentTimestamp).toLocaleString() + '\n' +
+            'Saved by: ' + (savedByUser || 'Unknown') + '\n\n' +
+            '⚠️ Continuing will OVERWRITE their changes!\n\n' +
+            'Click OK to overwrite (DANGEROUS)\n' +
+            'Click Cancel to reload and see their changes (SAFE)'
+          );
+          
+          if (!shouldContinue) {
+            alert('✅ Save cancelled. Reloading page to get latest data...');
+            location.reload();
+            return;
+          }
+        } else {
+          // Same user - auto-save and manual save, no conflict
+          console.log('✅ Same user save detected, skipping conflict warning');
         }
       }
     }
