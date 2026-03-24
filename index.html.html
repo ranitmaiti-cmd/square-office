@@ -276,6 +276,10 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <span id="connectionDot">🟢</span>
         <span id="connectionText">ONLINE</span>
       </div>
+      <div id="onlineUsersBtn" style="display:flex;align-items:center;gap:6px;padding:4px 12px;background:#4299e1;color:white;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;" title="Click to see who's online">
+        <span>👥</span>
+        <span id="onlineCount">Online: 0</span>
+      </div>
       <span class="user-badge"><span id="topbarName"></span><span class="admin-badge" id="adminBadge" style="display:none;">ADMIN</span></span>
       <button class="btn btn-ghost btn-sm" id="logoutBtn">Logout</button>
     </div>
@@ -495,7 +499,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V12 Granular Saves:</strong> Individual record saves + Zero conflicts for 10+ users + Real-time sync + Offline protection + Field permissions + Smart conflict detection
+            📌 <strong>V13 No Conflicts:</strong> Zero conflict popups + Edit protection (add-only for users) + Online status tracker + Admin full control + Fraud prevention + Last-write-wins
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -798,6 +802,10 @@ let useGranularSaves = true;
 let saveInProgress = false;
 let skipNextConflictCheck = false; // V12.1: Skip conflicts when adding new data
 
+// V13 Online Presence Tracking
+let presenceInterval = null;
+let onlineUsers = [];
+
 // V12 Granular Save Functions
 async function saveTimeLog(log) {
   if (!useGranularSaves) return saveData();
@@ -979,42 +987,15 @@ async function saveData() {
       const currentTimestamp = currentData.timestamp;
       const savedByUser = currentData.savedBy;
       
-      // V11.1: Only show conflict if DIFFERENT user saved
-      // Skip conflict popup if same user (auto-save vs manual save)
-      // V12.1: Skip conflict check if adding new data
-      if (skipNextConflictCheck) {
-        console.log('✅ Conflict check skipped - adding new data');
-        skipNextConflictCheck = false; // Reset flag
-      } else if (lastKnownTimestamp && currentTimestamp && currentTimestamp !== lastKnownTimestamp) {
-        const isSameUser = savedByUser === currentUser?.name;
-        const isAdmin = currentUser?.isAdmin;
-        
-        // Only show conflict popup if:
-        // 1. Different user saved AND
-        // 2. Current user is admin (editing shared data)
-        if (!isSameUser && isAdmin) {
-          // Different user saved - show conflict warning
-          const shouldContinue = confirm(
-            '⚠️ CONFLICT DETECTED!\n\n' +
-            'Someone else saved changes while you were working.\n\n' +
-            'Last known save: ' + new Date(lastKnownTimestamp).toLocaleString() + '\n' +
-            'Current save: ' + new Date(currentTimestamp).toLocaleString() + '\n' +
-            'Saved by: ' + (savedByUser || 'Unknown') + '\n\n' +
-            '⚠️ Continuing will OVERWRITE their changes!\n\n' +
-            'Click OK to overwrite (DANGEROUS)\n' +
-            'Click Cancel to reload and see their changes (SAFE)'
-          );
-          
-          if (!shouldContinue) {
-            alert('✅ Save cancelled. Reloading page to get latest data...');
-            location.reload();
-            return;
-          }
-        } else {
-          // Same user OR non-admin user - skip conflict warning
-          // Non-admin users only edit their own data, won't conflict
-          console.log('✅ Conflict check skipped - same user or non-admin');
-        }
+      // V13: Conflict detection REMOVED entirely
+      // With 10-12 simultaneous users, conflicts are constant
+      // Field permissions prevent actual data conflicts
+      // Last write wins + auto-backups for safety
+      console.log('💾 V13: Saving without conflict check (last write wins)');
+      
+      // Update lastKnownTimestamp for next save
+      if (currentTimestamp) {
+        lastKnownTimestamp = currentTimestamp;
       }
     }
     
@@ -1328,7 +1309,8 @@ document.getElementById('resetPasswordBtn').addEventListener('click', () => {
   document.getElementById('fpNewPass').value = '';
 });
 
-document.getElementById('logoutBtn').addEventListener('click',()=>{
+document.getElementById('logoutBtn').addEventListener('click',async ()=>{
+  await markOffline(); // V13: Mark user as offline
   currentUser=null;
   localStorage.removeItem('currentSession');
   document.getElementById('mainApp').style.display='none';
@@ -2596,6 +2578,104 @@ async function processQueue() {
 
 // Set initial connection status
 updateConnectionStatus(navigator.onLine);
+
+// ═══════════════════════════════════════════════════════
+// V13 ONLINE PRESENCE TRACKING
+// ═══════════════════════════════════════════════════════
+
+async function updatePresence() {
+  if (!currentUser) return;
+  
+  try {
+    await db.collection("presence").doc(currentUser.id).set({
+      userId: currentUser.id,
+      userName: currentUser.name,
+      status: 'online',
+      lastSeen: new Date().toISOString()
+    });
+  } catch(e) {
+    console.error('Presence update failed:', e);
+  }
+}
+
+async function loadOnlineUsers() {
+  try {
+    const snapshot = await db.collection("presence").get();
+    const now = Date.now();
+    const users = [];
+    
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const lastSeen = new Date(data.lastSeen).getTime();
+      const isOnline = (now - lastSeen) < 60000; // Online if seen in last 60 seconds
+      
+      users.push({
+        userId: data.userId,
+        userName: data.userName,
+        isOnline: isOnline
+      });
+    });
+    
+    onlineUsers = users;
+    updateOnlineCount();
+  } catch(e) {
+    console.error('Load online users failed:', e);
+  }
+}
+
+function updateOnlineCount() {
+  const onlineCount = onlineUsers.filter(u => u.isOnline).length;
+  document.getElementById('onlineCount').textContent = `Online: ${onlineCount}`;
+}
+
+function showOnlineUsers() {
+  const onlineList = onlineUsers
+    .filter(u => u.isOnline)
+    .map(u => `🟢 ${u.userName}${u.userId === currentUser?.id ? ' (You)' : ''}`)
+    .join('\n');
+    
+  const offlineList = onlineUsers
+    .filter(u => !u.isOnline)
+    .map(u => `⚪ ${u.userName}`)
+    .join('\n');
+  
+  const message = `👥 TEAM STATUS\n\n${onlineList || 'No one online'}${offlineList ? '\n\n' + offlineList : ''}`;
+  alert(message);
+}
+
+// Update presence every 30 seconds
+presenceInterval = setInterval(() => {
+  updatePresence();
+  loadOnlineUsers();
+}, 30000);
+
+// Initial presence
+setTimeout(() => {
+  if (currentUser) {
+    updatePresence();
+    loadOnlineUsers();
+  }
+}, 2000);
+
+// Click handler for online users button
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('onlineUsersBtn')?.addEventListener('click', showOnlineUsers);
+});
+
+// Mark offline on logout
+async function markOffline() {
+  if (!currentUser) return;
+  try {
+    await db.collection("presence").doc(currentUser.id).set({
+      userId: currentUser.id,
+      userName: currentUser.name,
+      status: 'offline',
+      lastSeen: new Date().toISOString()
+    });
+  } catch(e) {
+    console.error('Mark offline failed:', e);
+  }
+}
 
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
