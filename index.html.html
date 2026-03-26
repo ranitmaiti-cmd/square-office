@@ -499,7 +499,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V13.1 Unlimited Projects:</strong> No project limit + Zero conflicts + Online status + Edit protection + Admin control + Subcollection architecture
+            📌 <strong>V13.2 Unlimited Storage:</strong> All data in subcollections + No backdating (TODAY only) + Unlimited projects/logs/plans + Zero conflicts + Admin full control
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1014,10 +1014,10 @@ async function saveData() {
     
     const saveTimestamp = new Date().toISOString();
     
-    // V13.1: Save projects to subcollection (unlimited size)
-    // Save each project individually to avoid 1MB document limit
+    // V13.2: Save ALL large arrays to subcollections (unlimited size)
     const batch = db.batch();
     
+    // Save projects
     projectsData.forEach(project => {
       const projectRef = db.collection("projects").doc(project.id);
       batch.set(projectRef, {
@@ -1027,14 +1027,43 @@ async function saveData() {
       });
     });
     
-    // Save main data WITHOUT projects (keeps document small)
+    // Save time logs
+    timeLogs.forEach(log => {
+      const logRef = db.collection("timeLogs").doc(log.id);
+      batch.set(logRef, {
+        ...log,
+        updatedAt: saveTimestamp
+      });
+    });
+    
+    // Save plan entries
+    planEntries.forEach(entry => {
+      const entryRef = db.collection("planEntries").doc(entry.id);
+      batch.set(entryRef, {
+        ...entry,
+        updatedAt: saveTimestamp
+      });
+    });
+    
+    // Save leave requests
+    leaveRequests.forEach(leave => {
+      const leaveRef = db.collection("leaveRequests").doc(leave.id);
+      batch.set(leaveRef, {
+        ...leave,
+        updatedAt: saveTimestamp
+      });
+    });
+    
+    // Save main data WITHOUT large arrays (keeps document tiny)
     const dataToSave = {
-      users, clients, typologies, planEntries, 
-      timeLogs, leaveRequests, changeRequests, holidays,
+      users, clients, typologies, changeRequests, holidays,
       timestamp: saveTimestamp,
       instanceId: instanceId,
       savedBy: currentUser?.name || 'Unknown',
-      projectCount: projectsData.length // Track count for reference
+      projectCount: projectsData.length,
+      timeLogCount: timeLogs.length,
+      planEntryCount: planEntries.length,
+      leaveRequestCount: leaveRequests.length
     };
     
     console.log('💾 Saving to Firebase:', {
@@ -1087,7 +1116,9 @@ async function loadData() {
       clients = data.clients || clients;
       typologies = data.typologies || typologies;
       
-      // V13.1: Load projects from subcollection
+      // V13.2: Load all large arrays from subcollections
+      
+      // Load projects
       const projectsSnapshot = await db.collection("projects").get();
       projectsData = [];
       projectsSnapshot.forEach(doc => {
@@ -1095,16 +1126,48 @@ async function loadData() {
       });
       console.log('✅ Loaded projects from subcollection:', projectsData.length);
       
-      // Fallback: If no projects in subcollection, check old structure
+      // Load time logs
+      const timeLogsSnapshot = await db.collection("timeLogs").get();
+      timeLogs = [];
+      timeLogsSnapshot.forEach(doc => {
+        timeLogs.push(doc.data());
+      });
+      console.log('✅ Loaded time logs from subcollection:', timeLogs.length);
+      
+      // Load plan entries
+      const planEntriesSnapshot = await db.collection("planEntries").get();
+      planEntries = [];
+      planEntriesSnapshot.forEach(doc => {
+        planEntries.push(doc.data());
+      });
+      console.log('✅ Loaded plan entries from subcollection:', planEntries.length);
+      
+      // Load leave requests
+      const leaveRequestsSnapshot = await db.collection("leaveRequests").get();
+      leaveRequests = [];
+      leaveRequestsSnapshot.forEach(doc => {
+        leaveRequests.push(doc.data());
+      });
+      console.log('✅ Loaded leave requests from subcollection:', leaveRequests.length);
+      
+      // Fallback: Migrate old structure if subcollections empty
       if (projectsData.length === 0 && data.projectsData) {
         console.log('📦 Migrating projects from old structure...');
         projectsData = data.projectsData;
-        // Will be saved to subcollection on next save
+      }
+      if (timeLogs.length === 0 && data.timeLogs) {
+        console.log('📦 Migrating time logs from old structure...');
+        timeLogs = data.timeLogs;
+      }
+      if (planEntries.length === 0 && data.planEntries) {
+        console.log('📦 Migrating plan entries from old structure...');
+        planEntries = data.planEntries;
+      }
+      if (leaveRequests.length === 0 && data.leaveRequests) {
+        console.log('📦 Migrating leave requests from old structure...');
+        leaveRequests = data.leaveRequests;
       }
       
-      planEntries = data.planEntries || [];
-      timeLogs = data.timeLogs || [];
-      leaveRequests = data.leaveRequests || [];
       changeRequests = data.changeRequests || [];
       holidays = data.holidays || [];
       
@@ -1636,12 +1699,25 @@ function openLogModal(preLinked=null){
   const today = fmt(new Date());
   const logDateInput = document.getElementById('logDate');
   logDateInput.value = today;
-  logDateInput.setAttribute('min', today); // Block past dates
-  logDateInput.setAttribute('max', today); // Block future dates
-  // Make date field read-only so it can't be changed at all
-  logDateInput.setAttribute('readonly', 'readonly');
-  logDateInput.style.backgroundColor = '#f7fafc';
-  logDateInput.style.cursor = 'not-allowed';
+  
+  // V13.2: Lock date to TODAY for regular users, unlock for admins
+  if (currentUser && currentUser.isAdmin) {
+    // Admin: Can select any date
+    logDateInput.removeAttribute('readonly');
+    logDateInput.removeAttribute('min');
+    logDateInput.removeAttribute('max');
+    logDateInput.style.backgroundColor = '#ffffff';
+    logDateInput.style.cursor = 'pointer';
+    logDateInput.title = 'Admin: Can select any date';
+  } else {
+    // Regular users: LOCKED to today only, no backdating
+    logDateInput.setAttribute('min', today);
+    logDateInput.setAttribute('max', today);
+    logDateInput.setAttribute('readonly', 'readonly');
+    logDateInput.style.backgroundColor = '#f7fafc';
+    logDateInput.style.cursor = 'not-allowed';
+    logDateInput.title = 'Date locked to today - cannot backdate';
+  }
   
   document.getElementById('logH').value=0; document.getElementById('logM').value=0;
   document.getElementById('logS').value=''; document.getElementById('logE').value='';
