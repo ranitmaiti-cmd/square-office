@@ -522,7 +522,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V13.4 Live Timers:</strong> See who's working NOW (updates every second) + Live timer widget + Recent logs + All users visible + Unlimited storage
+            📌 <strong>V13.5 Real-Time Team View:</strong> See ALL users' active timers + Dashboard auto-refreshes every 30s + Complete team visibility + Live activity feed
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1561,38 +1561,75 @@ function renderDashboard(){
   renderLiveTimeLogFeed();
 }
 
+// V13.5: Firebase Active Timer Functions
+async function saveActiveTimerToFirebase() {
+  if (!currentUser || !timerRunning || !timerStartedAt) return;
+  
+  try {
+    const timerData = {
+      userId: currentUser.id,
+      userName: currentUser.name,
+      projectName: timerLinkedPlan ? timerLinkedPlan.project : 'Unplanned',
+      projectId: timerLinkedPlan ? timerLinkedPlan.projectId : null,
+      phase: timerLinkedPlan ? (timerLinkedPlan.phase || timerLinkedPlan.typology || '') : '',
+      startTime: timerStartedAt,
+      running: true,
+      updatedAt: Date.now()
+    };
+    
+    await db.collection("activeTimers").doc(currentUser.id).set(timerData);
+    console.log('✅ Active timer saved to Firebase');
+  } catch (e) {
+    console.error('❌ Error saving active timer:', e);
+  }
+}
+
+async function removeActiveTimerFromFirebase() {
+  if (!currentUser) return;
+  
+  try {
+    await db.collection("activeTimers").doc(currentUser.id).delete();
+    console.log('✅ Active timer removed from Firebase');
+  } catch (e) {
+    console.error('❌ Error removing active timer:', e);
+  }
+}
+
 // V13.4: Live Timer Widget
 let liveTimerInterval = null;
 
-function renderLiveTimers() {
+async function renderLiveTimers() {
   const feedEl = document.getElementById('liveTimerFeed');
   const countEl = document.getElementById('liveTimerCount');
   if (!feedEl) return;
   
-  // Collect all active timers from all users
+  // V13.5: Load all active timers from Firebase
   const activeTimers = [];
   
-  users.forEach(user => {
-    const timerKey = `timer_${user.id}`;
-    const timerData = localStorage.getItem(timerKey);
+  try {
+    const snapshot = await db.collection("activeTimers").get();
     
-    if (timerData) {
-      try {
-        const timer = JSON.parse(timerData);
-        if (timer.running && timer.startTime) {
-          const project = projectsData.find(p => p.id === timer.projectId);
-          activeTimers.push({
-            user: user,
-            timer: timer,
-            project: project,
-            startTime: new Date(timer.startTime)
-          });
-        }
-      } catch (e) {
-        console.error('Error parsing timer for user:', user.name, e);
+    snapshot.forEach(doc => {
+      const timer = doc.data();
+      if (timer.running && timer.startTime) {
+        const elapsed = Date.now() - timer.startTime;
+        const elapsedSecs = Math.floor(elapsed / 1000);
+        
+        activeTimers.push({
+          userName: timer.userName,
+          elapsedSecs: elapsedSecs,
+          projectName: timer.projectName || 'Unknown Activity',
+          phase: timer.phase || ''
+        });
       }
-    }
-  });
+    });
+    
+    // Sort by elapsed time (longest first)
+    activeTimers.sort((a, b) => b.elapsedSecs - a.elapsedSecs);
+    
+  } catch (e) {
+    console.error('❌ Error loading active timers:', e);
+  }
   
   // Update count
   if (countEl) {
@@ -1609,23 +1646,19 @@ function renderLiveTimers() {
   
   // Render active timers
   feedEl.innerHTML = activeTimers.map(item => {
-    const elapsed = Math.floor((Date.now() - item.startTime.getTime()) / 1000);
-    const hours = Math.floor(elapsed / 3600);
-    const minutes = Math.floor((elapsed % 3600) / 60);
-    const seconds = elapsed % 60;
+    const hours = Math.floor(item.elapsedSecs / 3600);
+    const minutes = Math.floor((item.elapsedSecs % 3600) / 60);
+    const seconds = item.elapsedSecs % 60;
     const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-    
-    const projectName = item.project ? item.project.name : (item.timer.activity || 'Unknown Activity');
-    const phase = item.timer.phase || '';
     
     return `
       <div style="background:#f0fdf4;padding:10px;border-radius:6px;border-left:3px solid #10b981;">
         <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px;">
-          <div style="font-weight:600;font-size:13px;color:#2d3748;">🟢 ${item.user.name}</div>
+          <div style="font-weight:600;font-size:13px;color:#2d3748;">🟢 ${item.userName}</div>
           <div style="font-size:14px;font-weight:700;color:#10b981;font-family:monospace;">${timeStr} ⬆️</div>
         </div>
         <div style="font-size:12px;color:#4a5568;">
-          📁 ${projectName}${phase ? ` - ${phase}` : ''}
+          📁 ${item.projectName}${item.phase ? ` - ${item.phase}` : ''}
         </div>
       </div>
     `;
@@ -1641,10 +1674,13 @@ function startLiveTimerUpdates() {
   // Initial render
   renderLiveTimers();
   
-  // Update every second
+  // V13.5: Update every second for live timers
   liveTimerInterval = setInterval(() => {
     renderLiveTimers();
   }, 1000);
+  
+  // V13.5: Auto-refresh time logs every 30 seconds
+  startDashboardAutoRefresh();
 }
 
 function stopLiveTimerUpdates() {
@@ -1652,7 +1688,92 @@ function stopLiveTimerUpdates() {
     clearInterval(liveTimerInterval);
     liveTimerInterval = null;
   }
+  stopDashboardAutoRefresh();
 }
+
+// V13.5: Dashboard Auto-Refresh
+let dashboardRefreshInterval = null;
+
+function startDashboardAutoRefresh() {
+  // Clear any existing interval
+  if (dashboardRefreshInterval) {
+    clearInterval(dashboardRefreshInterval);
+  }
+  
+  // Auto-refresh every 30 seconds
+  dashboardRefreshInterval = setInterval(async () => {
+    console.log('🔄 Auto-refreshing Dashboard data...');
+    
+    // Reload time logs from Firebase
+    try {
+      const snapshot = await db.collection("timeLogs").get();
+      timeLogs = [];
+      snapshot.forEach(doc => {
+        timeLogs.push({ id: doc.id, ...doc.data() });
+      });
+      console.log('✅ Time logs refreshed:', timeLogs.length);
+      
+      // Re-render Recent Time Logs widget
+      renderLiveTimeLogFeed();
+      
+      // Update stats
+      const dashAnalytics = document.getElementById('dashAnalytics');
+      if (dashAnalytics) {
+        renderDashboardStats();
+      }
+    } catch (e) {
+      console.error('❌ Error refreshing Dashboard:', e);
+    }
+  }, 30000); // 30 seconds
+  
+  console.log('✅ Dashboard auto-refresh started (every 30s)');
+}
+
+function stopDashboardAutoRefresh() {
+  if (dashboardRefreshInterval) {
+    clearInterval(dashboardRefreshInterval);
+    dashboardRefreshInterval = null;
+    console.log('⏹️ Dashboard auto-refresh stopped');
+  }
+}
+
+function renderDashboardStats() {
+  const el = document.getElementById('dashAnalytics');
+  if (!el) return;
+  
+  const thisMonth = fmt(new Date()).substring(0, 7);
+  const monthLogs = timeLogs.filter(l => l.date.startsWith(thisMonth));
+  const totalMins = monthLogs.reduce((sum, l) => sum + l.durationMins, 0);
+  const prodMins = monthLogs.filter(l => l.productive).reduce((sum, l) => sum + l.durationMins, 0);
+  const prodPct = totalMins > 0 ? Math.round((prodMins / totalMins) * 100) : 0;
+  const activeProjs = new Set(projectsData.filter(p => p.status === 'active').map(p => p.id)).size;
+  const overBudget = projectsData.filter(p => p.status === 'active' && p.totalHours > p.budgetedHours).length;
+  const avgHours = users.length > 0 ? (totalMins / 60 / users.length).toFixed(1) : 0;
+  
+  el.innerHTML = `
+    <div class="stat-card" style="border-top:3px solid #4299e1;">
+      <div class="stat-value">${minsToHM(totalMins)}</div>
+      <div class="stat-label">Total Hours (This Month)</div>
+    </div>
+    <div class="stat-card" style="border-top:3px solid #48bb78;">
+      <div class="stat-value">${prodPct}%</div>
+      <div class="stat-label">Productive Utilization</div>
+    </div>
+    <div class="stat-card" style="border-top:3px solid #ed8936;">
+      <div class="stat-value">${activeProjs}</div>
+      <div class="stat-label">Active Projects</div>
+    </div>
+    <div class="stat-card" style="border-top:3px solid #9f7aea;">
+      <div class="stat-value">${overBudget}</div>
+      <div class="stat-label">Phases Over Budget</div>
+    </div>
+    <div class="stat-card" style="border-top:3px solid #38b2ac;">
+      <div class="stat-value">${avgHours}h</div>
+      <div class="stat-label">Avg Hours/Person</div>
+    </div>
+  `;
+}
+
 
 // V13.3: Live Time Log Feed
 function renderLiveTimeLogFeed() {
@@ -2714,6 +2835,9 @@ document.getElementById('timerStartBtn').addEventListener('click',()=>{
   else { projBadge.textContent='⚠️ Unplanned'; projBadge.style.background='#fff5f5'; projBadge.style.color='#e53e3e'; }
   document.getElementById('timerNavLabel').textContent='⏱ Running...';
   timerInterval=setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
+  
+  // V13.5: Save active timer to Firebase
+  saveActiveTimerToFirebase();
 });
 
 document.getElementById('timerStopBtn').addEventListener('click',()=>{
@@ -2773,6 +2897,9 @@ function resetTimer() {
   
   const widget = document.getElementById('timerWidget');
   if (widget) widget.classList.remove('running');
+  
+  // V13.5: Remove active timer from Firebase
+  removeActiveTimerFromFirebase();
 }
 
 // ═══════════════════════════════════════════════════════
