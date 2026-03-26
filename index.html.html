@@ -522,7 +522,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.0 Production:</strong> Real-time team visibility + Pause/Resume + Auto-refresh + All data saves + Ready for April 1st
+            📌 <strong>V14.1 Timer Persistence:</strong> Timer survives refresh + Pause/Resume + Real-time team view + All data saves + Production ready
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1363,6 +1363,9 @@ loadData().then(() => {
         document.getElementById('adminBadge').style.display = user.isAdmin ? 'inline-block' : 'none';
         document.querySelectorAll('.admin-only').forEach(el => el.style.display = user.isAdmin ? 'flex' : 'none');
         initTimeReport(); renderDashboard(); updateApprovalBadge();
+        
+        // V14.1: Restore timer state if exists
+        restoreTimerState();
       }
     }
   } catch(e) {}
@@ -2839,6 +2842,15 @@ document.getElementById('timerStartBtn').addEventListener('click',()=>{
     timerLinkedPlan=myPlans[idx];
   }
   timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
+  
+  // V14.1: Save timer state to localStorage
+  localStorage.setItem('timerState', JSON.stringify({
+    startedAt: timerStartedAt,
+    pausedMs: timerPausedMs,
+    running: true,
+    linkedPlan: timerLinkedPlan
+  }));
+  
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPreStart').style.display='none';
   document.getElementById('timerRunning').style.display='block';
@@ -2966,12 +2978,63 @@ document.getElementById('timerCompletePausedBtn').addEventListener('click',()=>{
   alert(`✅ Task Completed!\n\n📁 ${timerLinkedPlan.project}\n\nRemoved from Weekly Planner.`);
 });
 
+// V14.1: Restore timer state from localStorage
+function restoreTimerState() {
+  try {
+    const saved = localStorage.getItem('timerState');
+    if (!saved) return;
+    
+    const state = JSON.parse(saved);
+    if (!state.running || !state.startedAt) return;
+    
+    // Restore timer variables
+    timerStartedAt = state.startedAt;
+    timerPausedMs = state.pausedMs || 0;
+    timerLinkedPlan = state.linkedPlan;
+    timerRunning = true;
+    
+    // Restore UI
+    document.getElementById('timerWidget').classList.add('running');
+    document.getElementById('timerPreStart').style.display='none';
+    document.getElementById('timerRunning').style.display='block';
+    document.getElementById('timerDisplay').classList.add('running');
+    document.getElementById('timerStatus').textContent='● Recording...';
+    
+    const projBadge=document.getElementById('timerProject');
+    projBadge.style.display='block';
+    if(timerLinkedPlan){ 
+      projBadge.textContent=`📁 ${timerLinkedPlan.project}`; 
+      projBadge.style.background='#ebf4ff'; 
+      projBadge.style.color='#2b6cb0'; 
+    } else { 
+      projBadge.textContent='⚠️ Unplanned'; 
+      projBadge.style.background='#fff5f5'; 
+      projBadge.style.color='#e53e3e'; 
+    }
+    
+    document.getElementById('timerNavLabel').textContent='⏱ Running...';
+    
+    // Restart interval
+    timerInterval=setInterval(()=>{ 
+      document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); 
+    },1000);
+    
+    console.log('✅ Timer restored from localStorage');
+  } catch(e) {
+    console.error('Error restoring timer:', e);
+    localStorage.removeItem('timerState');
+  }
+}
+
 function resetTimer() {
   timerRunning = false;
   timerStartedAt = null;
   timerPausedMs = 0;
   timerLinkedPlan = null;
   if (timerInterval) clearInterval(timerInterval);
+  
+  // V14.1: Clear timer state from localStorage
+  localStorage.removeItem('timerState');
   
   const display = document.getElementById('timerDisplay');
   if (display) {
@@ -2990,6 +3053,9 @@ function resetTimer() {
   
   const runningDiv = document.getElementById('timerRunning');
   if (runningDiv) runningDiv.style.display = 'none';
+  
+  const pausedDiv = document.getElementById('timerPaused');
+  if (pausedDiv) pausedDiv.style.display = 'none';
   
   const widget = document.getElementById('timerWidget');
   if (widget) widget.classList.remove('running');
