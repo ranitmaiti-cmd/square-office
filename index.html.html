@@ -499,7 +499,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V13 No Conflicts:</strong> Zero conflict popups + Edit protection (add-only for users) + Online status tracker + Admin full control + Fraud prevention + Last-write-wins
+            📌 <strong>V13.1 Unlimited Projects:</strong> No project limit + Zero conflicts + Online status + Edit protection + Admin control + Subcollection architecture
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1013,12 +1013,28 @@ async function saveData() {
     }
     
     const saveTimestamp = new Date().toISOString();
+    
+    // V13.1: Save projects to subcollection (unlimited size)
+    // Save each project individually to avoid 1MB document limit
+    const batch = db.batch();
+    
+    projectsData.forEach(project => {
+      const projectRef = db.collection("projects").doc(project.id);
+      batch.set(projectRef, {
+        ...project,
+        updatedAt: saveTimestamp,
+        updatedBy: currentUser?.name || 'Unknown'
+      });
+    });
+    
+    // Save main data WITHOUT projects (keeps document small)
     const dataToSave = {
-      users, clients, typologies, projectsData, planEntries, 
+      users, clients, typologies, planEntries, 
       timeLogs, leaveRequests, changeRequests, holidays,
       timestamp: saveTimestamp,
       instanceId: instanceId,
-      savedBy: currentUser?.name || 'Unknown'
+      savedBy: currentUser?.name || 'Unknown',
+      projectCount: projectsData.length // Track count for reference
     };
     
     console.log('💾 Saving to Firebase:', {
@@ -1034,6 +1050,11 @@ async function saveData() {
     
     console.log('📋 Plan Entries to Save:', planEntries);
     
+    // V13.1: Commit projects batch write first
+    await batch.commit();
+    console.log('✅ Projects saved to subcollection:', projectsData.length);
+    
+    // Then save main document
     await db.collection("companyData").doc("squareDB").set(dataToSave);
     
     // Update our known timestamp
@@ -1065,7 +1086,22 @@ async function loadData() {
       users = data.users || users;
       clients = data.clients || clients;
       typologies = data.typologies || typologies;
-      projectsData = data.projectsData || projectsData;
+      
+      // V13.1: Load projects from subcollection
+      const projectsSnapshot = await db.collection("projects").get();
+      projectsData = [];
+      projectsSnapshot.forEach(doc => {
+        projectsData.push(doc.data());
+      });
+      console.log('✅ Loaded projects from subcollection:', projectsData.length);
+      
+      // Fallback: If no projects in subcollection, check old structure
+      if (projectsData.length === 0 && data.projectsData) {
+        console.log('📦 Migrating projects from old structure...');
+        projectsData = data.projectsData;
+        // Will be saved to subcollection on next save
+      }
+      
       planEntries = data.planEntries || [];
       timeLogs = data.timeLogs || [];
       leaveRequests = data.leaveRequests || [];
