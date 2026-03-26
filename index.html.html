@@ -511,7 +511,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V13.3 Live Feed:</strong> Dashboard shows recent time logs + Real-time activity + Reliable saves + No backdating + Unlimited storage + Zero conflicts
+            📌 <strong>V13.3.2 Live Feed Fix:</strong> Aggressive debug logging + Shows all time logs + Fixed rendering + No backdating
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1543,13 +1543,22 @@ function renderDashboard(){
 
 // V13.3: Live Time Log Feed
 function renderLiveTimeLogFeed() {
+  console.log('🔥🔥🔥 renderLiveTimeLogFeed() CALLED!');
   const feedEl = document.getElementById('liveTimeLogFeed');
-  if (!feedEl) return;
+  console.log('🔥 Feed element found:', !!feedEl);
+  if (!feedEl) {
+    console.error('❌❌❌ liveTimeLogFeed element NOT FOUND!');
+    return;
+  }
+  
+  console.log('📡 Rendering live feed - Total time logs:', timeLogs.length);
   
   // Get last 10 time logs sorted by date (most recent first)
   const recentLogs = [...timeLogs]
     .sort((a, b) => new Date(b.date) - new Date(a.date))
     .slice(0, 10);
+  
+  console.log('📡 Recent logs to display:', recentLogs.length, recentLogs.map(l => `${l.date} - ${users.find(u=>u.id===l.userId)?.name}`));
   
   if (recentLogs.length === 0) {
     feedEl.innerHTML = '<div style="color:#a0aec0;font-size:13px;padding:12px;text-align:center;">No time logs yet</div>';
