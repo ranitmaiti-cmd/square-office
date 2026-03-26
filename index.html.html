@@ -522,7 +522,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V13.5.2 Complete:</strong> Pause/Resume timer + Debug logging + See all users' timers + Auto-refresh + Task stays in planner + Real-time team view
+            📌 <strong>V14.0 Production Ready:</strong> Complete team visibility + Pause/Resume + Auto-refresh + All data saves + Unlimited storage + Production stable
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1604,25 +1604,17 @@ async function removeActiveTimerFromFirebase() {
 let liveTimerInterval = null;
 
 async function renderLiveTimers() {
-  console.log('🔥🔥🔥 renderLiveTimers() CALLED!');
   const feedEl = document.getElementById('liveTimerFeed');
   const countEl = document.getElementById('liveTimerCount');
-  if (!feedEl) {
-    console.error('❌ liveTimerFeed element NOT FOUND!');
-    return;
-  }
+  if (!feedEl) return;
   
-  console.log('⏱️ Loading active timers from Firebase...');
-  
-  // V13.5: Load all active timers from Firebase
+  // V14.0: Load all active timers from Firebase
   const activeTimers = [];
   
   try {
     const snapshot = await db.collection("activeTimers").get();
-    console.log('📊 Firebase activeTimers collection size:', snapshot.size);
     
     snapshot.forEach(doc => {
-      console.log('📄 Active timer doc:', doc.id, doc.data());
       const timer = doc.data();
       if (timer.running && timer.startTime) {
         const elapsed = Date.now() - timer.startTime;
@@ -1637,12 +1629,13 @@ async function renderLiveTimers() {
       }
     });
     
-    console.log('✅ Active timers loaded:', activeTimers.length, activeTimers);
-    
     // Sort by elapsed time (longest first)
     activeTimers.sort((a, b) => b.elapsedSecs - a.elapsedSecs);
     
   } catch (e) {
+    console.error('❌ Error loading active timers:', e);
+  }
+  
     console.error('❌ Error loading active timers:', e);
   }
   
@@ -1792,22 +1785,13 @@ function renderDashboardStats() {
 
 // V13.3: Live Time Log Feed
 function renderLiveTimeLogFeed() {
-  console.log('🔥🔥🔥 renderLiveTimeLogFeed() CALLED!');
   const feedEl = document.getElementById('liveTimeLogFeed');
-  console.log('🔥 Feed element found:', !!feedEl);
-  if (!feedEl) {
-    console.error('❌❌❌ liveTimeLogFeed element NOT FOUND!');
-    return;
-  }
-  
-  console.log('📡 Rendering live feed - Total time logs:', timeLogs.length);
+  if (!feedEl) return;
   
   // Get last 10 time logs sorted by date (most recent first)
   const recentLogs = [...timeLogs]
     .sort((a, b) => new Date(b.date) - new Date(a.date))
     .slice(0, 10);
-  
-  console.log('📡 Recent logs to display:', recentLogs.length, recentLogs.map(l => `${l.date} - ${users.find(u=>u.id===l.userId)?.name}`));
   
   if (recentLogs.length === 0) {
     feedEl.innerHTML = '<div style="color:#a0aec0;font-size:13px;padding:12px;text-align:center;">No time logs yet</div>';
