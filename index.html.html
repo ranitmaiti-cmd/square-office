@@ -316,6 +316,18 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="page active" id="page-dashboard">
         <h2 class="page-title">📊 Dashboard</h2>
         <div class="stats-grid" id="dashAnalytics" style="margin-bottom:20px;"></div>
+        
+        <!-- V13.3: Live Time Log Feed -->
+        <div class="card" style="margin-bottom:20px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;font-size:16px;font-weight:700;color:#2d3748;">📡 Recent Time Logs</h3>
+            <a href="#" onclick="document.querySelector('[data-page=timelog]').click(); return false;" style="font-size:12px;color:#4299e1;text-decoration:none;font-weight:600;">View All →</a>
+          </div>
+          <div id="liveTimeLogFeed" style="display:flex;flex-direction:column;gap:8px;">
+            <div style="color:#a0aec0;font-size:13px;padding:12px;text-align:center;">Loading recent activity...</div>
+          </div>
+        </div>
+        
         <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
           <button class="btn btn-primary btn-sm" id="dashAddHoliday">📅 Add Holiday</button>
           <button class="btn btn-ghost btn-sm" id="dashViewHolidays">View Holidays</button>
@@ -499,7 +511,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V13.2 Unlimited Storage:</strong> All data in subcollections + No backdating (TODAY only) + Unlimited projects/logs/plans + Zero conflicts + Admin full control
+            📌 <strong>V13.3 Live Feed:</strong> Dashboard shows recent time logs + Real-time activity + Reliable saves + No backdating + Unlimited storage + Zero conflicts
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1014,45 +1026,66 @@ async function saveData() {
     
     const saveTimestamp = new Date().toISOString();
     
-    // V13.2: Save ALL large arrays to subcollections (unlimited size)
-    const batch = db.batch();
+    // V13.2.1: Save each collection separately to avoid 500-operation batch limit
+    // and ensure all data is saved reliably
+    
+    console.log('💾 Starting save to Firebase:', {
+      projects: projectsData.length,
+      timeLogs: timeLogs.length,
+      planEntries: planEntries.length,
+      leaveRequests: leaveRequests.length,
+      users: users.length,
+      clients: clients.length
+    });
     
     // Save projects
+    const projectBatch = db.batch();
     projectsData.forEach(project => {
       const projectRef = db.collection("projects").doc(project.id);
-      batch.set(projectRef, {
+      projectBatch.set(projectRef, {
         ...project,
         updatedAt: saveTimestamp,
         updatedBy: currentUser?.name || 'Unknown'
       });
     });
+    await projectBatch.commit();
+    console.log('✅ Projects saved:', projectsData.length);
     
     // Save time logs
+    const timeLogBatch = db.batch();
     timeLogs.forEach(log => {
       const logRef = db.collection("timeLogs").doc(log.id);
-      batch.set(logRef, {
+      timeLogBatch.set(logRef, {
         ...log,
         updatedAt: saveTimestamp
       });
     });
+    await timeLogBatch.commit();
+    console.log('✅ Time logs saved:', timeLogs.length);
     
     // Save plan entries
+    const planBatch = db.batch();
     planEntries.forEach(entry => {
       const entryRef = db.collection("planEntries").doc(entry.id);
-      batch.set(entryRef, {
+      planBatch.set(entryRef, {
         ...entry,
         updatedAt: saveTimestamp
       });
     });
+    await planBatch.commit();
+    console.log('✅ Plan entries saved:', planEntries.length);
     
     // Save leave requests
+    const leaveBatch = db.batch();
     leaveRequests.forEach(leave => {
       const leaveRef = db.collection("leaveRequests").doc(leave.id);
-      batch.set(leaveRef, {
+      leaveBatch.set(leaveRef, {
         ...leave,
         updatedAt: saveTimestamp
       });
     });
+    await leaveBatch.commit();
+    console.log('✅ Leave requests saved:', leaveRequests.length);
     
     // Save main data WITHOUT large arrays (keeps document tiny)
     const dataToSave = {
@@ -1066,25 +1099,18 @@ async function saveData() {
       leaveRequestCount: leaveRequests.length
     };
     
-    console.log('💾 Saving to Firebase:', {
-      projects: projectsData.length,
-      clients: clients.length,
-      users: users.length,
-      planEntries: planEntries.length,
-      timeLogs: timeLogs.length,
-      leaveRequests: leaveRequests.length,
-      savedBy: dataToSave.savedBy,
-      instanceId: instanceId
-    });
-    
-    console.log('📋 Plan Entries to Save:', planEntries);
-    
-    // V13.1: Commit projects batch write first
-    await batch.commit();
-    console.log('✅ Projects saved to subcollection:', projectsData.length);
-    
-    // Then save main document
+    // Save main document
     await db.collection("companyData").doc("squareDB").set(dataToSave);
+    console.log('✅ Main document saved');
+    
+    console.log('🎉 ALL DATA SAVED SUCCESSFULLY:', {
+      projects: projectsData.length,
+      timeLogs: timeLogs.length,
+      planEntries: planEntries.length,
+      leaveRequests: leaveRequests.length,
+      users: users.length,
+      clients: clients.length
+    });
     
     // Update our known timestamp
     lastKnownTimestamp = saveTimestamp;
@@ -1510,6 +1536,62 @@ function renderDashboard(){
     });
     grid.appendChild(row);
   });
+  
+  // V13.3: Render live time log feed
+  renderLiveTimeLogFeed();
+}
+
+// V13.3: Live Time Log Feed
+function renderLiveTimeLogFeed() {
+  const feedEl = document.getElementById('liveTimeLogFeed');
+  if (!feedEl) return;
+  
+  // Get last 10 time logs sorted by date (most recent first)
+  const recentLogs = [...timeLogs]
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 10);
+  
+  if (recentLogs.length === 0) {
+    feedEl.innerHTML = '<div style="color:#a0aec0;font-size:13px;padding:12px;text-align:center;">No time logs yet</div>';
+    return;
+  }
+  
+  feedEl.innerHTML = recentLogs.map(log => {
+    const user = users.find(u => u.id === log.userId);
+    const project = projectsData.find(p => p.id === log.projectId);
+    const logDate = new Date(log.date);
+    const today = new Date();
+    const daysDiff = Math.floor((today - logDate) / (1000 * 60 * 60 * 24));
+    
+    let timeAgo = '';
+    if (daysDiff === 0) timeAgo = 'Today';
+    else if (daysDiff === 1) timeAgo = 'Yesterday';
+    else if (daysDiff < 7) timeAgo = `${daysDiff} days ago`;
+    else timeAgo = log.date;
+    
+    const isProductive = log.productive;
+    const badge = isProductive ? 
+      '<span style="background:#c6f6d5;color:#22543d;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600;">Productive</span>' :
+      '<span style="background:#fed7d7;color:#742a2a;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600;">Non-Productive</span>';
+    
+    return `
+      <div style="background:#f7fafc;padding:10px;border-radius:6px;border-left:3px solid ${isProductive ? '#48bb78' : '#fc8181'};">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px;">
+          <div style="font-weight:600;font-size:13px;color:#2d3748;">👤 ${user?.name || 'Unknown'}</div>
+          <div style="font-size:11px;color:#718096;">${timeAgo}</div>
+        </div>
+        <div style="font-size:14px;font-weight:700;color:#4299e1;margin-bottom:4px;">⏱ ${minsToHM(log.durationMins)}</div>
+        <div style="font-size:12px;color:#4a5568;margin-bottom:4px;">
+          ${project ? `📁 ${project.name}` : `📝 ${log.activity || 'Activity'}`}
+          ${log.phase ? ` - ${log.phase}` : ''}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          ${badge}
+          ${log.description ? `<span style="font-size:11px;color:#718096;">${log.description}</span>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 // ═══════════════════════════════════════════════════════
