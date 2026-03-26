@@ -522,7 +522,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.1 Timer Persistence:</strong> Timer survives refresh + Pause/Resume + Real-time team view + All data saves + Production ready
+            📌 <strong>V14.2 Production Final:</strong> Critical bugs fixed + Phase dropdown working + No concurrent timers + Stale timer cleanup + April 1st ready!
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1624,11 +1624,23 @@ async function renderLiveTimers() {
     const snapshot = await db.collection("activeTimers").get();
     console.log('📊 Firebase activeTimers collection size:', snapshot.size);
     
+    // V14.2: FIX #3 - Track stale timers for cleanup
+    const staleTimers = [];
+    const STALE_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours
+    
     snapshot.forEach(doc => {
       console.log('📄 Active timer doc:', doc.id, doc.data());
       const timer = doc.data();
+      
+      // V14.2: Check if timer is stale (older than 24 hours)
+      const elapsed = Date.now() - timer.startTime;
+      if (elapsed > STALE_THRESHOLD) {
+        console.warn('⚠️ Stale timer detected:', doc.id, 'elapsed:', Math.floor(elapsed / 3600000), 'hours');
+        staleTimers.push(doc.id);
+        return; // Skip stale timers
+      }
+      
       if (timer.running && timer.startTime) {
-        const elapsed = Date.now() - timer.startTime;
         const elapsedSecs = Math.floor(elapsed / 1000);
         
         activeTimers.push({
@@ -1639,6 +1651,19 @@ async function renderLiveTimers() {
         });
       }
     });
+    
+    // V14.2: Clean up stale timers from Firebase
+    if (staleTimers.length > 0) {
+      console.log('🧹 Cleaning up', staleTimers.length, 'stale timers...');
+      for (const timerId of staleTimers) {
+        try {
+          await db.collection("activeTimers").doc(timerId).delete();
+          console.log('✅ Deleted stale timer:', timerId);
+        } catch (e) {
+          console.error('❌ Error deleting stale timer:', timerId, e);
+        }
+      }
+    }
     
     console.log('✅ Active timers loaded:', activeTimers.length, activeTimers);
     
@@ -2823,6 +2848,12 @@ document.getElementById('timerNavBtn').addEventListener('click',()=>{
 })();
 
 document.getElementById('timerStartBtn').addEventListener('click',()=>{
+  // V14.2: FIX #2 - Prevent concurrent timers
+  if(timerRunning){
+    alert('⚠️ Timer Already Running!\n\nPlease stop or pause your current timer before starting a new one.\n\nCurrent Task: ' + (timerLinkedPlan ? timerLinkedPlan.project : 'Unplanned'));
+    return;
+  }
+  
   const today=fmt(new Date()), myPlans=planEntries.filter(p=>p.userId===currentUser.id&&p.date===today&&!p.done);
   if(myPlans.length===0){
     if(currentUser.isAdmin){
@@ -2885,6 +2916,8 @@ document.getElementById('timerPauseBtn').addEventListener('click',()=>{
     document.getElementById('logProdYes').checked=true;
     document.getElementById('logProdFields').style.display='block';
     document.getElementById('logNonProdFields').style.display='none';
+    // V14.2: Trigger change event to populate phase dropdown
+    document.getElementById('logProdYes').dispatchEvent(new Event('change'));
     resetTimer();
     return;
   }
@@ -2948,6 +2981,8 @@ document.getElementById('timerCompleteBtn').addEventListener('click',()=>{
     document.getElementById('logProdYes').checked=true;
     document.getElementById('logProdFields').style.display='block';
     document.getElementById('logNonProdFields').style.display='none';
+    // V14.2: Trigger change event to populate phase dropdown
+    document.getElementById('logProdYes').dispatchEvent(new Event('change'));
     resetTimer();
     return;
   }
