@@ -522,7 +522,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.2 Production:</strong> Logout cleanup + Non-productive sync + 8hr orphan cleanup + Inactivity auto-pause + Forgotten timer recovery + All bugs fixed!
+            📌 <strong>V14.2 Production Final:</strong> Critical bugs fixed + Phase dropdown working + No concurrent timers + Stale timer cleanup + April 1st ready!
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -959,9 +959,6 @@ let editPlanUser = null;
 let editPlanDay  = null;
 
 let timerInterval=null, timerStartedAt=null, timerPausedMs=0, timerRunning=false, timerLinkedPlan=null;
-// V14.2.2: FIX #6 - Inactivity auto-pause
-let lastActivity = Date.now();
-let inactivityChecker = null;
 let mTimerInterval=null, mTimerStartedAt=null, mTimerPausedMs=0, mTimerRunning=false;
 
 // ═══════════════════════════════════════════════════════
@@ -1350,7 +1347,7 @@ function projectLoggedMins(projectId){ return timeLogs.filter(l=>l.projectId===p
 // ═══════════════════════════════════════════════════════
 // INIT — Load data then set up login
 // ═══════════════════════════════════════════════════════
-loadData().then(async () => {
+loadData().then(() => {
   console.log('Data ready. Checking for saved session...');
   // Auto-login from session
   try {
@@ -1367,16 +1364,11 @@ loadData().then(async () => {
         document.querySelectorAll('.admin-only').forEach(el => el.style.display = user.isAdmin ? 'flex' : 'none');
         initTimeReport(); renderDashboard(); updateApprovalBadge();
         
-        // V14.2.2: Start inactivity monitoring
-        startInactivityMonitor();
-        
-        // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
-        await restoreTimerState();
+        // V14.1: Restore timer state if exists
+        restoreTimerState();
       }
     }
-  } catch(e) {
-    console.error('Auto-login error:', e);
-  }
+  } catch(e) {}
 });
 
 // ═══════════════════════════════════════════════════════
@@ -1386,7 +1378,7 @@ document.getElementById('loginBtn').addEventListener('click', doLogin);
 document.getElementById('loginUsername').addEventListener('keypress', e=>{ if(e.key==='Enter') doLogin(); });
 document.getElementById('loginPassword').addEventListener('keypress', e=>{ if(e.key==='Enter') doLogin(); });
 
-async function doLogin(){
+function doLogin(){
   const username=document.getElementById('loginUsername').value.trim().toLowerCase();
   const pass=document.getElementById('loginPassword').value.trim();
   
@@ -1407,12 +1399,6 @@ async function doLogin(){
     document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
     initTimeReport(); renderDashboard(); updateApprovalBadge();
-    
-    // V14.2.2: FIX #6 - Start inactivity monitoring
-    startInactivityMonitor();
-    
-    // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
-    await restoreTimerState();
   } else {
     err.style.display='block';
     err.textContent='Invalid username or password.';
@@ -1468,13 +1454,6 @@ document.getElementById('resetPasswordBtn').addEventListener('click', () => {
 });
 
 document.getElementById('logoutBtn').addEventListener('click',async ()=>{
-  // V14.2.2: FIX #1 - Clean up timer before logout
-  if (timerRunning) {
-    await removeActiveTimerFromFirebase();
-    console.log('🧹 Timer cleaned up on logout');
-  }
-  localStorage.removeItem('timerState');
-  
   await markOffline(); // V13: Mark user as offline
   currentUser=null;
   localStorage.removeItem('currentSession');
@@ -1624,41 +1603,6 @@ async function removeActiveTimerFromFirebase() {
   }
 }
 
-// V14.2.2: FIX #6 - Inactivity auto-pause (30 minutes)
-function startInactivityMonitor() {
-  // Track user activity
-  const updateActivity = () => { lastActivity = Date.now(); };
-  document.addEventListener('mousemove', updateActivity);
-  document.addEventListener('keypress', updateActivity);
-  document.addEventListener('click', updateActivity);
-  document.addEventListener('scroll', updateActivity);
-  
-  // Check every minute for inactivity
-  if (inactivityChecker) clearInterval(inactivityChecker);
-  inactivityChecker = setInterval(() => {
-    if (timerRunning) {
-      const idleTime = Date.now() - lastActivity;
-      const INACTIVITY_THRESHOLD = 30 * 60 * 1000; // 30 minutes
-      
-      if (idleTime > INACTIVITY_THRESHOLD) {
-        console.log('⏸️ Auto-pausing timer due to inactivity');
-        // Trigger pause button
-        const pauseBtn = document.getElementById('timerPauseBtn');
-        if (pauseBtn) {
-          pauseBtn.click();
-          // Show notification after pause completes
-          setTimeout(() => {
-            alert('⏸️ Timer Auto-Paused\n\n' +
-                  'You were inactive for 30 minutes.\n\n' +
-                  'Time has been saved.\n' +
-                  'Click Resume when ready to continue.');
-          }, 500);
-        }
-      }
-    }
-  }, 60000); // Check every minute
-}
-
 // V13.4: Live Timer Widget
 let liveTimerInterval = null;
 
@@ -1680,9 +1624,9 @@ async function renderLiveTimers() {
     const snapshot = await db.collection("activeTimers").get();
     console.log('📊 Firebase activeTimers collection size:', snapshot.size);
     
-    // V14.2.2: FIX #3 - Track stale timers for cleanup (reduced to 8 hours)
+    // V14.2: FIX #3 - Track stale timers for cleanup
     const staleTimers = [];
-    const STALE_THRESHOLD = 8 * 60 * 60 * 1000; // 8 hours (was 24)
+    const STALE_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours
     
     snapshot.forEach(doc => {
       console.log('📄 Active timer doc:', doc.id, doc.data());
@@ -3039,7 +2983,7 @@ document.getElementById('timerCompleteBtn').addEventListener('click',()=>{
     document.getElementById('logNonProdFields').style.display='none';
     // V14.2: Trigger change event to populate phase dropdown
     document.getElementById('logProdYes').dispatchEvent(new Event('change'));
-    await resetTimer(); // V14.2.2: FIX #5 - Added await
+    resetTimer();
     return;
   }
   
@@ -3049,34 +2993,28 @@ document.getElementById('timerCompleteBtn').addEventListener('click',()=>{
   const plan=planEntries.find(p=>p.id===timerLinkedPlan.id); 
   if(plan)plan.done=true; // Mark as DONE!
   
-  autoSave(); await resetTimer(); renderTimeLog(); renderProjectsBudget(); renderDashboard(); // V14.2.2: FIX #5 - Added await
+  autoSave(); resetTimer(); renderTimeLog(); renderProjectsBudget(); renderDashboard();
   alert(`✅ Task Completed!\n\nLogged: ${minsToHM(mins)}\n📁 ${timerLinkedPlan.project}\n\nRemoved from Weekly Planner.`);
 });
 
-// V14.2.2: FIX #4 - Complete Button (from paused) - Fixed alert crash
-document.getElementById('timerCompletePausedBtn').addEventListener('click', async ()=>{
+// V13.6: Complete Button (from paused) - Mark task done without new time
+document.getElementById('timerCompletePausedBtn').addEventListener('click',()=>{
   if(!timerLinkedPlan){
     alert('No task to complete!');
-    await resetTimer();
+    resetTimer();
     return;
   }
-  
-  // V14.2.2: Save project name before resetTimer clears timerLinkedPlan
-  const projectName = timerLinkedPlan.project;
   
   // Mark task as done without adding new time log
   const plan=planEntries.find(p=>p.id===timerLinkedPlan.id); 
   if(plan)plan.done=true;
   
-  autoSave(); 
-  await resetTimer(); 
-  renderProjectsBudget(); 
-  renderDashboard();
-  alert(`✅ Task Completed!\n\n📁 ${projectName}\n\nRemoved from Weekly Planner.`);
+  autoSave(); resetTimer(); renderProjectsBudget(); renderDashboard();
+  alert(`✅ Task Completed!\n\n📁 ${timerLinkedPlan.project}\n\nRemoved from Weekly Planner.`);
 });
 
-// V14.2.2: FIX #7 - Restore timer state with old timer recovery
-async function restoreTimerState() {
+// V14.1: Restore timer state from localStorage
+function restoreTimerState() {
   try {
     const saved = localStorage.getItem('timerState');
     if (!saved) return;
@@ -3084,57 +3022,7 @@ async function restoreTimerState() {
     const state = JSON.parse(saved);
     if (!state.running || !state.startedAt) return;
     
-    // V14.2.2: FIX #7 - Check if timer is old (forgotten)
-    const elapsed = Date.now() - state.startedAt;
-    const hours = Math.floor(elapsed / (1000 * 60 * 60));
-    
-    // If timer is older than 8 hours - likely forgotten
-    if (hours >= 8) {
-      const projectName = state.linkedPlan?.project || 'Unknown Project';
-      const phase = state.linkedPlan?.phase || '';
-      
-      const choice = confirm(
-        `⚠️ FORGOTTEN TIMER DETECTED\n\n` +
-        `Found a timer from ${hours} hours ago:\n\n` +
-        `📁 ${projectName}\n` +
-        `${phase ? '📋 ' + phase : ''}\n\n` +
-        `This timer was likely forgotten.\n\n` +
-        `OK = Log 8 hours (max)\n` +
-        `Cancel = Discard timer`
-      );
-      
-      if (choice) {
-        // Log maximum 8 hours for the forgotten timer
-        const startDate = new Date(state.startedAt);
-        timeLogs.push({
-          id: genId(),
-          userId: currentUser.id,
-          date: fmt(startDate), // Original date when timer started
-          projectId: state.linkedPlan?.projectId || null,
-          projectName: projectName,
-          phase: state.linkedPlan?.phase || '',
-          typology: state.linkedPlan?.typology || '',
-          activity: '',
-          durationMins: 8 * 60, // Cap at 8 hours
-          startTime: '',
-          endTime: '',
-          desc: `Auto-recovered (forgotten timer from ${hours}h ago)`,
-          productive: true,
-          ts: Date.now()
-        });
-        await autoSave();
-        alert(`✅ Logged 8 hours for forgotten timer\n\n📁 ${projectName}\n\nTimer has been cleared.`);
-      } else {
-        console.log('❌ User discarded old timer');
-      }
-      
-      // Clear the old timer
-      localStorage.removeItem('timerState');
-      await removeActiveTimerFromFirebase();
-      return; // Don't restore
-    }
-    
-    // Timer is recent (< 8 hours) - restore normally
+    // Restore timer variables
     timerStartedAt = state.startedAt;
     timerPausedMs = state.pausedMs || 0;
     timerLinkedPlan = state.linkedPlan;
@@ -3173,7 +3061,7 @@ async function restoreTimerState() {
   }
 }
 
-async function resetTimer() {
+function resetTimer() {
   timerRunning = false;
   timerStartedAt = null;
   timerPausedMs = 0;
@@ -3207,8 +3095,8 @@ async function resetTimer() {
   const widget = document.getElementById('timerWidget');
   if (widget) widget.classList.remove('running');
   
-  // V14.2.2: FIX #5 - Await Firebase cleanup
-  await removeActiveTimerFromFirebase();
+  // V13.5: Remove active timer from Firebase
+  removeActiveTimerFromFirebase();
 }
 
 // ═══════════════════════════════════════════════════════
