@@ -410,22 +410,50 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="section-header"><h2 class="page-title" style="margin:0;">📈 Time Report</h2></div>
         <div class="card" style="margin-bottom:18px;">
           <div class="card-title">🔍 Filter</div>
-          <div class="form-row" style="margin-bottom:12px;">
-            <div class="form-group" style="margin:0;"><label class="form-label">From Month</label>
-              <select class="form-control" id="trFrom"><option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option><option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option><option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option></select>
-            </div>
-            <div class="form-group" style="margin:0;"><label class="form-label">To Month</label>
-              <select class="form-control" id="trTo"><option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option><option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option><option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option></select>
+
+          <!-- V14.2.3: Quick Preset Buttons -->
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11px;font-weight:700;color:#a0aec0;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Quick Select</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;" id="trPresetBtns">
+              <button class="btn btn-ghost btn-sm tr-preset" data-preset="today">Today</button>
+              <button class="btn btn-ghost btn-sm tr-preset" data-preset="yesterday">Yesterday</button>
+              <button class="btn btn-ghost btn-sm tr-preset" data-preset="thisweek">This Week</button>
+              <button class="btn btn-ghost btn-sm tr-preset" data-preset="lastweek">Last Week</button>
+              <button class="btn btn-ghost btn-sm tr-preset" data-preset="thismonth" id="trPresetThisMonth">This Month</button>
+              <button class="btn btn-ghost btn-sm tr-preset" data-preset="lastmonth">Last Month</button>
+              <button class="btn btn-ghost btn-sm tr-preset" data-preset="thisyear">This Year</button>
+              <button class="btn btn-ghost btn-sm tr-preset" data-preset="custom" id="trPresetCustom">📅 Custom Range</button>
             </div>
           </div>
+
+          <!-- Custom Date Range (hidden by default) -->
+          <div id="trCustomRange" style="display:none;background:#f7fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:14px;">
+            <div style="font-size:12px;font-weight:600;color:#4a5568;margin-bottom:8px;">Custom Date Range</div>
+            <div class="form-row" style="margin-bottom:0;">
+              <div class="form-group" style="margin:0;"><label class="form-label">From Date</label><input type="date" class="form-control" id="trCustomFrom"></div>
+              <div class="form-group" style="margin:0;"><label class="form-label">To Date</label><input type="date" class="form-control" id="trCustomTo"></div>
+            </div>
+          </div>
+
+          <!-- Selected Period Display -->
+          <div id="trPeriodDisplay" style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:13px;color:#2c5282;display:none;">
+            📅 <span id="trPeriodLabel"></span>
+          </div>
+
+          <!-- Member / Project / View filters -->
           <div class="form-row" style="margin-bottom:12px;">
-            <div class="form-group" style="margin:0;"><label class="form-label">Year</label><select class="form-control" id="trYear"></select></div>
             <div class="form-group" style="margin:0;"><label class="form-label">Member</label><select class="form-control" id="trUser"><option value="">All Members</option></select></div>
+            <div class="form-group" style="margin:0;"><label class="form-label">Project</label><select class="form-control" id="trProject"><option value="">All Projects</option></select></div>
           </div>
           <div class="form-row" style="margin-bottom:0;">
-            <div class="form-group" style="margin:0;"><label class="form-label">Project</label><select class="form-control" id="trProject"><option value="">All Projects</option></select></div>
             <div class="form-group" style="margin:0;"><label class="form-label">View</label>
               <select class="form-control" id="trView"><option value="both">Both</option><option value="person">By Person</option><option value="project">By Project</option></select>
+            </div>
+            <!-- Hidden legacy fields kept for backward compat with initTimeReport / runTimeReport -->
+            <div style="display:none;">
+              <select id="trFrom"></select>
+              <select id="trTo"></select>
+              <select id="trYear"></select>
             </div>
           </div>
           <div style="margin-top:14px;display:flex;gap:10px;">
@@ -522,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.2 Production:</strong> Logout cleanup + Non-productive sync + 8hr orphan cleanup + Inactivity auto-pause + Forgotten timer recovery + All bugs fixed!
+            📌 <strong>V14.2.4 Production:</strong> All V14.2.3 fixes + Timezone-safe date fix (Team Leave calendar 1-day shift in IST resolved)
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1345,8 +1373,26 @@ function showNotificationToast(title, message, type) {
 // HELPERS
 // ═══════════════════════════════════════════════════════
 function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
-function fmt(d){ return new Date(d).toISOString().split('T')[0]; }
-function fmtD(s){ return new Date(s).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}); }
+// V14.2.4 FIX: Timezone-safe date formatting — prevents 1-day shift in IST (UTC+5:30)
+// new Date("2026-04-02").toISOString() returns "2026-04-01T18:30:00Z" in IST — wrong!
+// Solution: use local year/month/date directly instead of going through UTC ISO string
+function fmt(d){
+  const dt = (d instanceof Date) ? d : new Date(d);
+  // If input was a plain date string "YYYY-MM-DD", parse without timezone shift
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth()+1).padStart(2,'0');
+  const day = String(dt.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function fmtD(s){
+  // Parse YYYY-MM-DD safely without timezone conversion
+  if (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y,mo,d] = s.split('-').map(Number);
+    return new Date(y, mo-1, d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+  }
+  return new Date(s).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+}
 function getMonday(d){ const dt=new Date(d),day=dt.getDay(); dt.setDate(dt.getDate()-day+(day===0?-6:1)); return dt; }
 function addDays(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
 function isSunday(d){ return new Date(d).getDay()===0; }
@@ -2352,35 +2398,133 @@ document.getElementById('saveProjBtn').addEventListener('click',function(){
 // TIME REPORT
 // ═══════════════════════════════════════════════════════
 const MONTHS_ARR=['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+// ─── V14.2.3: Time Report preset state ───────────────────────────────────────
+let trActivePreset = 'thismonth'; // default on first open
+
+function trGetDateRange(preset) {
+  const now = new Date();
+  const todayStr = fmt(now);
+  let fromDate, toDate, label;
+
+  if (preset === 'today') {
+    fromDate = toDate = todayStr;
+    label = 'Today · ' + fmtD(todayStr);
+  } else if (preset === 'yesterday') {
+    const y = new Date(now); y.setDate(y.getDate()-1);
+    fromDate = toDate = fmt(y);
+    label = 'Yesterday · ' + fmtD(fmt(y));
+  } else if (preset === 'thisweek') {
+    const d = new Date(now);
+    const day = d.getDay() === 0 ? 6 : d.getDay()-1; // Mon=0
+    d.setDate(d.getDate()-day);
+    fromDate = fmt(d);
+    const end = new Date(d); end.setDate(d.getDate()+6);
+    toDate = fmt(end);
+    label = 'This Week · ' + fmtD(fromDate) + ' → ' + fmtD(toDate);
+  } else if (preset === 'lastweek') {
+    const d = new Date(now);
+    const day = d.getDay() === 0 ? 6 : d.getDay()-1;
+    d.setDate(d.getDate()-day-7);
+    fromDate = fmt(d);
+    const end = new Date(d); end.setDate(d.getDate()+6);
+    toDate = fmt(end);
+    label = 'Last Week · ' + fmtD(fromDate) + ' → ' + fmtD(toDate);
+  } else if (preset === 'thismonth') {
+    fromDate = fmt(new Date(now.getFullYear(), now.getMonth(), 1));
+    toDate = fmt(new Date(now.getFullYear(), now.getMonth()+1, 0));
+    label = 'This Month · ' + MONTHS_ARR[now.getMonth()] + ' ' + now.getFullYear();
+  } else if (preset === 'lastmonth') {
+    const lm = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    fromDate = fmt(lm);
+    toDate = fmt(new Date(now.getFullYear(), now.getMonth(), 0));
+    label = 'Last Month · ' + MONTHS_ARR[lm.getMonth()] + ' ' + lm.getFullYear();
+  } else if (preset === 'thisyear') {
+    fromDate = fmt(new Date(now.getFullYear(), 0, 1));
+    toDate = fmt(new Date(now.getFullYear(), 11, 31));
+    label = 'This Year · ' + now.getFullYear();
+  } else if (preset === 'custom') {
+    fromDate = document.getElementById('trCustomFrom').value || todayStr;
+    toDate   = document.getElementById('trCustomTo').value   || todayStr;
+    if (toDate < fromDate) toDate = fromDate;
+    label = 'Custom · ' + fmtD(fromDate) + ' → ' + fmtD(toDate);
+  }
+  return { fromDate, toDate, label };
+}
+
+function trSetPreset(preset) {
+  trActivePreset = preset;
+  // Highlight active button
+  document.querySelectorAll('.tr-preset').forEach(b => {
+    b.style.background = b.dataset.preset === preset ? '#ebf4ff' : '';
+    b.style.borderColor = b.dataset.preset === preset ? '#2b6cb0' : '';
+    b.style.color = b.dataset.preset === preset ? '#2b6cb0' : '';
+    b.style.fontWeight = b.dataset.preset === preset ? '700' : '';
+  });
+  // Show/hide custom range picker
+  document.getElementById('trCustomRange').style.display = preset === 'custom' ? 'block' : 'none';
+  // Update period display
+  if (preset !== 'custom') {
+    const { label } = trGetDateRange(preset);
+    document.getElementById('trPeriodDisplay').style.display = 'block';
+    document.getElementById('trPeriodLabel').textContent = label;
+  }
+}
+
 function initTimeReport(){
+  // Populate legacy hidden selects (kept for backward compat)
   const sel=document.getElementById('trYear'); if(sel.options.length>0) return;
   const cy=new Date().getFullYear();
   for(let y=cy-2;y<=cy+1;y++){ const o=document.createElement('option'); o.value=y; o.textContent=y; if(y===cy)o.selected=true; sel.appendChild(o); }
-  document.getElementById('trFrom').value=new Date().getMonth();
-  document.getElementById('trTo').value=new Date().getMonth();
+  // Set default preset
+  trSetPreset('thismonth');
+  // Set default custom range dates to today
+  const todayStr = fmt(new Date());
+  document.getElementById('trCustomFrom').value = todayStr;
+  document.getElementById('trCustomTo').value   = todayStr;
+  // Wire up preset buttons
+  document.querySelectorAll('.tr-preset').forEach(btn => {
+    btn.addEventListener('click', () => trSetPreset(btn.dataset.preset));
+  });
+  // Update period display when custom dates change
+  ['trCustomFrom','trCustomTo'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      if (trActivePreset === 'custom') {
+        const { label } = trGetDateRange('custom');
+        document.getElementById('trPeriodDisplay').style.display = 'block';
+        document.getElementById('trPeriodLabel').textContent = label;
+      }
+    });
+  });
   document.getElementById('trRunBtn').addEventListener('click',runTimeReport);
   document.getElementById('trPdfBtn2').addEventListener('click',exportPDF);
 }
+
 function runTimeReport(){
   const currentUserId=document.getElementById('trUser').value, currentProjId=document.getElementById('trProject').value;
   document.getElementById('trUser').innerHTML='<option value="">All Members</option>'+users.map(u=>`<option value="${u.id}">${u.name}</option>`).join('');
   document.getElementById('trProject').innerHTML='<option value="">All Projects</option>'+projectsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
   if(currentUserId) document.getElementById('trUser').value=currentUserId;
   if(currentProjId) document.getElementById('trProject').value=currentProjId;
-  const fromM=parseInt(document.getElementById('trFrom').value), toM=parseInt(document.getElementById('trTo').value);
-  const year=parseInt(document.getElementById('trYear').value), userId=document.getElementById('trUser').value, projId=document.getElementById('trProject').value;
+
+  // V14.2.3: Use preset date range instead of month/year dropdowns
+  const { fromDate, toDate, label } = trGetDateRange(trActivePreset);
+  document.getElementById('trPeriodDisplay').style.display = 'block';
+  document.getElementById('trPeriodLabel').textContent = label;
+
+  const userId=document.getElementById('trUser').value, projId=document.getElementById('trProject').value;
   const view=document.getElementById('trView').value;
   let logs=timeLogs.filter(l=>currentUser.isAdmin||l.userId===currentUser.id);
-  logs=logs.filter(l=>{ const d=new Date(l.date); return d.getFullYear()===year&&d.getMonth()>=fromM&&d.getMonth()<=toM; });
+  // Filter by date range (inclusive)
+  logs=logs.filter(l=>l.date>=fromDate&&l.date<=toDate);
   if(userId) logs=logs.filter(l=>l.userId===userId);
   if(projId) logs=logs.filter(l=>l.projectId===projId);
   document.getElementById('trOutput').style.display='block';
   const total=logs.reduce((s,l)=>s+l.durationMins,0);
   const prodMins=logs.filter(l=>l.productive).reduce((s,l)=>s+l.durationMins,0);
   document.getElementById('trStats').innerHTML=`<div class="stat-card"><div class="stat-num">${minsToHM(total)}</div><div class="stat-lbl">Total Time</div></div><div class="stat-card g"><div class="stat-num">${minsToHM(prodMins)}</div><div class="stat-lbl">Productive</div></div><div class="stat-card r"><div class="stat-num">${minsToHM(total-prodMins)}</div><div class="stat-lbl">Non-Productive</div></div><div class="stat-card o"><div class="stat-num">${logs.length}</div><div class="stat-lbl">Log Entries</div></div>`;
-  const fromL=MONTHS_ARR[fromM], toL=fromM===toM?'':' – '+MONTHS_ARR[toM];
   const uL=userId?users.find(u=>u.id===userId)?.name:'All Members', pL=projId?projectsData.find(p=>p.id===projId)?.name:'All Projects';
-  document.getElementById('trTitle').textContent=fromL+toL+' '+year;
+  document.getElementById('trTitle').textContent=label;
   document.getElementById('trSubtitle').textContent=uL+' · '+pL;
   document.getElementById('trPersonSec').style.display=view!=='project'?'block':'none';
   document.getElementById('trProjSec').style.display=view!=='person'?'block':'none';
