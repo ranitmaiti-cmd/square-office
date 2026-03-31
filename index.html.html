@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.4 Production:</strong> All V14.2.3 fixes + Timezone-safe date fix (Team Leave calendar 1-day shift in IST resolved)
+            📌 <strong>V14.2.5 Production:</strong> Option C orphan timer recovery (user self-reports actual time) + End-of-day 6:30 PM warning + 7:00 PM auto-complete + All V14.2.4 fixes
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -766,6 +766,58 @@ textarea.form-control{min-height:70px;resize:vertical;}
   <div class="modal-box">
     <div class="modal-head"><h3>📅 Holidays</h3><button class="close-btn" onclick="closeModal('viewHolidaysModal')">×</button></div>
     <div id="holidaysList"></div>
+  </div>
+</div>
+
+<!-- V14.2.5: Orphan Timer Recovery Modal (Option C) -->
+<div class="modal-backdrop" id="orphanTimerModal" style="z-index:600;">
+  <div class="modal-box" style="max-width:460px;">
+    <div class="modal-head">
+      <h3>⏱️ Forgotten Timer Found</h3>
+    </div>
+    <div style="background:#fffaf0;border:2px solid #f6ad55;border-radius:10px;padding:14px;margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:700;color:#c05621;margin-bottom:6px;">You left a timer running!</div>
+      <div id="orphanTimerInfo" style="font-size:13px;color:#4a5568;line-height:1.6;"></div>
+    </div>
+    <div style="font-size:13px;font-weight:600;color:#2d3748;margin-bottom:10px;">How long did you actually work?</div>
+    <div class="form-row" style="margin-bottom:6px;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Hours</label>
+        <input type="number" class="form-control" id="orphanHours" min="0" max="12" value="0" placeholder="0">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Minutes</label>
+        <select class="form-control" id="orphanMins">
+          <option value="0">00</option>
+          <option value="15">15</option>
+          <option value="30">30</option>
+          <option value="45">45</option>
+        </select>
+      </div>
+    </div>
+    <div class="info-box" style="margin-bottom:14px;font-size:12px;">💡 Enter your best estimate. This will be saved as a self-reported log entry.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" id="orphanSaveBtn">✅ Save This Time</button>
+      <button class="btn btn-ghost btn-sm" id="orphanSnoozeBtn" style="margin-left:auto;">🔔 Remind Me in 1 Hour</button>
+      <button class="btn btn-danger btn-sm" id="orphanDiscardBtn">🗑️ Discard Timer</button>
+    </div>
+    <div style="font-size:11px;color:#a0aec0;margin-top:10px;text-align:center;" id="orphanSnoozeCount"></div>
+  </div>
+</div>
+
+<!-- V14.2.5: End-of-Day Warning Modal -->
+<div class="modal-backdrop" id="endOfDayModal" style="z-index:600;">
+  <div class="modal-box" style="max-width:420px;">
+    <div class="modal-head"><h3>🌆 End of Day Reminder</h3></div>
+    <div style="background:#fff5f5;border:2px solid #feb2b2;border-radius:10px;padding:14px;margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:700;color:#9b2c2c;margin-bottom:4px;">⚠️ You have an active timer!</div>
+      <div style="font-size:13px;color:#4a5568;">It's past 6:30 PM. Please complete your timer before leaving — it will be auto-completed at 7:00 PM.</div>
+    </div>
+    <div id="endOfDayTimerInfo" style="font-size:13px;color:#2d3748;margin-bottom:16px;background:#f7fafc;border-radius:8px;padding:10px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-success" id="endOfDayCompleteBtn">⏹️ Complete Timer Now</button>
+      <button class="btn btn-ghost" onclick="closeModal('endOfDayModal')">Later</button>
+    </div>
   </div>
 </div>
 
@@ -1451,6 +1503,9 @@ loadData().then(async () => {
         // V14.2.2: Start inactivity monitoring
         startInactivityMonitor();
         
+        // V14.2.5: Start end-of-day monitor
+        startEndOfDayMonitor();
+        
         // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
         await restoreTimerState();
       }
@@ -1491,6 +1546,9 @@ async function doLogin(){
     
     // V14.2.2: FIX #6 - Start inactivity monitoring
     startInactivityMonitor();
+    
+    // V14.2.5: Start end-of-day monitor
+    startEndOfDayMonitor();
     
     // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
     await restoreTimerState();
@@ -3219,102 +3277,231 @@ document.getElementById('timerCompletePausedBtn').addEventListener('click', asyn
   alert(`✅ Task Completed!\n\n📁 ${projectName}\n\nRemoved from Weekly Planner.`);
 });
 
-// V14.2.2: FIX #7 - Restore timer state with old timer recovery
+// ═══════════════════════════════════════════════════════
+// V14.2.5: OPTION C — Interactive orphan timer recovery
+// ═══════════════════════════════════════════════════════
+let orphanTimerState = null; // holds the recovered state during modal interaction
+let orphanSnoozeCount = 0;
+let orphanSnoozeTimeout = null;
+
 async function restoreTimerState() {
   try {
     const saved = localStorage.getItem('timerState');
     if (!saved) return;
-    
     const state = JSON.parse(saved);
     if (!state.running || !state.startedAt) return;
-    
-    // V14.2.2: FIX #7 - Check if timer is old (forgotten)
+
     const elapsed = Date.now() - state.startedAt;
-    const hours = Math.floor(elapsed / (1000 * 60 * 60));
-    
-    // If timer is older than 8 hours - likely forgotten
+    const hours = elapsed / (1000 * 60 * 60);
+
+    // Timer older than 8 hours = orphaned → Option C modal
     if (hours >= 8) {
-      const projectName = state.linkedPlan?.project || 'Unknown Project';
-      const phase = state.linkedPlan?.phase || '';
-      
-      const choice = confirm(
-        `⚠️ FORGOTTEN TIMER DETECTED\n\n` +
-        `Found a timer from ${hours} hours ago:\n\n` +
-        `📁 ${projectName}\n` +
-        `${phase ? '📋 ' + phase : ''}\n\n` +
-        `This timer was likely forgotten.\n\n` +
-        `OK = Log 8 hours (max)\n` +
-        `Cancel = Discard timer`
-      );
-      
-      if (choice) {
-        // Log maximum 8 hours for the forgotten timer
-        const startDate = new Date(state.startedAt);
-        timeLogs.push({
-          id: genId(),
-          userId: currentUser.id,
-          date: fmt(startDate), // Original date when timer started
-          projectId: state.linkedPlan?.projectId || null,
-          projectName: projectName,
-          phase: state.linkedPlan?.phase || '',
-          typology: state.linkedPlan?.typology || '',
-          activity: '',
-          durationMins: 8 * 60, // Cap at 8 hours
-          startTime: '',
-          endTime: '',
-          desc: `Auto-recovered (forgotten timer from ${hours}h ago)`,
-          productive: true,
-          ts: Date.now()
-        });
-        await autoSave();
-        alert(`✅ Logged 8 hours for forgotten timer\n\n📁 ${projectName}\n\nTimer has been cleared.`);
-      } else {
-        console.log('❌ User discarded old timer');
-      }
-      
-      // Clear the old timer
-      localStorage.removeItem('timerState');
-      await removeActiveTimerFromFirebase();
-      return; // Don't restore
+      orphanTimerState = state;
+      showOrphanRecoveryModal(state, Math.floor(hours));
+      return; // Don't restore — wait for user decision
     }
-    
-    // Timer is recent (< 8 hours) - restore normally
+
+    // Timer is recent (< 8h) — restore normally
     timerStartedAt = state.startedAt;
-    timerPausedMs = state.pausedMs || 0;
+    timerPausedMs  = state.pausedMs || 0;
     timerLinkedPlan = state.linkedPlan;
-    timerRunning = true;
-    
-    // Restore UI
+    timerRunning   = true;
+
     document.getElementById('timerWidget').classList.add('running');
-    document.getElementById('timerPreStart').style.display='none';
-    document.getElementById('timerRunning').style.display='block';
+    document.getElementById('timerPreStart').style.display  = 'none';
+    document.getElementById('timerRunning').style.display   = 'block';
     document.getElementById('timerDisplay').classList.add('running');
-    document.getElementById('timerStatus').textContent='● Recording...';
-    
-    const projBadge=document.getElementById('timerProject');
-    projBadge.style.display='block';
-    if(timerLinkedPlan){ 
-      projBadge.textContent=`📁 ${timerLinkedPlan.project}`; 
-      projBadge.style.background='#ebf4ff'; 
-      projBadge.style.color='#2b6cb0'; 
-    } else { 
-      projBadge.textContent='⚠️ Unplanned'; 
-      projBadge.style.background='#fff5f5'; 
-      projBadge.style.color='#e53e3e'; 
+    document.getElementById('timerStatus').textContent = '● Recording...';
+
+    const projBadge = document.getElementById('timerProject');
+    projBadge.style.display = 'block';
+    if (timerLinkedPlan) {
+      projBadge.textContent       = `📁 ${timerLinkedPlan.project}`;
+      projBadge.style.background  = '#ebf4ff';
+      projBadge.style.color       = '#2b6cb0';
+    } else {
+      projBadge.textContent       = '⚠️ Unplanned';
+      projBadge.style.background  = '#fff5f5';
+      projBadge.style.color       = '#e53e3e';
     }
-    
-    document.getElementById('timerNavLabel').textContent='⏱ Running...';
-    
-    // Restart interval
-    timerInterval=setInterval(()=>{ 
-      document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); 
-    },1000);
-    
+
+    document.getElementById('timerNavLabel').textContent = '⏱ Running...';
+    timerInterval = setInterval(() => {
+      document.getElementById('timerDisplay').textContent = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
+    }, 1000);
+
     console.log('✅ Timer restored from localStorage');
   } catch(e) {
     console.error('Error restoring timer:', e);
     localStorage.removeItem('timerState');
   }
+}
+
+function showOrphanRecoveryModal(state, hoursAgo) {
+  const projectName = state.linkedPlan?.project || 'Unknown Project';
+  const phase       = state.linkedPlan?.phase   || '';
+  const startedAt   = new Date(state.startedAt);
+  const startStr    = startedAt.toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+
+  document.getElementById('orphanTimerInfo').innerHTML =
+    `📁 <strong>${projectName}</strong>${phase ? `<br>📋 ${phase}` : ''}<br>` +
+    `🕐 Started: ${startStr} (${hoursAgo}h ago)`;
+
+  // Reset inputs
+  document.getElementById('orphanHours').value = '0';
+  document.getElementById('orphanMins').value  = '0';
+
+  // Snooze count display
+  const sc = document.getElementById('orphanSnoozeCount');
+  sc.textContent = orphanSnoozeCount > 0
+    ? `Snoozed ${orphanSnoozeCount} time${orphanSnoozeCount > 1 ? 's' : ''}. ${orphanSnoozeCount >= 3 ? 'Timer will be discarded in 24h if unresolved.' : ''}`
+    : '';
+
+  openModal('orphanTimerModal');
+}
+
+// Wire up orphan modal buttons
+document.getElementById('orphanSaveBtn').addEventListener('click', async () => {
+  const h    = parseInt(document.getElementById('orphanHours').value) || 0;
+  const m    = parseInt(document.getElementById('orphanMins').value)  || 0;
+  const mins = h * 60 + m;
+
+  if (mins <= 0) {
+    alert('Please enter how long you actually worked, or use Discard if you didn\'t work.');
+    return;
+  }
+
+  const state = orphanTimerState;
+  const projectName = state.linkedPlan?.project || 'Unknown Project';
+  const startDate   = new Date(state.startedAt);
+
+  timeLogs.push({
+    id:          genId(),
+    userId:      currentUser.id,
+    date:        fmt(startDate),
+    projectId:   state.linkedPlan?.projectId  || null,
+    projectName: projectName,
+    phase:       state.linkedPlan?.phase      || '',
+    typology:    state.linkedPlan?.typology   || '',
+    activity:    '',
+    durationMins: mins,
+    startTime:   '',
+    endTime:     '',
+    desc:        `Self-reported (timer left running — ${minsToHM(mins)} logged by user)`,
+    productive:  true,
+    ts:          Date.now()
+  });
+
+  localStorage.removeItem('timerState');
+  if (orphanSnoozeTimeout) clearTimeout(orphanSnoozeTimeout);
+  orphanTimerState  = null;
+  orphanSnoozeCount = 0;
+
+  await autoSave();
+  closeModal('orphanTimerModal');
+  renderTimeLog(); renderProjectsBudget(); renderDashboard();
+  alert(`✅ Saved ${minsToHM(mins)} for ${projectName}.\n\nThank you for self-reporting honestly.`);
+});
+
+document.getElementById('orphanSnoozeBtn').addEventListener('click', () => {
+  orphanSnoozeCount++;
+  closeModal('orphanTimerModal');
+
+  // Auto-discard after 3 snoozes (24h worth)
+  if (orphanSnoozeCount >= 3) {
+    alert('⚠️ You\'ve snoozed 3 times. The timer will be discarded automatically in 24 hours if not resolved.');
+    orphanSnoozeTimeout = setTimeout(() => {
+      localStorage.removeItem('timerState');
+      orphanTimerState  = null;
+      orphanSnoozeCount = 0;
+      console.log('🗑️ Orphan timer auto-discarded after 3 snoozes');
+    }, 24 * 60 * 60 * 1000);
+    return;
+  }
+
+  // Remind again in 1 hour
+  orphanSnoozeTimeout = setTimeout(() => {
+    if (orphanTimerState && currentUser) {
+      const hours = Math.floor((Date.now() - orphanTimerState.startedAt) / (1000 * 60 * 60));
+      showOrphanRecoveryModal(orphanTimerState, hours);
+    }
+  }, 60 * 60 * 1000);
+
+  alert('🔔 We\'ll remind you in 1 hour. Please don\'t forget to log your time!');
+});
+
+document.getElementById('orphanDiscardBtn').addEventListener('click', async () => {
+  if (!confirm('Discard this timer completely? No time will be logged.')) return;
+  localStorage.removeItem('timerState');
+  if (orphanSnoozeTimeout) clearTimeout(orphanSnoozeTimeout);
+  await removeActiveTimerFromFirebase();
+  orphanTimerState  = null;
+  orphanSnoozeCount = 0;
+  closeModal('orphanTimerModal');
+  console.log('🗑️ Orphan timer discarded by user');
+});
+
+// ═══════════════════════════════════════════════════════
+// V14.2.5: End-of-Day Auto-Complete (6:30 PM warning, 7:00 PM force)
+// ═══════════════════════════════════════════════════════
+let endOfDayWarningShown = false;
+let endOfDayInterval = null;
+
+function startEndOfDayMonitor() {
+  if (endOfDayInterval) clearInterval(endOfDayInterval);
+  endOfDayInterval = setInterval(() => {
+    if (!currentUser || !timerRunning) return;
+    const now  = new Date();
+    const hour = now.getHours();
+    const min  = now.getMinutes();
+
+    // 6:30 PM warning
+    if (hour === 18 && min >= 30 && !endOfDayWarningShown) {
+      endOfDayWarningShown = true;
+      const projectName = timerLinkedPlan?.project || 'Unplanned';
+      const elapsed = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
+      document.getElementById('endOfDayTimerInfo').innerHTML =
+        `📁 <strong>${projectName}</strong><br>⏱ Running for: <strong>${elapsed}</strong>`;
+      document.getElementById('endOfDayCompleteBtn').onclick = () => {
+        closeModal('endOfDayModal');
+        document.getElementById('timerCompleteBtn').click();
+      };
+      openModal('endOfDayModal');
+    }
+
+    // 7:00 PM force auto-complete
+    if (hour === 19 && min === 0 && timerRunning) {
+      closeModal('endOfDayModal');
+      const parts = document.getElementById('timerDisplay').textContent.split(':').map(Number);
+      const totalSecs = parts[0]*3600 + parts[1]*60 + parts[2];
+      const mins = Math.max(1, Math.round(totalSecs/60));
+      const projectName = timerLinkedPlan?.project || 'Unplanned';
+
+      if (timerLinkedPlan) {
+        timeLogs.push({
+          id: genId(), userId: currentUser.id, date: fmt(new Date()),
+          projectId: timerLinkedPlan.projectId, projectName,
+          phase: timerLinkedPlan.phase, typology: timerLinkedPlan.typology,
+          activity: '', durationMins: mins, startTime: '', endTime: '',
+          desc: `${timerLinkedPlan.typology || timerLinkedPlan.phase || 'Work on project'} (Auto-completed at end of day)`,
+          productive: true, ts: Date.now()
+        });
+        const plan = planEntries.find(p => p.id === timerLinkedPlan?.id);
+        if (plan) plan.done = true;
+      }
+
+      resetTimer();
+      autoSave();
+      renderTimeLog(); renderProjectsBudget(); renderDashboard();
+      endOfDayWarningShown = false;
+      showNotificationToast('⏹️ Timer Auto-Completed', `${minsToHM(mins)} logged for ${projectName} at 7:00 PM.`, 'warning');
+      console.log('⏹️ End-of-day auto-complete fired at 7:00 PM');
+    }
+
+    // Reset flag at midnight for next day
+    if (hour === 0 && min === 0) endOfDayWarningShown = false;
+
+  }, 60000); // Check every minute
 }
 
 async function resetTimer() {
