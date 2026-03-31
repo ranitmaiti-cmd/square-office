@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.5 Production:</strong> Option C orphan timer recovery (user self-reports actual time) + End-of-day 6:30 PM warning + 7:00 PM auto-complete + All V14.2.4 fixes
+            📌 <strong>V14.2.6 Production:</strong> Leave approval/rejection now writes directly to Firebase (fixes status reverting on refresh + Team Leave calendar not showing approved leaves)
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -2861,15 +2861,53 @@ function renderApprovals(){
     const dateRange = lv.isHalf ? `${fmtD(lv.startDate)} (Half Day)` : `${fmtD(lv.startDate)} → ${fmtD(lv.endDate)}`;
     const halfIcon = lv.isHalf ? ' 🕐' : '';
     c.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">🌴 Leave · ${lv.userName}${halfIcon}</div><div style="font-size:11px;color:#718096;">${lv.type} · ${dateRange} · ${lv.days}d</div></div><span class="badge badge-pending">Pending</span></div><div style="font-size:12px;margin-bottom:10px;">${lv.reason}</div><div style="display:flex;gap:8px;"><button class="btn btn-success btn-sm">✓ Approve</button><button class="btn btn-danger btn-sm">✗ Reject</button></div>`;
-    c.querySelector('.btn-success').onclick=()=>{
-      lv.status='approved'; const u=users.find(u=>u.id===lv.userId);
-      if(lv.type==='medical') u.medLeft=Math.max(0,u.medLeft-lv.days); else u.casLeft=Math.max(0,u.casLeft-lv.days);
-      autoSave();
-      renderApprovals(); updateApprovalBadge(); renderDashboard();
+    c.querySelector('.btn-success').onclick= async ()=>{
+      // V14.2.6: Direct granular save — don't rely on batch autoSave for status changes
+      lv.status='approved';
+      const u=users.find(u=>u.id===lv.userId);
+      if(lv.type==='medical') u.medLeft=Math.max(0,u.medLeft-lv.days);
+      else u.casLeft=Math.max(0,u.casLeft-lv.days);
+
+      try {
+        // Write leave status directly to Firebase immediately
+        await db.collection("leaveRequests").doc(lv.id).set({
+          ...lv,
+          status: 'approved',
+          approvedBy: currentUser.name,
+          approvedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        // Save updated user leave balance
+        await saveUser(u);
+        console.log('✅ Leave approved and saved:', lv.id);
+      } catch(e) {
+        console.error('❌ Failed to save approval:', e);
+        alert('❌ Failed to save approval to cloud. Please try again.');
+        lv.status = 'pending'; // Revert on failure
+        if(lv.type==='medical') u.medLeft=Math.min(12, u.medLeft+lv.days);
+        else u.casLeft=Math.min(5, u.casLeft+lv.days);
+        return;
+      }
+      renderApprovals(); updateApprovalBadge(); renderDashboard(); renderTeamLeave();
     };
-    c.querySelector('.btn-danger').onclick=()=>{
+    c.querySelector('.btn-danger').onclick= async ()=>{
+      // V14.2.6: Direct granular save for rejection too
       lv.status='rejected';
-      autoSave();
+      try {
+        await db.collection("leaveRequests").doc(lv.id).set({
+          ...lv,
+          status: 'rejected',
+          rejectedBy: currentUser.name,
+          rejectedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        console.log('✅ Leave rejected and saved:', lv.id);
+      } catch(e) {
+        console.error('❌ Failed to save rejection:', e);
+        alert('❌ Failed to save rejection to cloud. Please try again.');
+        lv.status = 'pending';
+        return;
+      }
       renderApprovals(); updateApprovalBadge();
     };
     el.appendChild(c);
