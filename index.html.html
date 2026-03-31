@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.6 Production:</strong> Leave approval/rejection now writes directly to Firebase (fixes status reverting on refresh + Team Leave calendar not showing approved leaves)
+            📌 <strong>V14.2.6 Production:</strong> Fixed leave approval root cause — removed 3 duplicate loadData() race conditions + periodic save no longer overwrites approved status every 30s
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1358,8 +1358,9 @@ function hideAllIndicators() {
   document.getElementById('unsavedIndicator')?.classList.remove('show');
 }
 
-// Ensure loadData runs immediately
-loadData();
+// ═══════════════════════════════════════════════════════
+// INIT — Load data then set up login (single entry point)
+// ═══════════════════════════════════════════════════════
 
 // Redirect autoSave to use Firebase
 window.autoSave = function() {
@@ -3834,45 +3835,22 @@ setInterval(() => {
   localStorage.setItem('squareActiveTab', instanceId);
 }, 5000);
 
-loadData().then(() => {
-  // Check for saved session
-  const session = localStorage.getItem('currentSession');
-  if (session) {
-    try {
-      const {userId} = JSON.parse(session);
-      const user = users.find(u => u.id === userId);
-      if (user) {
-        currentUser = user;
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('mainApp').style.display = 'flex';
-        document.getElementById('topbarName').textContent = user.name;
-        document.getElementById('adminBadge').style.display = user.isAdmin ? 'inline-block' : 'none';
-        document.querySelectorAll('.admin-only').forEach(el => el.style.display = user.isAdmin ? 'flex' : 'none');
-        initTimeReport(); renderDashboard(); updateApprovalBadge();
-        return;
-      }
-    } catch(e) {
-      console.error('Session restore failed:', e);
-    }
-  }
-  
-  // Show login screen
-  document.getElementById('loginScreen').style.display = 'flex';
-});
+// V14.2.6: Removed duplicate loadData() call here — data is already loaded
+// by the single authoritative call above. This block was causing race conditions
+// that reset leaveRequests status back to pending after approval.
 
 // ═══════════════════════════════════════════════════════
-// V9 AGGRESSIVE AUTO-SAVE
+// V9 AGGRESSIVE AUTO-SAVE — V14.2.6: only save when changes exist
 // ═══════════════════════════════════════════════════════
 
-// Periodic Auto-Save (every 30 seconds)
+// Periodic Auto-Save (every 30 seconds) — only if real changes exist
 periodicSaveInterval = setInterval(() => {
   if (!dataLoaded || !currentUser) return;
-  
-  const timeSinceLastSave = Date.now() - lastSaveTime;
-  
-  // Save if there are unsaved changes OR if it's been more than 30 seconds
-  if (hasUnsavedChanges || timeSinceLastSave > 30000) {
-    console.log('⏰ Periodic auto-save triggered');
+  // V14.2.6: Only save if there are actual unsaved changes
+  // Removed unconditional timeSinceLastSave trigger — it was overwriting
+  // leave approval status on every 30s tick with stale in-memory data
+  if (hasUnsavedChanges) {
+    console.log('⏰ Periodic auto-save triggered (has unsaved changes)');
     saveData();
   }
 }, 30000); // Every 30 seconds
