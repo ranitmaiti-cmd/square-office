@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.11 Production:</strong> Leave approval permanently fixed — onSnapshot now skips ALL cache and pending writes (includeMetadataChanges:true). Only confirmed server data updates in-memory array.
+            📌 <strong>V14.2.11 Production:</strong> Leave submission no longer pushes to in-memory array (race condition fixed) — onSnapshot adds it when Firebase confirms. Approval status can never be overwritten by a concurrent submit.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -2707,8 +2707,8 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
   if(type==='casual'&&days>user.casLeft){ alert(`Only ${user.casLeft} casual days left`); return; }
   
   const newLeave = {id:genId(),userId:currentUser.id,userName:currentUser.name,type,startDate:start,endDate:end,days,isHalf,reason,status:'pending',date:fmt(new Date())};
-  leaveRequests.push(newLeave);
-  // V14.2.6: Use granular save — never batch-rewrite all leaveRequests (would overwrite approved statuses)
+  // V14.2.11: Don't push to in-memory array — onSnapshot will add it when Firebase confirms
+  // Pushing first then saving caused race condition where stale array overwrote approved statuses
   await saveLeaveRequest(newLeave);
   closeModal('leaveModal'); updateApprovalBadge(); renderLeaves();
 });
