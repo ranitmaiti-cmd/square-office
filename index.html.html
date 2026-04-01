@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.11 Production:</strong> Leave submission no longer pushes to in-memory array (race condition fixed) — onSnapshot adds it when Firebase confirms. Approval status can never be overwritten by a concurrent submit.
+            📌 <strong>V14.2.12 Production:</strong> Stale timer cleanup skips auto-complete if real logs already exist for that user/date — prevents inflated duplicate entries (e.g. Souvik's 12h 52m bug)
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -3508,11 +3508,22 @@ async function cleanupStaleTimers() {
 
     for (const { id, data } of stale) {
       const startTime   = data.startTime;
+      const timerDate   = fmt(new Date(startTime));
+
+      // V14.2.12 FIX: Skip auto-complete if real log entries already exist
+      // for this user on this date — prevents inflated duplicate entries
+      const existingLogs = timeLogs.filter(l => l.userId === id && l.date === timerDate);
+      if (existingLogs.length > 0) {
+        console.log(`⏭️ Skipping stale timer for ${data.userName || id} on ${timerDate} — ${existingLogs.length} real log(s) already exist`);
+        // Still delete the stale active timer
+        await db.collection("activeTimers").doc(id).delete();
+        continue;
+      }
+
       const elapsedMs   = Date.now() - startTime;
       const elapsedMins = Math.round(elapsedMs / 60000);
       // Cap at 9 hours (realistic working day max)
       const cappedMins  = Math.min(elapsedMins, 9 * 60);
-      const timerDate   = fmt(new Date(startTime));
 
       const clockStart = new Date(startTime).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
       const clockEnd   = '19:00'; // Mark as end-of-working-day
