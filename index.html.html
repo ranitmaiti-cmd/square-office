@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.9 Production:</strong> Overnight stale timer auto-cleanup + Start/End clock times + Month name in stats + Firebase cache disabled (root cause of leave approval reverting on refresh)
+            📌 <strong>V14.2.10 Production:</strong> Inactivity pause fixed (tab-hidden only, not browser-idle) + Leave approval syncs in-memory array after save + All V14.2.9 features
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1413,39 +1413,44 @@ window.autoSave = function() {
   saveData();
 };
 
-// V14.2.2: FIX #6 - Inactivity auto-pause (30 minutes)
+// V14.2.9 FIX: Inactivity auto-pause — only triggers when tab is hidden
+// Previous version paused when mouse/keyboard were idle in the SQUARE tab
+// but architects work in AutoCAD, Revit etc — their browser tab looks idle
+// New logic: only auto-pause if the tab has been hidden (backgrounded) for 30+ minutes
 function startInactivityMonitor() {
-  // Track user activity
-  const updateActivity = () => { lastActivity = Date.now(); };
-  document.addEventListener('mousemove', updateActivity);
-  document.addEventListener('keypress', updateActivity);
-  document.addEventListener('click', updateActivity);
-  document.addEventListener('scroll', updateActivity);
-  
-  // Check every minute for inactivity
+  let tabHiddenAt = null;
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      tabHiddenAt = Date.now(); // Tab just went to background
+    } else {
+      tabHiddenAt = null; // Tab came back to foreground — reset
+    }
+  });
+
+  // Check every minute
   if (inactivityChecker) clearInterval(inactivityChecker);
   inactivityChecker = setInterval(() => {
-    if (timerRunning) {
-      const idleTime = Date.now() - lastActivity;
-      const INACTIVITY_THRESHOLD = 30 * 60 * 1000; // 30 minutes
-      
-      if (idleTime > INACTIVITY_THRESHOLD) {
-        console.log('⏸️ Auto-pausing timer due to inactivity');
-        // Trigger pause button
-        const pauseBtn = document.getElementById('timerPauseBtn');
-        if (pauseBtn) {
-          pauseBtn.click();
-          // Show notification after pause completes
-          setTimeout(() => {
-            alert('⏸️ Timer Auto-Paused\n\n' +
-                  'You were inactive for 30 minutes.\n\n' +
-                  'Time has been saved.\n' +
-                  'Click Resume when ready to continue.');
-          }, 500);
-        }
+    if (!timerRunning) return;
+    if (!document.hidden) return; // Tab is visible — user is here, don't pause
+    if (!tabHiddenAt) return;
+
+    const hiddenDuration = Date.now() - tabHiddenAt;
+    const THRESHOLD = 30 * 60 * 1000; // 30 minutes hidden
+
+    if (hiddenDuration > THRESHOLD) {
+      console.log('⏸️ Auto-pausing timer — tab hidden for 30+ minutes');
+      const pauseBtn = document.getElementById('timerPauseBtn');
+      if (pauseBtn) {
+        pauseBtn.click();
+        tabHiddenAt = null; // Reset so we don't trigger again
+        setTimeout(() => {
+          showNotificationToast('⏸️ Timer Auto-Paused',
+            'SQUARE was in the background for 30 minutes. Time saved — click Resume when ready.', 'warning');
+        }, 500);
       }
     }
-  }, 60000); // Check every minute
+  }, 60000);
 }
 
 
@@ -2913,6 +2918,10 @@ function renderApprovals(){
         });
         // Save updated user leave balance
         await saveUser(u);
+        // V14.2.9: Reload leave requests from server to sync in-memory array
+        const fresh = await db.collection("leaveRequests").get({source:'server'});
+        leaveRequests = [];
+        fresh.forEach(doc => leaveRequests.push(doc.data()));
         console.log('✅ Leave approved and saved:', lv.id);
       } catch(e) {
         console.error('❌ Failed to save approval:', e);
@@ -2935,6 +2944,10 @@ function renderApprovals(){
           rejectedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });
+        // V14.2.9: Reload leave requests from server
+        const fresh = await db.collection("leaveRequests").get({source:'server'});
+        leaveRequests = [];
+        fresh.forEach(doc => leaveRequests.push(doc.data()));
         console.log('✅ Leave rejected and saved:', lv.id);
       } catch(e) {
         console.error('❌ Failed to save rejection:', e);
