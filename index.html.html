@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.8 Production:</strong> Dashboard stats fixed — correct total hours, utilization, phases over budget. Timezone-safe month filtering in dashboard + time log. Removed duplicate broken renderDashboardStats.
+            📌 <strong>V14.2.9 Production:</strong> Overnight stale timer auto-cleanup + Start/End clock times on all log entries + Month name in dashboard stats (e.g. "Total Hours — April 2026")
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1556,6 +1556,9 @@ loadData().then(async () => {
         
         // V14.2.5: Start end-of-day monitor
         startEndOfDayMonitor();
+
+        // V14.2.9: Clean up any stale timers from previous day
+        await cleanupStaleTimers();
         
         // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
         await restoreTimerState();
@@ -1600,6 +1603,9 @@ async function doLogin(){
     
     // V14.2.5: Start end-of-day monitor
     startEndOfDayMonitor();
+
+    // V14.2.9: Clean up any stale timers from previous day
+    await cleanupStaleTimers();
     
     // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
     await restoreTimerState();
@@ -1712,6 +1718,8 @@ function renderDashboard(){
   const now=new Date(), thisMonth=now.getMonth(), thisYear=now.getFullYear();
   // V14.2.8 FIX: Use string comparison to avoid timezone date shift bug
   const thisMonthStr = `${thisYear}-${String(thisMonth+1).padStart(2,'0')}`;
+  // V14.2.9: Show actual month name in stat cards
+  const monthLabel = now.toLocaleDateString('en-IN',{month:'long',year:'numeric'});
   const monthLogs=timeLogs.filter(l=> l.date && l.date.startsWith(thisMonthStr));
   const totalHours=monthLogs.reduce((s,l)=>s+l.durationMins,0)/60;
   const prodHours=monthLogs.filter(l=>l.productive).reduce((s,l)=>s+l.durationMins,0)/60;
@@ -1723,11 +1731,11 @@ function renderDashboard(){
   const avgHoursPerPerson=activeUsers>0?(totalHours/activeUsers).toFixed(1):0;
 
   document.getElementById('dashAnalytics').innerHTML=`
-    <div class="stat-card"><div class="stat-num">${totalHours.toFixed(1)}h</div><div class="stat-lbl">Total Hours (This Month)</div></div>
+    <div class="stat-card"><div class="stat-num">${totalHours.toFixed(1)}h</div><div class="stat-lbl">Total Hours (${monthLabel})</div></div>
     <div class="stat-card g"><div class="stat-num">${utilization}%</div><div class="stat-lbl">Productive Utilization</div></div>
     <div class="stat-card o"><div class="stat-num">${activeProjects}</div><div class="stat-lbl">Active Projects</div></div>
     <div class="stat-card ${overBudgetCount>0?'r':'p'}"><div class="stat-num">${overBudgetCount}</div><div class="stat-lbl">Phases Over Budget</div></div>
-    <div class="stat-card"><div class="stat-num">${avgHoursPerPerson}h</div><div class="stat-lbl">Avg Hours/Person</div></div>`;
+    <div class="stat-card"><div class="stat-num">${avgHoursPerPerson}h</div><div class="stat-lbl">Avg Hours/Person (${monthLabel})</div></div>`;
 
   const days=[]; for(let i=0;i<7;i++) days.push(addDays(currentWeek,i));
   document.getElementById('weekLabel').textContent='Week of '+currentWeek.toLocaleDateString('en-IN',{month:'short',day:'numeric',year:'numeric'});
@@ -2394,7 +2402,7 @@ function renderTimeLog(){
     const user=users.find(u=>u.id===log.userId);
     const el2=document.createElement('div'); el2.className='log-card';
     const projBadge=log.productive?`<strong>📁 ${log.projectName}</strong> · ${log.phase} · <span class="prod-tag">Productive</span>`:`<span class="nonprod-tag">Non-Productive</span> ${log.activity}`;
-    el2.innerHTML=`<div class="log-body"><div class="log-time">⏱ ${minsToHM(log.durationMins)}</div><div class="log-meta">${projBadge}${currentUser.isAdmin?` · 👤 <strong>${user?.name||'?'}</strong>`:''}</div>${log.typology?`<div style="font-size:11px;color:#718096;margin-bottom:3px;">🏷️ ${log.typology}</div>`:''}<div class="log-desc">${log.desc}</div>${log.startTime?`<div style="font-size:10px;color:#a0aec0;margin-top:2px;">🕐 ${log.startTime}–${log.endTime}</div>`:''}</div><div class="log-right"><div class="log-date">${fmtD(log.date)}</div></div>`;
+    el2.innerHTML=`<div class="log-body"><div class="log-time">⏱ ${minsToHM(log.durationMins)}</div><div class="log-meta">${projBadge}${currentUser.isAdmin?` · 👤 <strong>${user?.name||'?'}</strong>`:''}</div>${log.typology?`<div style="font-size:11px;color:#718096;margin-bottom:3px;">🏷️ ${log.typology}</div>`:''}<div class="log-desc">${log.desc}</div>${log.startTime&&log.endTime?`<div style="font-size:11px;color:#718096;margin-top:3px;display:flex;align-items:center;gap:4px;">🕐 <strong>${log.startTime}</strong> → <strong>${log.endTime}</strong></div>`:'<div style="font-size:10px;color:#cbd5e0;margin-top:2px;font-style:italic;">No clock time recorded</div>'}</div><div class="log-right"><div class="log-date">${fmtD(log.date)}</div></div>`;
     el.appendChild(el2);
   });
 }
@@ -2643,12 +2651,14 @@ function buildTrProject(logs,total){
 }
 function buildTrDetail(logs){
   const sorted=logs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
-  let html=`<table class="rpt-table"><thead><tr><th>Date</th><th>Member</th><th>Project / Activity</th><th>Phase</th><th>Typology</th><th>Description</th><th style="text-align:right">Time</th></tr></thead><tbody>`;
+  // V14.2.9: Added Clock Time column
+  let html=`<table class="rpt-table"><thead><tr><th>Date</th><th>Member</th><th>Project / Activity</th><th>Phase</th><th>Typology</th><th>Clock Time</th><th>Description</th><th style="text-align:right">Time</th></tr></thead><tbody>`;
   sorted.forEach(l=>{ const u=users.find(u=>u.id===l.userId);
-    html+=`<tr><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#2b6cb0;font-weight:600;">${l.productive?'📁 '+l.projectName:'🔸 '+l.activity}</td><td style="font-size:11px;">${l.phase||'-'}</td><td style="font-size:11px;">${l.typology||'-'}</td><td>${l.desc}</td><td style="text-align:right;font-weight:700;color:#2b6cb0;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
+    const clockTime = l.startTime && l.endTime ? `${l.startTime} → ${l.endTime}` : '<span style="color:#cbd5e0;font-style:italic;">—</span>';
+    html+=`<tr><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#2b6cb0;font-weight:600;">${l.productive?'📁 '+l.projectName:'🔸 '+l.activity}</td><td style="font-size:11px;">${l.phase||'-'}</td><td style="font-size:11px;">${l.typology||'-'}</td><td style="font-size:11px;white-space:nowrap;">${clockTime}</td><td>${l.desc}</td><td style="text-align:right;font-weight:700;color:#2b6cb0;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
   });
   const tot=logs.reduce((s,l)=>s+l.durationMins,0);
-  html+=`<tr style="background:#f7fafc;font-weight:700;"><td colspan="6" style="text-align:right;">Grand Total:</td><td style="text-align:right;color:#2b6cb0;font-size:15px;">${minsToHM(tot)}</td></tr>`;
+  html+=`<tr style="background:#f7fafc;font-weight:700;"><td colspan="7" style="text-align:right;">Grand Total:</td><td style="text-align:right;color:#2b6cb0;font-size:15px;">${minsToHM(tot)}</td></tr>`;
   document.getElementById('trDetailTbl').innerHTML=html+'</tbody></table>';
 }
 function exportPDF(){
@@ -3371,8 +3381,11 @@ document.getElementById('timerPauseBtn').addEventListener('click',()=>{
   }
   
   // Save time log but DON'T mark task as done
+  // V14.2.9: Record actual clock start and end times
+  const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const clockEnd   = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (Paused)`;
-  timeLogs.push({id:genId(),userId:currentUser.id,date:fmt(new Date()),projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:'',endTime:'',desc:autoDesc,productive:true,ts:Date.now()});
+  timeLogs.push({id:genId(),userId:currentUser.id,date:fmt(new Date()),projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
   
   // DON'T mark plan as done - keep it active!
   
@@ -3436,8 +3449,11 @@ document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>
   }
   
   // Save time log AND mark task as done
+  // V14.2.9: Record actual clock start and end times
+  const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const clockEnd   = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'}`;
-  timeLogs.push({id:genId(),userId:currentUser.id,date:fmt(new Date()),projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:'',endTime:'',desc:autoDesc,productive:true,ts:Date.now()});
+  timeLogs.push({id:genId(),userId:currentUser.id,date:fmt(new Date()),projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
   const plan=planEntries.find(p=>p.id===timerLinkedPlan.id); 
   if(plan)plan.done=true; // Mark as DONE!
   
@@ -3468,7 +3484,94 @@ document.getElementById('timerCompletePausedBtn').addEventListener('click', asyn
 });
 
 // ═══════════════════════════════════════════════════════
-// V14.2.5: OPTION C — Interactive orphan timer recovery
+// V14.2.9: OVERNIGHT STALE TIMER AUTO-CLEANUP
+// Fires on every app load — cleans up any activeTimers
+// from a previous calendar day automatically
+// ═══════════════════════════════════════════════════════
+async function cleanupStaleTimers() {
+  try {
+    const today = fmt(new Date());
+    const snapshot = await db.collection("activeTimers").get();
+    if (snapshot.empty) return;
+
+    const stale = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (!data.startTime) return;
+      const timerDate = fmt(new Date(data.startTime));
+      // If timer started on a previous calendar day — it's stale
+      if (timerDate < today) {
+        stale.push({ id: doc.id, data });
+      }
+    });
+
+    if (stale.length === 0) return;
+
+    console.log(`🧹 Found ${stale.length} stale timer(s) from previous day — auto-completing...`);
+
+    for (const { id, data } of stale) {
+      const startTime   = data.startTime;
+      const elapsedMs   = Date.now() - startTime;
+      const elapsedMins = Math.round(elapsedMs / 60000);
+      // Cap at 9 hours (realistic working day max)
+      const cappedMins  = Math.min(elapsedMins, 9 * 60);
+      const timerDate   = fmt(new Date(startTime));
+
+      const clockStart = new Date(startTime).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+      const clockEnd   = '19:00'; // Mark as end-of-working-day
+
+      // Save time log under the user's account
+      const logEntry = {
+        id:          genId(),
+        userId:      id, // activeTimers doc ID = userId
+        date:        timerDate,
+        projectId:   data.projectId   || null,
+        projectName: data.projectName || 'Unknown Project',
+        phase:       data.phase       || '',
+        typology:    data.typology    || '',
+        activity:    '',
+        durationMins: cappedMins,
+        startTime:   clockStart,
+        endTime:     clockEnd,
+        desc:        `${data.phase || data.projectName || 'Work on project'} (Auto-completed — timer left running overnight)`,
+        productive:  true,
+        ts:          Date.now(),
+        autoCompleted: true
+      };
+
+      // Save log to Firebase directly
+      await db.collection("timeLogs").doc(logEntry.id).set({
+        ...logEntry,
+        updatedAt: new Date().toISOString()
+      });
+
+      // Add to local array
+      timeLogs.push(logEntry);
+
+      // Remove stale active timer from Firebase
+      await db.collection("activeTimers").doc(id).delete();
+
+      console.log(`✅ Auto-completed stale timer for user ${data.userName || id}: ${minsToHM(cappedMins)} on ${timerDate}`);
+    }
+
+    if (stale.length > 0) {
+      // Refresh dashboard to show updated logs
+      renderDashboard();
+      renderTimeLog();
+      // Show admin notification
+      if (currentUser?.isAdmin) {
+        const names = stale.map(s => s.data.userName || s.id).join(', ');
+        showNotificationToast(
+          '🧹 Stale Timers Auto-Completed',
+          `${stale.length} overnight timer(s) auto-completed: ${names}`,
+          'warning'
+        );
+      }
+    }
+  } catch(e) {
+    console.error('❌ Stale timer cleanup failed:', e);
+  }
+}
 // ═══════════════════════════════════════════════════════
 let orphanTimerState = null; // holds the recovered state during modal interaction
 let orphanSnoozeCount = 0;
