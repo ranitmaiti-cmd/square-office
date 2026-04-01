@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.7 Production:</strong> Smart timer start — Quick Plan+Start modal (no more "go to planner" block) + Task selection cards replace ugly prompt() + smart last-used defaults. Phase & job type remain mandatory.
+            📌 <strong>V14.2.8 Production:</strong> Dashboard stats fixed — correct total hours, utilization, phases over budget. Timezone-safe month filtering in dashboard + time log. Removed duplicate broken renderDashboardStats.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1710,13 +1710,15 @@ document.getElementById('nextWeek').addEventListener('click',()=>{ currentWeek=a
 
 function renderDashboard(){
   const now=new Date(), thisMonth=now.getMonth(), thisYear=now.getFullYear();
-  const monthLogs=timeLogs.filter(l=>{ const d=new Date(l.date); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+  // V14.2.8 FIX: Use string comparison to avoid timezone date shift bug
+  const thisMonthStr = `${thisYear}-${String(thisMonth+1).padStart(2,'0')}`;
+  const monthLogs=timeLogs.filter(l=> l.date && l.date.startsWith(thisMonthStr));
   const totalHours=monthLogs.reduce((s,l)=>s+l.durationMins,0)/60;
   const prodHours=monthLogs.filter(l=>l.productive).reduce((s,l)=>s+l.durationMins,0)/60;
   const utilization=totalHours>0?((prodHours/totalHours)*100).toFixed(0):0;
   const activeProjects=projectsData.length;
   let overBudgetCount=0;
-  projectsData.forEach(proj=>{ Object.entries(proj.phases).forEach(([phase,budget])=>{ if(budget>0){ const used=phaseLoggedMins(proj.id,phase)/60; if(used>=budget)overBudgetCount++; } }); });
+  projectsData.forEach(proj=>{ Object.entries(proj.phases||{}).forEach(([phase,budget])=>{ if(budget>0){ const used=phaseLoggedMins(proj.id,phase)/60; if(used>=budget)overBudgetCount++; } }); });
   const activeUsers=users.filter(u=>!u.isAdmin).length;
   const avgHoursPerPerson=activeUsers>0?(totalHours/activeUsers).toFixed(1):0;
 
@@ -1991,41 +1993,11 @@ function stopDashboardAutoRefresh() {
   }
 }
 
+// V14.2.8: renderDashboardStats delegates to renderDashboard — single source of truth
+// The old duplicate function used wrong CSS classes (stat-value/stat-label don't exist)
+// and wrong field names (p.status, p.totalHours, p.budgetedHours) causing 0/wrong values
 function renderDashboardStats() {
-  const el = document.getElementById('dashAnalytics');
-  if (!el) return;
-  
-  const thisMonth = fmt(new Date()).substring(0, 7);
-  const monthLogs = timeLogs.filter(l => l.date.startsWith(thisMonth));
-  const totalMins = monthLogs.reduce((sum, l) => sum + l.durationMins, 0);
-  const prodMins = monthLogs.filter(l => l.productive).reduce((sum, l) => sum + l.durationMins, 0);
-  const prodPct = totalMins > 0 ? Math.round((prodMins / totalMins) * 100) : 0;
-  const activeProjs = new Set(projectsData.filter(p => p.status === 'active').map(p => p.id)).size;
-  const overBudget = projectsData.filter(p => p.status === 'active' && p.totalHours > p.budgetedHours).length;
-  const avgHours = users.length > 0 ? (totalMins / 60 / users.length).toFixed(1) : 0;
-  
-  el.innerHTML = `
-    <div class="stat-card" style="border-top:3px solid #4299e1;">
-      <div class="stat-value">${minsToHM(totalMins)}</div>
-      <div class="stat-label">Total Hours (This Month)</div>
-    </div>
-    <div class="stat-card" style="border-top:3px solid #48bb78;">
-      <div class="stat-value">${prodPct}%</div>
-      <div class="stat-label">Productive Utilization</div>
-    </div>
-    <div class="stat-card" style="border-top:3px solid #ed8936;">
-      <div class="stat-value">${activeProjs}</div>
-      <div class="stat-label">Active Projects</div>
-    </div>
-    <div class="stat-card" style="border-top:3px solid #9f7aea;">
-      <div class="stat-value">${overBudget}</div>
-      <div class="stat-label">Phases Over Budget</div>
-    </div>
-    <div class="stat-card" style="border-top:3px solid #38b2ac;">
-      <div class="stat-value">${avgHours}h</div>
-      <div class="stat-label">Avg Hours/Person</div>
-    </div>
-  `;
+  if (typeof renderDashboard === 'function') renderDashboard();
 }
 
 
@@ -2408,7 +2380,8 @@ function renderTimeLog(){
   
   let logs=timeLogs.filter(l=>currentUser.isAdmin||l.userId===currentUser.id);
   const m=parseInt(document.getElementById('tlMonth').value);
-  if(m>=0) logs=logs.filter(l=>new Date(l.date).getMonth()===m);
+  // V14.2.8 FIX: Use string comparison to avoid timezone date shift bug
+  if(m>=0) logs=logs.filter(l=>{ if(!l.date) return false; const parts=l.date.split('-'); return parseInt(parts[1])-1===m; });
   if(projFilter) logs=logs.filter(l=>l.projectId===projFilter);
   if(typeFilter) logs=logs.filter(l=>(typeFilter==='productive'?l.productive:!l.productive));
   logs=logs.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)||b.ts-a.ts);
