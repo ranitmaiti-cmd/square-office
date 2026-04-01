@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.6 Production:</strong> Fixed leave approval root cause — removed 3 duplicate loadData() race conditions + periodic save no longer overwrites approved status every 30s
+            📌 <strong>V14.2.7 Production:</strong> Smart timer start — Quick Plan+Start modal (no more "go to planner" block) + Task selection cards replace ugly prompt() + smart last-used defaults. Phase & job type remain mandatory.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -821,10 +821,66 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div>
 </div>
 
+<!-- V14.2.7: Quick Plan + Start Modal (no plan for today) -->
+<div class="modal-backdrop" id="quickPlanModal" style="z-index:550;">
+  <div class="modal-box" style="max-width:500px;">
+    <div class="modal-head">
+      <h3>▶ Start Timer</h3>
+      <button class="close-btn" onclick="closeModal('quickPlanModal')">×</button>
+    </div>
+    <div style="background:#fffaf0;border:1px solid #fbd38d;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#c05621;">
+      📌 No task planned for today. Fill in the details below — this will create a planner entry and start your timer in one step.
+    </div>
+    <div class="form-group">
+      <label class="form-label">Project <span style="color:#e53e3e;">*</span></label>
+      <select class="form-control" id="qpProject">
+        <option value="">Select project...</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Phase <span style="color:#e53e3e;">*</span></label>
+        <select class="form-control" id="qpPhase">
+          <option value="">Select project first</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Job Type <span style="color:#e53e3e;">*</span></label>
+        <select class="form-control" id="qpTypology">
+          <option value="">Select...</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Task Type</label>
+      <select class="form-control" id="qpType">
+        <option value="planned">Planned</option>
+        <option value="emergency">Emergency / Unplanned</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button class="btn btn-success" id="qpStartBtn">▶ Plan & Start Timer</button>
+      <button class="btn btn-ghost" onclick="closeModal('quickPlanModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- V14.2.7: Task Selection Modal (multiple plans today) -->
+<div class="modal-backdrop" id="taskSelectModal" style="z-index:550;">
+  <div class="modal-box" style="max-width:480px;">
+    <div class="modal-head">
+      <h3>▶ Select Task to Start</h3>
+      <button class="close-btn" onclick="closeModal('taskSelectModal')">×</button>
+    </div>
+    <div style="font-size:13px;color:#718096;margin-bottom:14px;">Choose which planned task to time now:</div>
+    <div id="taskSelectList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;"></div>
+    <div style="border-top:1px solid #e2e8f0;padding-top:12px;">
+      <button class="btn btn-warning btn-sm" id="taskSelectAddNew">+ Add a different task for today</button>
+    </div>
+  </div>
+</div>
+
 <script>
-// ═══════════════════════════════════════════════════════
-// FIREBASE CONFIGURATION - WORKING VERSION
-// ═══════════════════════════════════════════════════════
 const firebaseConfig = {
   apiKey: "AIzaSyBi_OD42znfsYZerQ_c6RWfLIPD_GropBE",
   authDomain: "square-office-management.firebaseapp.com",
@@ -1174,17 +1230,11 @@ async function saveData() {
     await planBatch.commit();
     console.log('✅ Plan entries saved:', planEntries.length);
     
-    // Save leave requests
-    const leaveBatch = db.batch();
-    leaveRequests.forEach(leave => {
-      const leaveRef = db.collection("leaveRequests").doc(leave.id);
-      leaveBatch.set(leaveRef, {
-        ...leave,
-        updatedAt: saveTimestamp
-      });
-    });
-    await leaveBatch.commit();
-    console.log('✅ Leave requests saved:', leaveRequests.length);
+    // V14.2.6: leaveRequests are EXCLUDED from batch save entirely.
+    // They are always written granularly (per-document) to prevent
+    // batch overwrites from resetting approved/rejected status back to pending.
+    // See: saveLeaveRequest(), approve handler, reject handler, submitLeaveBtn
+    console.log('✅ Leave requests handled granularly — skipping batch save');
     
     // Save main data WITHOUT large arrays (keeps document tiny)
     const dataToSave = {
@@ -2674,7 +2724,7 @@ document.getElementById('lFull').addEventListener('change',()=>{
   }
 }));
 
-document.getElementById('submitLeaveBtn').addEventListener('click',()=>{
+document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
   const type=document.getElementById('lType').value,start=document.getElementById('lStart').value,end=document.getElementById('lEnd').value,reason=document.getElementById('lReason').value.trim();
   const isHalf=document.getElementById('lHalf').checked;
   if(!type||!start||!reason){ alert('Fill all required fields'); return; }
@@ -2684,8 +2734,11 @@ document.getElementById('submitLeaveBtn').addEventListener('click',()=>{
   if(type==='medical'&&days>user.medLeft){ alert(`Only ${user.medLeft} medical days left`); return; }
   if(type==='casual'&&days>user.casLeft){ alert(`Only ${user.casLeft} casual days left`); return; }
   
-  leaveRequests.push({id:genId(),userId:currentUser.id,userName:currentUser.name,type,startDate:start,endDate:end,days,isHalf,reason,status:'pending',date:fmt(new Date())});
-  autoSave(); closeModal('leaveModal'); updateApprovalBadge(); renderLeaves();
+  const newLeave = {id:genId(),userId:currentUser.id,userName:currentUser.name,type,startDate:start,endDate:end,days,isHalf,reason,status:'pending',date:fmt(new Date())};
+  leaveRequests.push(newLeave);
+  // V14.2.6: Use granular save — never batch-rewrite all leaveRequests (would overwrite approved statuses)
+  await saveLeaveRequest(newLeave);
+  closeModal('leaveModal'); updateApprovalBadge(); renderLeaves();
 });
 function renderLeaves(){
   const user=users.find(u=>u.id===currentUser.id);
@@ -2839,7 +2892,10 @@ window.cancelLeave = function(leaveId) {
   }
   
   leaveRequests = leaveRequests.filter(l => l.id !== leaveId);
-  autoSave();
+  // V14.2.6: Delete directly from Firebase — don't use autoSave batch
+  db.collection("leaveRequests").doc(leaveId).delete()
+    .then(() => console.log('✅ Leave cancelled and deleted:', leaveId))
+    .catch(e => console.error('❌ Cancel delete failed:', e));
   renderLeaves();
   updateApprovalBadge();
   alert('✅ Leave request cancelled');
@@ -3144,55 +3200,177 @@ document.getElementById('timerNavBtn').addEventListener('click',()=>{
   document.addEventListener('touchend',()=>{ drag=false; });
 })();
 
-document.getElementById('timerStartBtn').addEventListener('click',()=>{
-  // V14.2: FIX #2 - Prevent concurrent timers
-  if(timerRunning){
-    alert('⚠️ Timer Already Running!\n\nPlease stop or pause your current timer before starting a new one.\n\nCurrent Task: ' + (timerLinkedPlan ? timerLinkedPlan.project : 'Unplanned'));
+// ═══════════════════════════════════════════════════════
+// V14.2.7: SMART TIMER START — Quick Plan Modal + Task Selection Modal
+// ═══════════════════════════════════════════════════════
+
+// Populate Quick Plan modal fields
+function openQuickPlanModal() {
+  const pSel = document.getElementById('qpProject');
+  pSel.innerHTML = '<option value="">Select project...</option>' +
+    projectsData.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+
+  // Restore last used project/phase/typology for this user
+  const lastUsed = JSON.parse(localStorage.getItem('lastTimerDefaults_' + currentUser.id) || '{}');
+  if (lastUsed.projectId) {
+    pSel.value = lastUsed.projectId;
+    populateQPPhase(lastUsed.projectId, lastUsed.phase);
+  } else {
+    populateQPPhase('');
+  }
+
+  const tSel = document.getElementById('qpTypology');
+  tSel.innerHTML = '<option value="">Select...</option>' +
+    typologies.map(t => `<option value="${t}">${t}</option>`).join('');
+  if (lastUsed.typology) tSel.value = lastUsed.typology;
+
+  openModal('quickPlanModal');
+}
+
+function populateQPPhase(projectId, selectedPhase) {
+  const pSel = document.getElementById('qpPhase');
+  if (!projectId) {
+    pSel.innerHTML = '<option value="">Select project first</option>';
     return;
   }
-  
-  const today=fmt(new Date()), myPlans=planEntries.filter(p=>p.userId===currentUser.id&&p.date===today&&!p.done);
-  if(myPlans.length===0){
-    if(currentUser.isAdmin){
-      if(!confirm('⚠️ No planned work for today!\n\nAs admin, do you want to start an unplanned timer anyway?')) return;
-      timerLinkedPlan=null;
-    } else {
-      alert('⚠️ No planned work for today!\n\nPlease go to Weekly Planner and assign work for today before starting the timer.'); return;
-    }
-  } else if(myPlans.length===1){
-    timerLinkedPlan=myPlans[0];
-  } else {
-    const opts=myPlans.map((p,i)=>`${i+1}. [${p.project}] ${p.phase||''}`).join('\n');
-    const choice=prompt(`You have ${myPlans.length} planned tasks.\n\n${opts}\n\nEnter number:`);
-    if(!choice) return;
-    const idx=parseInt(choice)-1;
-    if(idx<0||idx>=myPlans.length){ alert('Invalid selection'); return; }
-    timerLinkedPlan=myPlans[idx];
-  }
-  timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
-  
-  // V14.1: Save timer state to localStorage
+  pSel.innerHTML = '<option value="">Select phase...</option>' +
+    PHASES.map(ph => `<option value="${ph}">${ph}</option>`).join('');
+  if (selectedPhase) pSel.value = selectedPhase;
+}
+
+document.getElementById('qpProject').addEventListener('change', function() {
+  populateQPPhase(this.value);
+});
+
+// Quick Plan + Start button
+document.getElementById('qpStartBtn').addEventListener('click', () => {
+  const projectId  = document.getElementById('qpProject').value;
+  const phase      = document.getElementById('qpPhase').value;
+  const typology   = document.getElementById('qpTypology').value;
+  const type       = document.getElementById('qpType').value;
+
+  if (!projectId) { alert('Please select a project'); return; }
+  if (!phase)     { alert('Please select a phase'); return; }
+  if (!typology)  { alert('Please select a job type'); return; }
+
+  const proj = projectsData.find(p => p.id === projectId);
+
+  // Create planner entry for today
+  const today = fmt(new Date());
+  const entry = {
+    id: genId(),
+    userId: currentUser.id,
+    date: today,
+    projectId,
+    project: proj.name,
+    client: proj.client,
+    phase,
+    typology,
+    desc: `${phase} — ${typology}`,
+    estHours: 0,
+    type,
+    done: false
+  };
+  planEntries.push(entry);
+  savePlanEntry(entry);
+
+  // Save last used defaults for smart pre-fill next time
+  localStorage.setItem('lastTimerDefaults_' + currentUser.id, JSON.stringify({ projectId, phase, typology }));
+
+  closeModal('quickPlanModal');
+  startTimerWithPlan(entry);
+  renderPlanner(); renderDashboard();
+});
+
+// Task selection modal — show cards for each plan
+function openTaskSelectModal(plans) {
+  const list = document.getElementById('taskSelectList');
+  list.innerHTML = '';
+  plans.forEach(plan => {
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#f7fafc;border:2px solid #e2e8f0;border-radius:10px;padding:12px 16px;cursor:pointer;transition:border-color 0.2s;';
+    card.innerHTML = `
+      <div style="font-weight:700;font-size:14px;color:#2b6cb0;">📁 ${plan.project}</div>
+      <div style="font-size:12px;color:#4a5568;margin-top:3px;">${plan.phase || '—'} · ${plan.typology || '—'}</div>
+      <div style="font-size:11px;color:#a0aec0;margin-top:2px;">${plan.type === 'emergency' ? '🚨 Emergency' : '📅 Planned'}</div>
+    `;
+    card.onmouseenter = () => card.style.borderColor = '#2b6cb0';
+    card.onmouseleave = () => card.style.borderColor = '#e2e8f0';
+    card.onclick = () => {
+      closeModal('taskSelectModal');
+      startTimerWithPlan(plan);
+    };
+    list.appendChild(card);
+  });
+  openModal('taskSelectModal');
+}
+
+// "Add a different task" from task select modal
+document.getElementById('taskSelectAddNew').addEventListener('click', () => {
+  closeModal('taskSelectModal');
+  // Open quick plan modal but without the "no plan" warning message
+  openQuickPlanModal();
+  document.querySelector('#quickPlanModal [style*="fffaf0"]').style.display = 'none';
+});
+
+// Core function: actually start the timer with a linked plan
+function startTimerWithPlan(plan) {
+  timerLinkedPlan = plan;
+  timerStartedAt  = Date.now();
+  timerPausedMs   = 0;
+  timerRunning    = true;
+
   localStorage.setItem('timerState', JSON.stringify({
     startedAt: timerStartedAt,
     pausedMs: timerPausedMs,
     running: true,
     linkedPlan: timerLinkedPlan
   }));
-  
+
   document.getElementById('timerWidget').classList.add('running');
-  document.getElementById('timerPreStart').style.display='none';
-  document.getElementById('timerRunning').style.display='block';
+  document.getElementById('timerPreStart').style.display  = 'none';
+  document.getElementById('timerRunning').style.display   = 'block';
+  document.getElementById('timerPaused').style.display    = 'none';
   document.getElementById('timerDisplay').classList.add('running');
-  document.getElementById('timerStatus').textContent='● Recording...';
-  const projBadge=document.getElementById('timerProject');
-  projBadge.style.display='block';
-  if(timerLinkedPlan){ projBadge.textContent=`📁 ${timerLinkedPlan.project}`; projBadge.style.background='#ebf4ff'; projBadge.style.color='#2b6cb0'; }
-  else { projBadge.textContent='⚠️ Unplanned'; projBadge.style.background='#fff5f5'; projBadge.style.color='#e53e3e'; }
-  document.getElementById('timerNavLabel').textContent='⏱ Running...';
-  timerInterval=setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
-  
-  // V13.5: Save active timer to Firebase
+  document.getElementById('timerStatus').textContent = '● Recording...';
+
+  const projBadge = document.getElementById('timerProject');
+  projBadge.style.display    = 'block';
+  projBadge.textContent      = `📁 ${plan.project}`;
+  projBadge.style.background = '#ebf4ff';
+  projBadge.style.color      = '#2b6cb0';
+
+  document.getElementById('timerNavLabel').textContent = '⏱ Running...';
+  timerInterval = setInterval(() => {
+    document.getElementById('timerDisplay').textContent = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
+  }, 1000);
+
   saveActiveTimerToFirebase();
+}
+
+document.getElementById('timerStartBtn').addEventListener('click', () => {
+  // Prevent concurrent timers
+  if (timerRunning) {
+    alert('⚠️ Timer Already Running!\n\nPlease stop or pause your current timer before starting a new one.\n\nCurrent Task: ' + (timerLinkedPlan ? timerLinkedPlan.project : 'Unknown'));
+    return;
+  }
+
+  const today    = fmt(new Date());
+  const myPlans  = planEntries.filter(p => p.userId === currentUser.id && p.date === today && !p.done);
+
+  if (myPlans.length === 0) {
+    // No plans today — open Quick Plan modal
+    openQuickPlanModal();
+    // Restore warning message visibility in case it was hidden
+    const warn = document.querySelector('#quickPlanModal [style*="fffaf0"]');
+    if (warn) warn.style.display = 'block';
+  } else if (myPlans.length === 1) {
+    // Exactly one plan — start immediately
+    startTimerWithPlan(myPlans[0]);
+  } else {
+    // Multiple plans — show selection modal
+    openTaskSelectModal(myPlans);
+  }
 });
 
 // V13.6: Pause Button - Save time but keep task active
