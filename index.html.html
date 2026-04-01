@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.10 Production:</strong> Firebase quota fix (timer display separated from Firebase reads — 3,600 reads/hour → 2 reads/hour) + periodic save no longer fires on auto-refresh + tab-hidden inactivity pause + leave approval sync
+            📌 <strong>V14.2.11 Production:</strong> Leave approval permanently fixed — onSnapshot now skips ALL cache and pending writes (includeMetadataChanges:true). Only confirmed server data updates in-memory array.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1168,14 +1168,14 @@ async function saveData() {
     }
     
     // AUTO-BACKUP before save
+    // V14.2.10: leaveRequests excluded from backup — status changes must come from Firebase only
     if (autoBackupEnabled) {
       const backup = {
         timestamp: new Date().toISOString(),
-        data: { users, clients, typologies, projectsData, planEntries, timeLogs, leaveRequests, changeRequests, holidays }
+        data: { users, clients, typologies, projectsData, planEntries, timeLogs, changeRequests, holidays }
       };
       const backups = JSON.parse(localStorage.getItem('autoBackups') || '[]');
       backups.unshift(backup);
-      // Keep only last 5 backups
       localStorage.setItem('autoBackups', JSON.stringify(backups.slice(0, 5)));
       console.log('💾 Auto-backup created');
     }
@@ -1558,6 +1558,9 @@ loadData().then(async () => {
 
         // V14.2.9: Clean up any stale timers from previous day
         await cleanupStaleTimers();
+
+        // V14.2.10: Start real-time leave requests listener
+        startLeaveRequestsListener();
         
         // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
         await restoreTimerState();
@@ -1605,6 +1608,9 @@ async function doLogin(){
 
     // V14.2.9: Clean up any stale timers from previous day
     await cleanupStaleTimers();
+
+    // V14.2.10: Start real-time leave requests listener
+    startLeaveRequestsListener();
     
     // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
     await restoreTimerState();
@@ -3563,8 +3569,38 @@ async function cleanupStaleTimers() {
     console.error('❌ Stale timer cleanup failed:', e);
   }
 }
+
 // ═══════════════════════════════════════════════════════
-let orphanTimerState = null; // holds the recovered state during modal interaction
+// V14.2.10: Real-time Firestore listener for leaveRequests
+// ═══════════════════════════════════════════════════════
+// V14.2.10: Leave Requests Real-Time Listener
+// Uses onSnapshot with metadata changes to distinguish
+// server vs cache — only processes confirmed server data
+// ═══════════════════════════════════════════════════════
+let leaveRequestsListener = null;
+
+function startLeaveRequestsListener() {
+  if (leaveRequestsListener) leaveRequestsListener(); // Unsubscribe existing
+
+  leaveRequestsListener = db.collection("leaveRequests")
+    .onSnapshot({ includeMetadataChanges: true }, snapshot => {
+      // V14.2.10 FIX: Skip ALL cache results — only process confirmed server writes
+      if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
+        console.log('⏭️ leaveRequests snapshot skipped — from cache or has pending writes');
+        return;
+      }
+      leaveRequests = [];
+      snapshot.forEach(doc => leaveRequests.push(doc.data()));
+      console.log('🔔 leaveRequests from SERVER:', leaveRequests.map(l=>l.userName+':'+l.status).join(', '));
+      updateApprovalBadge();
+      const approvalsPage = document.getElementById('page-approvals');
+      if (approvalsPage && approvalsPage.classList.contains('active')) {
+        renderApprovals();
+      }
+    }, err => {
+      console.error('❌ leaveRequests listener error:', err);
+    });
+}
 let orphanSnoozeCount = 0;
 let orphanSnoozeTimeout = null;
 
