@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.9 Production:</strong> Overnight stale timer auto-cleanup + Start/End clock times on all log entries + Month name in dashboard stats (e.g. "Total Hours — April 2026")
+            📌 <strong>V14.2.9 Production:</strong> Overnight stale timer auto-cleanup + Start/End clock times + Month name in stats + Firebase cache disabled (root cause of leave approval reverting on refresh)
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -892,6 +892,7 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+// V14.2.9: Cache bypassed via {source:'server'} on all reads — see loadData()
 
 let dataLoaded = false; // Prevent saves before load completes
 
@@ -1284,46 +1285,39 @@ async function saveData() {
 
 async function loadData() {
   try {
-    const docSnap = await db.collection("companyData").doc("squareDB").get();
+    const docSnap = await db.collection("companyData").doc("squareDB").get({source:'server'});
     if (docSnap.exists) {
       const data = docSnap.data();
       users = data.users || users;
       clients = data.clients || clients;
       typologies = data.typologies || typologies;
       
-      // V13.2: Load all large arrays from subcollections
-      
+      // V14.2.9 FIX: All reads use {source:'server'} to bypass Firebase cache
+      // Cache was serving stale data (old 'pending' status) after approve/reject
+
       // Load projects
-      const projectsSnapshot = await db.collection("projects").get();
+      const projectsSnapshot = await db.collection("projects").get({source:'server'});
       projectsData = [];
-      projectsSnapshot.forEach(doc => {
-        projectsData.push(doc.data());
-      });
-      console.log('✅ Loaded projects from subcollection:', projectsData.length);
+      projectsSnapshot.forEach(doc => { projectsData.push(doc.data()); });
+      console.log('✅ Loaded projects from server:', projectsData.length);
       
       // Load time logs
-      const timeLogsSnapshot = await db.collection("timeLogs").get();
+      const timeLogsSnapshot = await db.collection("timeLogs").get({source:'server'});
       timeLogs = [];
-      timeLogsSnapshot.forEach(doc => {
-        timeLogs.push(doc.data());
-      });
-      console.log('✅ Loaded time logs from subcollection:', timeLogs.length);
+      timeLogsSnapshot.forEach(doc => { timeLogs.push(doc.data()); });
+      console.log('✅ Loaded time logs from server:', timeLogs.length);
       
       // Load plan entries
-      const planEntriesSnapshot = await db.collection("planEntries").get();
+      const planEntriesSnapshot = await db.collection("planEntries").get({source:'server'});
       planEntries = [];
-      planEntriesSnapshot.forEach(doc => {
-        planEntries.push(doc.data());
-      });
-      console.log('✅ Loaded plan entries from subcollection:', planEntries.length);
+      planEntriesSnapshot.forEach(doc => { planEntries.push(doc.data()); });
+      console.log('✅ Loaded plan entries from server:', planEntries.length);
       
       // Load leave requests
-      const leaveRequestsSnapshot = await db.collection("leaveRequests").get();
+      const leaveRequestsSnapshot = await db.collection("leaveRequests").get({source:'server'});
       leaveRequests = [];
-      leaveRequestsSnapshot.forEach(doc => {
-        leaveRequests.push(doc.data());
-      });
-      console.log('✅ Loaded leave requests from subcollection:', leaveRequests.length);
+      leaveRequestsSnapshot.forEach(doc => { leaveRequests.push(doc.data()); });
+      console.log('✅ Loaded leave requests from server:', leaveRequests.length);
       
       // Fallback: Migrate old structure if subcollections empty
       if (projectsData.length === 0 && data.projectsData) {
