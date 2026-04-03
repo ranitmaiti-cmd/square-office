@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.12 Production:</strong> Stale timer cleanup skips auto-complete if real logs already exist for that user/date — prevents inflated duplicate entries (e.g. Souvik's 12h 52m bug)
+            📌 <strong>V14.2.13 Production:</strong> CRITICAL FIX — Pause now logs incremental session time only (not cumulative from original start). Each resume resets session clock. Eliminates duplicate inflated entries like 26h for Tasmin.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -3299,6 +3299,9 @@ function startTimerWithPlan(plan) {
   timerStartedAt  = Date.now();
   timerPausedMs   = 0;
   timerRunning    = true;
+  // V14.2.12 FIX: Track session start separately from original start
+  // Each pause logs incremental time since THIS session start, not original start
+  window.lastSessionStartedAt = Date.now();
 
   localStorage.setItem('timerState', JSON.stringify({
     startedAt: timerStartedAt,
@@ -3378,8 +3381,11 @@ document.getElementById('timerPauseBtn').addEventListener('click',()=>{
   }
   
   // Save time log but DON'T mark task as done
-  // V14.2.9: Record actual clock start and end times
-  const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  // V14.2.12 FIX: Use lastSessionStartedAt for clock times — records this session only
+  // timerStartedAt is the original start (09:58) which never changes across resumes
+  // lastSessionStartedAt resets on every resume — gives correct incremental clock time
+  const sessionStart = window.lastSessionStartedAt || timerStartedAt;
+  const clockStart = new Date(sessionStart).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const clockEnd   = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (Paused)`;
   timeLogs.push({id:genId(),userId:currentUser.id,date:fmt(new Date()),projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
@@ -3409,6 +3415,8 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
   
   // Restart timer for same task
   timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
+  // V14.2.12: Reset session start so next pause logs only this session's time
+  window.lastSessionStartedAt = Date.now();
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPaused').style.display='none';
   document.getElementById('timerRunning').style.display='block';
@@ -3446,8 +3454,9 @@ document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>
   }
   
   // Save time log AND mark task as done
-  // V14.2.9: Record actual clock start and end times
-  const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  // V14.2.12 FIX: Use lastSessionStartedAt for correct incremental clock time
+  const sessionStart = window.lastSessionStartedAt || timerStartedAt;
+  const clockStart = new Date(sessionStart).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const clockEnd   = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'}`;
   timeLogs.push({id:genId(),userId:currentUser.id,date:fmt(new Date()),projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
