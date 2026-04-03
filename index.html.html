@@ -550,7 +550,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.13 Production:</strong> CRITICAL FIX — Pause now logs incremental session time only (not cumulative from original start). Each resume resets session clock. Eliminates duplicate inflated entries like 26h for Tasmin.
+            📌 <strong>V14.2.14 Production:</strong> Complete timer session fix — lastSessionStartedAt persisted to localStorage (survives refresh), 7PM auto-complete uses session time not cumulative display, resetTimer clears session state. No more inflated log entries.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -3299,12 +3299,13 @@ function startTimerWithPlan(plan) {
   timerStartedAt  = Date.now();
   timerPausedMs   = 0;
   timerRunning    = true;
-  // V14.2.12 FIX: Track session start separately from original start
-  // Each pause logs incremental time since THIS session start, not original start
+  // V14.2.14: Track session start separately — resets on every resume
+  // Saved to localStorage so it survives page refresh
   window.lastSessionStartedAt = Date.now();
 
   localStorage.setItem('timerState', JSON.stringify({
     startedAt: timerStartedAt,
+    lastSessionStartedAt: window.lastSessionStartedAt,
     pausedMs: timerPausedMs,
     running: true,
     linkedPlan: timerLinkedPlan
@@ -3415,8 +3416,15 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
   
   // Restart timer for same task
   timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
-  // V14.2.12: Reset session start so next pause logs only this session's time
+  // V14.2.14: Reset session start and persist to localStorage
   window.lastSessionStartedAt = Date.now();
+  localStorage.setItem('timerState', JSON.stringify({
+    startedAt: timerStartedAt,
+    lastSessionStartedAt: window.lastSessionStartedAt,
+    pausedMs: 0,
+    running: true,
+    linkedPlan: timerLinkedPlan
+  }));
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPaused').style.display='none';
   document.getElementById('timerRunning').style.display='block';
@@ -3646,6 +3654,8 @@ async function restoreTimerState() {
     timerPausedMs  = state.pausedMs || 0;
     timerLinkedPlan = state.linkedPlan;
     timerRunning   = true;
+    // V14.2.14: Restore lastSessionStartedAt — if not saved, use startedAt as fallback
+    window.lastSessionStartedAt = state.lastSessionStartedAt || state.startedAt;
 
     document.getElementById('timerWidget').classList.add('running');
     document.getElementById('timerPreStart').style.display  = 'none';
@@ -3812,17 +3822,22 @@ function startEndOfDayMonitor() {
     // 7:00 PM force auto-complete
     if (hour === 19 && min === 0 && timerRunning) {
       closeModal('endOfDayModal');
-      const parts = document.getElementById('timerDisplay').textContent.split(':').map(Number);
-      const totalSecs = parts[0]*3600 + parts[1]*60 + parts[2];
-      const mins = Math.max(1, Math.round(totalSecs/60));
+      // V14.2.14 FIX: Use lastSessionStartedAt for correct session duration
+      // timerDisplay shows cumulative time — use actual session start instead
+      const sessionStart = window.lastSessionStartedAt || timerStartedAt;
+      const sessionSecs = Math.floor((Date.now() - sessionStart) / 1000);
+      const mins = Math.max(1, Math.round(sessionSecs / 60));
       const projectName = timerLinkedPlan?.project || 'Unplanned';
+      const clockStart = new Date(sessionStart).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+      const clockEnd = '19:00';
 
       if (timerLinkedPlan) {
         timeLogs.push({
           id: genId(), userId: currentUser.id, date: fmt(new Date()),
           projectId: timerLinkedPlan.projectId, projectName,
           phase: timerLinkedPlan.phase, typology: timerLinkedPlan.typology,
-          activity: '', durationMins: mins, startTime: '', endTime: '',
+          activity: '', durationMins: mins,
+          startTime: clockStart, endTime: clockEnd,
           desc: `${timerLinkedPlan.typology || timerLinkedPlan.phase || 'Work on project'} (Auto-completed at end of day)`,
           productive: true, ts: Date.now()
         });
@@ -3849,6 +3864,7 @@ async function resetTimer() {
   timerStartedAt = null;
   timerPausedMs = 0;
   timerLinkedPlan = null;
+  window.lastSessionStartedAt = null;
   if (timerInterval) clearInterval(timerInterval);
   
   // V14.1: Clear timer state from localStorage
