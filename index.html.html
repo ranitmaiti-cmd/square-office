@@ -505,6 +505,12 @@ textarea.form-control{min-height:70px;resize:vertical;}
           <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#fed7d7;border:1px solid #e53e3e;display:inline-block;border-radius:3px;"></span> On Leave</span>
           <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#fef3c7;border:1px solid #f59e0b;display:inline-block;border-radius:3px;"></span> Half Day</span>
         </div>
+
+        <!-- V14.2.15: Leave Bank — admin only -->
+        <div class="admin-only" style="margin-top:24px;">
+          <div style="font-weight:700;font-size:14px;margin-bottom:12px;color:#2d3748;">🏦 Team Leave Bank</div>
+          <div id="teamLeaveBank" style="overflow-x:auto;"></div>
+        </div>
       </div>
 
       <!-- APPROVALS -->
@@ -550,7 +556,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.14 Production:</strong> Complete timer session fix — lastSessionStartedAt persisted to localStorage (survives refresh), 7PM auto-complete uses session time not cumulative display, resetTimer clears session state. No more inflated log entries.
+            📌 <strong>V14.2.15 Production:</strong> Team Leave Bank added (admin only) — shows each member's medical and casual leave balance, days used, progress bars and status indicators. V14.2.14 timer session fixes included.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1707,7 +1713,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='projects')   renderProjectsBudget();
     if(page==='timereport') initTimeReport();
     if(page==='leaves')     renderLeaves();
-    if(page==='teamleave')  renderTeamLeave();
+    if(page==='teamleave')  { renderTeamLeave(); renderTeamLeaveBank(); }
     if(page==='approvals')  renderApprovals();
     if(page==='manage')     renderManage();
   });
@@ -2847,8 +2853,77 @@ function renderTeamLeave() {
 }
 
 // ═══════════════════════════════════════════════════════
-// APPROVALS
+// V14.2.15: Team Leave Bank — admin view
 // ═══════════════════════════════════════════════════════
+function renderTeamLeaveBank() {
+  const el = document.getElementById('teamLeaveBank');
+  if (!el || !currentUser?.isAdmin) return;
+
+  const teamMembers = users.filter(u => !u.isAdmin);
+
+  // Calculate used days from approved leave requests per user
+  const usedMed = {}, usedCas = {};
+  leaveRequests.filter(l => l.status === 'approved').forEach(l => {
+    if (!usedMed[l.userId]) { usedMed[l.userId] = 0; usedCas[l.userId] = 0; }
+    if (l.type === 'medical') usedMed[l.userId] += l.days;
+    else if (l.type === 'casual') usedCas[l.userId] += l.days;
+  });
+
+  // Helper to display days nicely — 0.5 shows as ½
+  const fmtDays = d => d === 0.5 ? '½' : d % 1 === 0.5 ? `${Math.floor(d)}½` : String(d);
+
+  const rows = teamMembers.map(u => {
+    const medUsed = usedMed[u.id] || (12 - (u.medLeft ?? 12));
+    const casUsed = usedCas[u.id] || (5 - (u.casLeft ?? 5));
+    const medLeft = u.medLeft ?? 12;
+    const casLeft = u.casLeft ?? 5;
+
+    const medBar = `<div style="background:#e2e8f0;border-radius:4px;height:6px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${medLeft<=2?'#e53e3e':medLeft<=5?'#d69e2e':'#3182ce'};border-radius:4px;height:6px;width:${Math.round((medUsed/12)*80)}px;"></div></div>`;
+    const casBar = `<div style="background:#e2e8f0;border-radius:4px;height:6px;width:60px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${casLeft===0?'#e53e3e':casLeft<=1?'#d69e2e':'#38a169'};border-radius:4px;height:6px;width:${Math.round((casUsed/5)*60)}px;"></div></div>`;
+
+    return `<tr style="border-bottom:1px solid #f0f4f8;">
+      <td style="padding:10px 12px;font-weight:600;font-size:13px;">${u.name}</td>
+      <td style="padding:10px 12px;text-align:center;">
+        <span style="font-size:13px;font-weight:700;color:#3182ce;">${fmtDays(medLeft)}</span>
+        <span style="font-size:11px;color:#a0aec0;"> / 12</span>
+        ${medBar}
+      </td>
+      <td style="padding:10px 12px;text-align:center;">
+        <span style="font-size:13px;color:#718096;">${fmtDays(medUsed)}</span>
+        <span style="font-size:11px;color:#a0aec0;"> day${medUsed!==1?'s':''}</span>
+      </td>
+      <td style="padding:10px 12px;text-align:center;">
+        <span style="font-size:13px;font-weight:700;color:#38a169;">${fmtDays(casLeft)}</span>
+        <span style="font-size:11px;color:#a0aec0;"> / 5</span>
+        ${casBar}
+      </td>
+      <td style="padding:10px 12px;text-align:center;">
+        <span style="font-size:13px;color:#718096;">${fmtDays(casUsed)}</span>
+        <span style="font-size:11px;color:#a0aec0;"> day${casUsed!==1?'s':''}</span>
+      </td>
+      <td style="padding:10px 12px;text-align:center;">
+        ${casLeft === 0 ? '<span style="font-size:11px;background:#fff5f5;color:#e53e3e;padding:2px 8px;border-radius:10px;font-weight:600;">Exhausted</span>' :
+          casLeft === 1 ? '<span style="font-size:11px;background:#fffaf0;color:#d69e2e;padding:2px 8px;border-radius:10px;">Low</span>' :
+          '<span style="font-size:11px;background:#f0fff4;color:#38a169;padding:2px 8px;border-radius:10px;">OK</span>'}
+      </td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:10px;border:1px solid #e2e8f0;overflow:hidden;font-size:13px;">
+      <thead>
+        <tr style="background:#f7fafc;">
+          <th style="padding:10px 12px;text-align:left;font-size:11px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Member</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#3182ce;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🏥 Medical Left</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#38a169;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🌴 Casual Left</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Status</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
 // Leave Cancellation
 window.cancelLeave = function(leaveId) {
   const leave = leaveRequests.find(l => l.id === leaveId);
@@ -2921,7 +2996,7 @@ function renderApprovals(){
         else u.casLeft=Math.min(5, u.casLeft+lv.days);
         return;
       }
-      renderApprovals(); updateApprovalBadge(); renderDashboard(); renderTeamLeave();
+      renderApprovals(); updateApprovalBadge(); renderDashboard(); renderTeamLeave(); renderTeamLeaveBank();
     };
     c.querySelector('.btn-danger').onclick= async ()=>{
       // V14.2.6: Direct granular save for rejection too
