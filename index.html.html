@@ -556,7 +556,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.16 Production:</strong> DEFINITIVE timer fix — pause and complete now calculate duration from lastSessionStartedAt directly, never from timerDisplay. Display resets to 00:00:00 on resume. Eliminates all cumulative pause inflation permanently.
+            📌 <strong>V14.2.15 Production:</strong> Team Leave Bank added (admin only) — shows each member's medical and casual leave balance, days used, progress bars and status indicators. V14.2.14 timer session fixes included.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -3435,20 +3435,10 @@ document.getElementById('timerStartBtn').addEventListener('click', () => {
 // V13.6: Pause Button - Save time but keep task active
 document.getElementById('timerPauseBtn').addEventListener('click',()=>{
   clearInterval(timerInterval); timerRunning=false;
-
-  // V14.2.15 DEFINITIVE FIX: Calculate duration from lastSessionStartedAt
-  // NEVER read from timerDisplay — it can show cumulative time from original start
-  const sessionStart = window.lastSessionStartedAt || timerStartedAt;
-  const sessionSecs = Math.floor((Date.now() - sessionStart) / 1000);
-  if(sessionSecs < 60){
-    alert('Timer must run for at least 1 minute');
-    timerStartedAt = Date.now();
-    window.lastSessionStartedAt = Date.now();
-    timerRunning = true;
-    timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(Date.now()-timerStartedAt); },1000);
-    return;
-  }
-  const mins = Math.max(1, Math.round(sessionSecs / 60));
+  const parts=document.getElementById('timerDisplay').textContent.split(':').map(Number);
+  const totalSecs=parts[0]*3600+parts[1]*60+parts[2];
+  if(totalSecs<60){ alert('Timer must run for at least 1 minute'); timerStartedAt=Date.now(); timerRunning=true; timerInterval=setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000); return; }
+  const mins=Math.max(1,Math.round(totalSecs/60));
   
   // If timer was unplanned, open log modal
   if(!timerLinkedPlan){
@@ -3513,7 +3503,6 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPaused').style.display='none';
   document.getElementById('timerRunning').style.display='block';
-  document.getElementById('timerDisplay').textContent='00:00:00';
   document.getElementById('timerDisplay').classList.add('running');
   document.getElementById('timerStatus').textContent='● Recording...';
   document.getElementById('timerNavLabel').textContent='⏱ Running...';
@@ -3526,19 +3515,10 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
 // V13.6: Complete Button (from running) - Mark task done
 document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>{
   clearInterval(timerInterval); timerRunning=false;
-
-  // V14.2.15 DEFINITIVE FIX: Calculate duration from lastSessionStartedAt
-  const sessionStart = window.lastSessionStartedAt || timerStartedAt;
-  const sessionSecs = Math.floor((Date.now() - sessionStart) / 1000);
-  if(sessionSecs < 60){
-    alert('Timer must run for at least 1 minute');
-    timerStartedAt = Date.now();
-    window.lastSessionStartedAt = Date.now();
-    timerRunning = true;
-    timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(Date.now()-timerStartedAt); },1000);
-    return;
-  }
-  const mins = Math.max(1, Math.round(sessionSecs / 60));
+  const parts=document.getElementById('timerDisplay').textContent.split(':').map(Number);
+  const totalSecs=parts[0]*3600+parts[1]*60+parts[2];
+  if(totalSecs<60){ alert('Timer must run for at least 1 minute'); timerStartedAt=Date.now(); timerRunning=true; timerInterval=setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000); return; }
+  const mins=Math.max(1,Math.round(totalSecs/60));
   
   // If timer was unplanned, open log modal
   if(!timerLinkedPlan){
