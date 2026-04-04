@@ -3456,7 +3456,7 @@ document.getElementById('timerPauseBtn').addEventListener('click',()=>{
     document.getElementById('timerWidget').classList.remove('running');
     openLogModal();
     document.getElementById('tmTmr').checked=true;
-    document.getElementById('mTimerDisp').textContent=secsToHMS(totalSecs);
+    document.getElementById('mTimerDisp').textContent=secsToHMS(sessionSecs);
     document.getElementById('logProdYes').checked=true;
     document.getElementById('logProdFields').style.display='block';
     document.getElementById('logNonProdFields').style.display='none';
