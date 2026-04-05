@@ -556,7 +556,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.16 Production:</strong> DEFINITIVE timer fix — pause and complete now calculate duration from lastSessionStartedAt directly, never from timerDisplay. Display resets to 00:00:00 on resume. Eliminates all cumulative pause inflation permanently.
+            📌 <strong>V14.2.17 Production:</strong> FINAL timer fix — pause/complete/7PM auto-complete all read lastSessionStartedAt directly from localStorage (not window variable which can be lost). localStorage is the single source of truth for session timing.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -3436,14 +3436,23 @@ document.getElementById('timerStartBtn').addEventListener('click', () => {
 document.getElementById('timerPauseBtn').addEventListener('click',()=>{
   clearInterval(timerInterval); timerRunning=false;
 
-  // V14.2.15 DEFINITIVE FIX: Calculate duration from lastSessionStartedAt
-  // NEVER read from timerDisplay — it can show cumulative time from original start
-  const sessionStart = window.lastSessionStartedAt || timerStartedAt;
+  // V14.2.17 DEFINITIVE FIX: Read lastSessionStartedAt from localStorage
+  // window variable can be lost; localStorage persists reliably
+  let sessionStart = timerStartedAt;
+  try {
+    const saved = JSON.parse(localStorage.getItem('timerState') || '{}');
+    sessionStart = saved.lastSessionStartedAt || saved.startedAt || timerStartedAt;
+  } catch(e) { sessionStart = timerStartedAt; }
+  
   const sessionSecs = Math.floor((Date.now() - sessionStart) / 1000);
   if(sessionSecs < 60){
     alert('Timer must run for at least 1 minute');
     timerStartedAt = Date.now();
     window.lastSessionStartedAt = Date.now();
+    localStorage.setItem('timerState', JSON.stringify({
+      startedAt: timerStartedAt, lastSessionStartedAt: timerStartedAt,
+      pausedMs: 0, running: true, linkedPlan: timerLinkedPlan
+    }));
     timerRunning = true;
     timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(Date.now()-timerStartedAt); },1000);
     return;
@@ -3524,13 +3533,22 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
 document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>{
   clearInterval(timerInterval); timerRunning=false;
 
-  // V14.2.15 DEFINITIVE FIX: Calculate duration from lastSessionStartedAt
-  const sessionStart = window.lastSessionStartedAt || timerStartedAt;
+  // V14.2.17 DEFINITIVE FIX: Read lastSessionStartedAt from localStorage
+  let sessionStart = timerStartedAt;
+  try {
+    const saved = JSON.parse(localStorage.getItem('timerState') || '{}');
+    sessionStart = saved.lastSessionStartedAt || saved.startedAt || timerStartedAt;
+  } catch(e) { sessionStart = timerStartedAt; }
+
   const sessionSecs = Math.floor((Date.now() - sessionStart) / 1000);
   if(sessionSecs < 60){
     alert('Timer must run for at least 1 minute');
     timerStartedAt = Date.now();
     window.lastSessionStartedAt = Date.now();
+    localStorage.setItem('timerState', JSON.stringify({
+      startedAt: timerStartedAt, lastSessionStartedAt: timerStartedAt,
+      pausedMs: 0, running: true, linkedPlan: timerLinkedPlan
+    }));
     timerRunning = true;
     timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(Date.now()-timerStartedAt); },1000);
     return;
@@ -3913,9 +3931,12 @@ function startEndOfDayMonitor() {
     // 7:00 PM force auto-complete
     if (hour === 19 && min === 0 && timerRunning) {
       closeModal('endOfDayModal');
-      // V14.2.14 FIX: Use lastSessionStartedAt for correct session duration
-      // timerDisplay shows cumulative time — use actual session start instead
-      const sessionStart = window.lastSessionStartedAt || timerStartedAt;
+      // V14.2.17 FIX: Read lastSessionStartedAt from localStorage
+      let sessionStart = timerStartedAt;
+      try {
+        const saved = JSON.parse(localStorage.getItem('timerState') || '{}');
+        sessionStart = saved.lastSessionStartedAt || saved.startedAt || timerStartedAt;
+      } catch(e) { sessionStart = timerStartedAt; }
       const sessionSecs = Math.floor((Date.now() - sessionStart) / 1000);
       const mins = Math.max(1, Math.round(sessionSecs / 60));
       const projectName = timerLinkedPlan?.project || 'Unplanned';
