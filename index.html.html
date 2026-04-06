@@ -556,7 +556,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.17 Production:</strong> FINAL timer fix — pause/complete/7PM auto-complete all read lastSessionStartedAt directly from localStorage (not window variable which can be lost). localStorage is the single source of truth for session timing.
+            📌 <strong>V14.2.18 Production:</strong> FINAL timer fix — pause/complete/7PM now calculate INCREMENTAL time only (total elapsed minus already-logged minutes for that project today). Works correctly whether timer runs continuously or is paused/resumed. No more cumulative inflation.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -3436,28 +3436,31 @@ document.getElementById('timerStartBtn').addEventListener('click', () => {
 document.getElementById('timerPauseBtn').addEventListener('click',()=>{
   clearInterval(timerInterval); timerRunning=false;
 
-  // V14.2.17 DEFINITIVE FIX: Read lastSessionStartedAt from localStorage
-  // window variable can be lost; localStorage persists reliably
-  let sessionStart = timerStartedAt;
-  try {
-    const saved = JSON.parse(localStorage.getItem('timerState') || '{}');
-    sessionStart = saved.lastSessionStartedAt || saved.startedAt || timerStartedAt;
-  } catch(e) { sessionStart = timerStartedAt; }
-  
-  const sessionSecs = Math.floor((Date.now() - sessionStart) / 1000);
-  if(sessionSecs < 60){
+  // V14.2.18 FINAL FIX: Calculate INCREMENTAL time only
+  // Total elapsed since original start MINUS already-logged minutes for this task today
+  // This works whether user paused/resumed or ran timer continuously all day
+  const totalElapsedMins = Math.floor((Date.now() - timerStartedAt) / 1000 / 60);
+  const today = fmt(new Date());
+  const alreadyLoggedMins = timeLogs
+    .filter(l => l.userId === currentUser.id && l.date === today && l.projectId === timerLinkedPlan?.projectId)
+    .reduce((s, l) => s + l.durationMins, 0);
+  const incrementalMins = totalElapsedMins - alreadyLoggedMins;
+
+  if(incrementalMins < 1){
     alert('Timer must run for at least 1 minute');
-    timerStartedAt = Date.now();
-    window.lastSessionStartedAt = Date.now();
-    localStorage.setItem('timerState', JSON.stringify({
-      startedAt: timerStartedAt, lastSessionStartedAt: timerStartedAt,
-      pausedMs: 0, running: true, linkedPlan: timerLinkedPlan
-    }));
     timerRunning = true;
-    timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(Date.now()-timerStartedAt); },1000);
+    timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
     return;
   }
-  const mins = Math.max(1, Math.round(sessionSecs / 60));
+  const mins = Math.max(1, incrementalMins);
+
+  // Clock start = end time of last log for this task, or now minus incremental mins
+  const lastLog = [...timeLogs]
+    .filter(l => l.userId === currentUser.id && l.date === today && l.projectId === timerLinkedPlan?.projectId)
+    .sort((a,b) => b.ts - a.ts)[0];
+  const sessionStartMs = lastLog ? (Date.now() - incrementalMins * 60000) : timerStartedAt;
+  const clockStart = new Date(sessionStartMs).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const clockEnd = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   
   // If timer was unplanned, open log modal
   if(!timerLinkedPlan){
@@ -3465,24 +3468,18 @@ document.getElementById('timerPauseBtn').addEventListener('click',()=>{
     document.getElementById('timerWidget').classList.remove('running');
     openLogModal();
     document.getElementById('tmTmr').checked=true;
-    document.getElementById('mTimerDisp').textContent=secsToHMS(sessionSecs);
+    document.getElementById('mTimerDisp').textContent=secsToHMS(mins*60);
     document.getElementById('logProdYes').checked=true;
     document.getElementById('logProdFields').style.display='block';
     document.getElementById('logNonProdFields').style.display='none';
-    // V14.2: Trigger change event to populate phase dropdown
     document.getElementById('logProdYes').dispatchEvent(new Event('change'));
     resetTimer();
     return;
   }
   
-  // Save time log but DON'T mark task as done
-  // V14.2.16: clockStart uses same sessionStart already calculated above
-  const clockStart = new Date(sessionStart).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  const clockEnd   = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  // Save incremental log entry
   const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (Paused)`;
-  timeLogs.push({id:genId(),userId:currentUser.id,date:fmt(new Date()),projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
-  
-  // DON'T mark plan as done - keep it active!
+  timeLogs.push({id:genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
   
   autoSave(); renderTimeLog(); renderProjectsBudget();
   
@@ -3492,9 +3489,7 @@ document.getElementById('timerPauseBtn').addEventListener('click',()=>{
   document.getElementById('timerStatus').textContent='⏸️ Paused...';
   document.getElementById('timerDisplay').textContent='00:00:00';
   
-  // Remove from Firebase active timers
   removeActiveTimerFromFirebase();
-  
   alert(`⏸️ Timer Paused\n\n✅ Logged: ${minsToHM(mins)}\n📁 ${timerLinkedPlan.project}\n\nTask stays in Weekly Planner.\nClick Resume to continue.`);
 });
 
@@ -3533,54 +3528,48 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
 document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>{
   clearInterval(timerInterval); timerRunning=false;
 
-  // V14.2.17 DEFINITIVE FIX: Read lastSessionStartedAt from localStorage
-  let sessionStart = timerStartedAt;
-  try {
-    const saved = JSON.parse(localStorage.getItem('timerState') || '{}');
-    sessionStart = saved.lastSessionStartedAt || saved.startedAt || timerStartedAt;
-  } catch(e) { sessionStart = timerStartedAt; }
+  // V14.2.18 FINAL FIX: Incremental deduction — same logic as pause button
+  const totalElapsedMins = Math.floor((Date.now() - timerStartedAt) / 1000 / 60);
+  const today = fmt(new Date());
+  const alreadyLoggedMins = timeLogs
+    .filter(l => l.userId === currentUser.id && l.date === today && l.projectId === timerLinkedPlan?.projectId)
+    .reduce((s, l) => s + l.durationMins, 0);
+  const incrementalMins = totalElapsedMins - alreadyLoggedMins;
 
-  const sessionSecs = Math.floor((Date.now() - sessionStart) / 1000);
-  if(sessionSecs < 60){
+  if(incrementalMins < 1){
     alert('Timer must run for at least 1 minute');
-    timerStartedAt = Date.now();
-    window.lastSessionStartedAt = Date.now();
-    localStorage.setItem('timerState', JSON.stringify({
-      startedAt: timerStartedAt, lastSessionStartedAt: timerStartedAt,
-      pausedMs: 0, running: true, linkedPlan: timerLinkedPlan
-    }));
     timerRunning = true;
-    timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(Date.now()-timerStartedAt); },1000);
+    timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
     return;
   }
-  const mins = Math.max(1, Math.round(sessionSecs / 60));
-  
+  const mins = Math.max(1, incrementalMins);
+
+  const sessionStartMs = Date.now() - incrementalMins * 60000;
+  const clockStart = new Date(sessionStartMs).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const clockEnd = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+
   // If timer was unplanned, open log modal
   if(!timerLinkedPlan){
     document.getElementById('timerDisplay').textContent='00:00:00';
     document.getElementById('timerWidget').classList.remove('running');
     openLogModal();
     document.getElementById('tmTmr').checked=true;
-    document.getElementById('mTimerDisp').textContent=secsToHMS(sessionSecs);
+    document.getElementById('mTimerDisp').textContent=secsToHMS(mins*60);
     document.getElementById('logProdYes').checked=true;
     document.getElementById('logProdFields').style.display='block';
     document.getElementById('logNonProdFields').style.display='none';
-    // V14.2: Trigger change event to populate phase dropdown
     document.getElementById('logProdYes').dispatchEvent(new Event('change'));
-    await resetTimer(); // V14.2.2: FIX #5 - Added await
+    await resetTimer();
     return;
   }
   
-  // Save time log AND mark task as done
-  // V14.2.16: clockStart uses same sessionStart already calculated above
-  const clockStart = new Date(sessionStart).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  const clockEnd   = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  // Save incremental log AND mark task done
   const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'}`;
-  timeLogs.push({id:genId(),userId:currentUser.id,date:fmt(new Date()),projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
-  const plan=planEntries.find(p=>p.id===timerLinkedPlan.id); 
-  if(plan)plan.done=true; // Mark as DONE!
+  timeLogs.push({id:genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
+  const plan=planEntries.find(p=>p.id===timerLinkedPlan.id);
+  if(plan)plan.done=true;
   
-  autoSave(); await resetTimer(); renderTimeLog(); renderProjectsBudget(); renderDashboard(); // V14.2.2: FIX #5 - Added await
+  autoSave(); await resetTimer(); renderTimeLog(); renderProjectsBudget(); renderDashboard();
   alert(`✅ Task Completed!\n\nLogged: ${minsToHM(mins)}\n📁 ${timerLinkedPlan.project}\n\nRemoved from Weekly Planner.`);
 });
 
@@ -3931,16 +3920,16 @@ function startEndOfDayMonitor() {
     // 7:00 PM force auto-complete
     if (hour === 19 && min === 0 && timerRunning) {
       closeModal('endOfDayModal');
-      // V14.2.17 FIX: Read lastSessionStartedAt from localStorage
-      let sessionStart = timerStartedAt;
-      try {
-        const saved = JSON.parse(localStorage.getItem('timerState') || '{}');
-        sessionStart = saved.lastSessionStartedAt || saved.startedAt || timerStartedAt;
-      } catch(e) { sessionStart = timerStartedAt; }
-      const sessionSecs = Math.floor((Date.now() - sessionStart) / 1000);
-      const mins = Math.max(1, Math.round(sessionSecs / 60));
+      // V14.2.18 FINAL FIX: Incremental deduction
+      const totalElapsedMins = Math.floor((Date.now() - timerStartedAt) / 1000 / 60);
+      const today = fmt(new Date());
+      const alreadyLoggedMins = timeLogs
+        .filter(l => l.userId === currentUser.id && l.date === today && l.projectId === timerLinkedPlan?.projectId)
+        .reduce((s, l) => s + l.durationMins, 0);
+      const mins = Math.max(1, totalElapsedMins - alreadyLoggedMins);
       const projectName = timerLinkedPlan?.project || 'Unplanned';
-      const clockStart = new Date(sessionStart).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+      const sessionStartMs = Date.now() - mins * 60000;
+      const clockStart = new Date(sessionStartMs).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
       const clockEnd = '19:00';
 
       if (timerLinkedPlan) {
