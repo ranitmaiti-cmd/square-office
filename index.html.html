@@ -556,7 +556,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.18 Production:</strong> FINAL timer fix — pause/complete/7PM now calculate INCREMENTAL time only (total elapsed minus already-logged minutes for that project today). Works correctly whether timer runs continuously or is paused/resumed. No more cumulative inflation.
+            📌 <strong>V14.2.19 Production:</strong> Auto-complete pushed to 8:30PM (warning at 8:00PM). Page-refresh fix — restoreTimerState restores timerStartedAt from lastSessionStartedAt for correct incremental deduction after refresh.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -817,7 +817,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
     <div class="modal-head"><h3>🌆 End of Day Reminder</h3></div>
     <div style="background:#fff5f5;border:2px solid #feb2b2;border-radius:10px;padding:14px;margin-bottom:16px;">
       <div style="font-size:13px;font-weight:700;color:#9b2c2c;margin-bottom:4px;">⚠️ You have an active timer!</div>
-      <div style="font-size:13px;color:#4a5568;">It's past 6:30 PM. Please complete your timer before leaving — it will be auto-completed at 7:00 PM.</div>
+      <div style="font-size:13px;color:#4a5568;">It's 8:00 PM. Please complete your timer before leaving — it will be auto-completed at 8:30 PM.</div>
     </div>
     <div id="endOfDayTimerInfo" style="font-size:13px;color:#2d3748;margin-bottom:16px;background:#f7fafc;border-radius:8px;padding:10px;"></div>
     <div style="display:flex;gap:8px;">
@@ -3641,7 +3641,7 @@ async function cleanupStaleTimers() {
       const cappedMins  = Math.min(elapsedMins, 9 * 60);
 
       const clockStart = new Date(startTime).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-      const clockEnd   = '19:00'; // Mark as end-of-working-day
+      const clockEnd   = '20:30'; // Mark as end-of-working-day
 
       // Save time log under the user's account
       const logEntry = {
@@ -3748,12 +3748,13 @@ async function restoreTimerState() {
     }
 
     // Timer is recent (< 8h) — restore normally
-    timerStartedAt = state.startedAt;
-    timerPausedMs  = state.pausedMs || 0;
+    // V14.2.18 FIX: Restore timerStartedAt from lastSessionStartedAt
+    // so incremental deduction works correctly after page refresh
+    window.lastSessionStartedAt = state.lastSessionStartedAt || state.startedAt;
+    timerStartedAt = window.lastSessionStartedAt; // ← KEY FIX: use session start, not original start
+    timerPausedMs  = 0; // reset paused ms since we're using session start
     timerLinkedPlan = state.linkedPlan;
     timerRunning   = true;
-    // V14.2.14: Restore lastSessionStartedAt — if not saved, use startedAt as fallback
-    window.lastSessionStartedAt = state.lastSessionStartedAt || state.startedAt;
 
     document.getElementById('timerWidget').classList.add('running');
     document.getElementById('timerPreStart').style.display  = 'none';
@@ -3904,7 +3905,7 @@ function startEndOfDayMonitor() {
     const min  = now.getMinutes();
 
     // 6:30 PM warning
-    if (hour === 18 && min >= 30 && !endOfDayWarningShown) {
+    if (hour === 20 && min >= 0 && min < 5 && !endOfDayWarningShown) {
       endOfDayWarningShown = true;
       const projectName = timerLinkedPlan?.project || 'Unplanned';
       const elapsed = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
@@ -3918,7 +3919,7 @@ function startEndOfDayMonitor() {
     }
 
     // 7:00 PM force auto-complete
-    if (hour === 19 && min === 0 && timerRunning) {
+    if (hour === 20 && min === 30 && timerRunning) {
       closeModal('endOfDayModal');
       // V14.2.18 FINAL FIX: Incremental deduction
       const totalElapsedMins = Math.floor((Date.now() - timerStartedAt) / 1000 / 60);
@@ -3930,7 +3931,7 @@ function startEndOfDayMonitor() {
       const projectName = timerLinkedPlan?.project || 'Unplanned';
       const sessionStartMs = Date.now() - mins * 60000;
       const clockStart = new Date(sessionStartMs).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-      const clockEnd = '19:00';
+      const clockEnd = '20:30';
 
       if (timerLinkedPlan) {
         timeLogs.push({
