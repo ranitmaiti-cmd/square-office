@@ -556,7 +556,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.19 Production:</strong> Auto-complete pushed to 8:30PM (warning at 8:00PM). Page-refresh fix — restoreTimerState restores timerStartedAt from lastSessionStartedAt for correct incremental deduction after refresh.
+            📌 <strong>V14.2.21 Production:</strong> Critical fix — incremental deduction now only subtracts logs created AFTER timerStartedAt (last resume). Prevents zero/negative incremental when rounding causes previous logs to exceed elapsed time. Fixes Snaha/Shreya missing afternoon hours.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -3436,17 +3436,22 @@ document.getElementById('timerStartBtn').addEventListener('click', () => {
 document.getElementById('timerPauseBtn').addEventListener('click',()=>{
   clearInterval(timerInterval); timerRunning=false;
 
-  // V14.2.18 FINAL FIX: Calculate INCREMENTAL time only
-  // Total elapsed since original start MINUS already-logged minutes for this task today
-  // This works whether user paused/resumed or ran timer continuously all day
-  const totalElapsedMins = Math.floor((Date.now() - timerStartedAt) / 1000 / 60);
+  // V14.2.20 FIX: Calculate INCREMENTAL time only
+  // Subtract only logs created AFTER timerStartedAt (last resume)
+  // This prevents negative/zero incremental when rounding causes alreadyLogged > elapsed
+  const totalElapsedSecs = Math.floor((Date.now() - timerStartedAt) / 1000);
+  const totalElapsedMins = Math.floor(totalElapsedSecs / 60);
   const today = fmt(new Date());
   const alreadyLoggedMins = timeLogs
-    .filter(l => l.userId === currentUser.id && l.date === today && l.projectId === timerLinkedPlan?.projectId)
+    .filter(l => l.userId === currentUser.id && l.date === today && 
+                 l.projectId === timerLinkedPlan?.projectId &&
+                 l.ts > timerStartedAt)
     .reduce((s, l) => s + l.durationMins, 0);
+  const incrementalSecs = totalElapsedSecs - (alreadyLoggedMins * 60);
   const incrementalMins = totalElapsedMins - alreadyLoggedMins;
 
-  if(incrementalMins < 1){
+  // Only block if genuinely under 30 seconds (accidental double-click)
+  if(incrementalSecs < 30){
     alert('Timer must run for at least 1 minute');
     timerRunning = true;
     timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
@@ -3528,15 +3533,19 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
 document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>{
   clearInterval(timerInterval); timerRunning=false;
 
-  // V14.2.18 FINAL FIX: Incremental deduction — same logic as pause button
-  const totalElapsedMins = Math.floor((Date.now() - timerStartedAt) / 1000 / 60);
+  // V14.2.20 FIX: Incremental deduction — only logs AFTER timerStartedAt
+  const totalElapsedSecs = Math.floor((Date.now() - timerStartedAt) / 1000);
+  const totalElapsedMins = Math.floor(totalElapsedSecs / 60);
   const today = fmt(new Date());
   const alreadyLoggedMins = timeLogs
-    .filter(l => l.userId === currentUser.id && l.date === today && l.projectId === timerLinkedPlan?.projectId)
+    .filter(l => l.userId === currentUser.id && l.date === today && 
+                 l.projectId === timerLinkedPlan?.projectId &&
+                 l.ts > timerStartedAt)
     .reduce((s, l) => s + l.durationMins, 0);
+  const incrementalSecs = totalElapsedSecs - (alreadyLoggedMins * 60);
   const incrementalMins = totalElapsedMins - alreadyLoggedMins;
 
-  if(incrementalMins < 1){
+  if(incrementalSecs < 30){
     alert('Timer must run for at least 1 minute');
     timerRunning = true;
     timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
@@ -3921,11 +3930,13 @@ function startEndOfDayMonitor() {
     // 7:00 PM force auto-complete
     if (hour === 20 && min === 30 && timerRunning) {
       closeModal('endOfDayModal');
-      // V14.2.18 FINAL FIX: Incremental deduction
+      // V14.2.20 FIX: Only subtract logs created AFTER timerStartedAt
       const totalElapsedMins = Math.floor((Date.now() - timerStartedAt) / 1000 / 60);
       const today = fmt(new Date());
       const alreadyLoggedMins = timeLogs
-        .filter(l => l.userId === currentUser.id && l.date === today && l.projectId === timerLinkedPlan?.projectId)
+        .filter(l => l.userId === currentUser.id && l.date === today && 
+                     l.projectId === timerLinkedPlan?.projectId &&
+                     l.ts > timerStartedAt)
         .reduce((s, l) => s + l.durationMins, 0);
       const mins = Math.max(1, totalElapsedMins - alreadyLoggedMins);
       const projectName = timerLinkedPlan?.project || 'Unplanned';
