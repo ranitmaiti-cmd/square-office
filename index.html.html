@@ -3736,13 +3736,20 @@ async function restoreTimerState() {
     }
 
     // Timer is recent (< 8h) — restore normally
-    // V14.2.18 FIX: Restore timerStartedAt from lastSessionStartedAt
-    // so incremental deduction works correctly after page refresh
-    window.lastSessionStartedAt = state.lastSessionStartedAt || state.startedAt;
-    timerStartedAt = window.lastSessionStartedAt; // ← KEY FIX: use session start, not original start
-    timerPausedMs  = 0; // reset paused ms since we're using session start
+    // V14.2.22 FIX: On page restore, timerStartedAt = NOW
+    // Page load = new session start. This guarantees pause always logs
+    // only time since this page load, never cumulative from original start.
+    timerStartedAt = Date.now();
+    window.lastSessionStartedAt = timerStartedAt;
+    timerPausedMs  = 0;
     timerLinkedPlan = state.linkedPlan;
     timerRunning   = true;
+    // Update localStorage so next pause reads correct value
+    localStorage.setItem('timerState', JSON.stringify({
+      startedAt: timerStartedAt,
+      lastSessionStartedAt: timerStartedAt,
+      pausedMs: 0, running: true, linkedPlan: timerLinkedPlan
+    }));
 
     document.getElementById('timerWidget').classList.add('running');
     document.getElementById('timerPreStart').style.display  = 'none';
