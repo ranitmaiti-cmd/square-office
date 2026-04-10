@@ -556,7 +556,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.23 Production:</strong> 6 bug fixes — (1) Timer no longer resets to zero on page reload/refresh, full elapsed time preserved. (2) Stale overnight cleanup no longer drops multi-project logs. (3) Dashboard 30s refresh no longer overwrites running timer entries. (4) User delete now fully cleans Firebase (plan entries, presence, active timer). (5) End-of-day warning corrected to 6:30 PM, force-complete to 7:00 PM. (6) Dashboard refresh forced to server source to prevent stale cache reads.
+            📌 <strong>V14.2.23 Production:</strong> 8 fixes — (1) Timer no longer resets to zero on page reload, full elapsed time preserved. (2) Stale overnight cleanup replaced with smart gap-fill: only logs unaccounted gap, never inflates already-logged time. (3) Dashboard 30s refresh no longer overwrites running timer entries. (4) User delete now fully cleans Firebase. (5) End-of-day warning corrected to 6:30 PM, force-complete to 7:00 PM. (6) Dashboard refresh forced to server source. (7) Gap-fill capped at 7PM EOD. (8) New Task button added to paused state — start a different task without marking current one done.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -594,6 +594,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
     </div>
     <div id="timerPaused" style="display:none;">
       <button class="btn btn-success" id="timerResumeBtn" style="width:100%;margin-bottom:8px;">▶️ Resume</button>
+      <button class="btn" id="timerNewTaskBtn" style="width:100%;background:#2b6cb0;color:white;margin-bottom:8px;">⏭️ New Task</button>
       <button class="btn" id="timerCompletePausedBtn" style="width:100%;background:#e53e3e;color:white;">⏹️ Stop & Complete</button>
     </div>
   </div>
@@ -3550,7 +3551,39 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
   saveActiveTimerToFirebase();
 });
 
-// V13.6: Complete Button (from running) - Mark task done
+// V14.2.23: New Task Button (from paused) 
+// Lets staff start a different task without having to Complete the current one.
+// Current paused task stays as-is in Weekly Planner (not marked done).
+// Timer resets cleanly and opens the Start Timer modal for a new task.
+document.getElementById('timerNewTaskBtn').addEventListener('click', () => {
+  if (!confirm('Start a new task?\n\nYour current paused task will stay in the Weekly Planner — NOT marked as done. You can resume it later from the planner.\n\nContinue?')) return;
+
+  // Clear timer state fully — don't mark current plan as done
+  clearInterval(timerInterval);
+  timerRunning    = false;
+  timerStartedAt  = null;
+  timerPausedMs   = 0;
+  timerLinkedPlan = null;
+  window.lastSessionStartedAt = null;
+  localStorage.removeItem('timerState');
+
+  // Reset widget UI back to pre-start state
+  document.getElementById('timerPaused').style.display   = 'none';
+  document.getElementById('timerRunning').style.display  = 'none';
+  document.getElementById('timerPreStart').style.display = 'block';
+  document.getElementById('timerDisplay').textContent    = '00:00:00';
+  document.getElementById('timerDisplay').classList.remove('running');
+  document.getElementById('timerWidget').classList.remove('running');
+  document.getElementById('timerStatus').textContent     = '';
+  document.getElementById('timerProject').style.display  = 'none';
+  document.getElementById('timerNavLabel').textContent   = 'Start Timer';
+
+  // Remove from Firebase activeTimers
+  removeActiveTimerFromFirebase();
+
+  // Open the Start Timer modal so they can pick a new task immediately
+  openModal('quickPlanModal');
+});
 document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>{
   clearInterval(timerInterval); timerRunning=false;
 
@@ -3617,9 +3650,22 @@ document.getElementById('timerCompletePausedBtn').addEventListener('click', asyn
 });
 
 // ═══════════════════════════════════════════════════════
-// V14.2.9: OVERNIGHT STALE TIMER AUTO-CLEANUP
-// Fires on every app load — cleans up any activeTimers
-// from a previous calendar day automatically
+// V14.2.23: OVERNIGHT STALE TIMER AUTO-CLEANUP (smart gap-fill)
+//
+// Core principle: only log the UNACCOUNTED gap.
+//
+// Old behaviour: always wrote a flat 8h (or 9h cap) entry regardless
+// of what the user had already logged — causing massive inflation when
+// someone had paused+logged multiple sessions and left the timer running.
+//
+// New behaviour:
+//  1. Find the timer's session window: startTime → 19:00 that day (hard EOD cap)
+//  2. Sum all logs already recorded for that user+project+date that fall
+//     within that window (their real pause entries)
+//  3. Gap = window duration − already logged
+//  4. If gap ≤ 5 min  → nothing meaningful to add, just delete the stale doc
+//  5. If gap > 5 min  → write ONE gap-fill entry for exactly that duration
+//  6. Never write more than one autoCompleted entry per user+project+date
 // ═══════════════════════════════════════════════════════
 async function cleanupStaleTimers() {
   try {
@@ -3632,7 +3678,6 @@ async function cleanupStaleTimers() {
       const data = doc.data();
       if (!data.startTime) return;
       const timerDate = fmt(new Date(data.startTime));
-      // If timer started on a previous calendar day — it's stale
       if (timerDate < today) {
         stale.push({ id: doc.id, data });
       }
@@ -3640,82 +3685,112 @@ async function cleanupStaleTimers() {
 
     if (stale.length === 0) return;
 
-    console.log(`🧹 Found ${stale.length} stale timer(s) from previous day — auto-completing...`);
+    console.log(`🧹 Found ${stale.length} stale timer(s) from previous day — smart gap-fill...`);
+
+    const autoCompleted = [];
+    const skipped = [];
 
     for (const { id, data } of stale) {
-      const startTime   = data.startTime;
-      const timerDate   = fmt(new Date(startTime));
+      const startTime = data.startTime;
+      const timerDate = fmt(new Date(startTime));
 
-      // V14.2.23 FIX: Skip auto-complete only if an autoCompleted log already
-      // exists for THIS user + THIS project on this date — not any log.
-      // Previous logic skipped if ANY log existed, causing real work to be
-      // silently dropped when someone worked on multiple projects in a day.
-      const existingAutoLog = timeLogs.find(l =>
+      // Guard: never write a second autoCompleted entry for same user+project+date
+      const alreadyAutoCompleted = timeLogs.find(l =>
         l.userId === id &&
         l.date === timerDate &&
         l.projectId === (data.projectId || null) &&
         l.autoCompleted === true
       );
-      if (existingAutoLog) {
-        console.log(`⏭️ Skipping stale timer for ${data.userName || id} on ${timerDate} — auto-complete log already exists for this project`);
+      if (alreadyAutoCompleted) {
+        console.log(`⏭️ Already auto-completed for ${data.userName || id} on ${timerDate} — deleting stale doc only`);
         await db.collection("activeTimers").doc(id).delete();
+        skipped.push(data.userName || id);
         continue;
       }
 
-      const elapsedMs   = Date.now() - startTime;
-      const elapsedMins = Math.round(elapsedMs / 60000);
-      // Cap at 9 hours (realistic working day max)
-      const cappedMins  = Math.min(elapsedMins, 9 * 60);
+      // Session window: timer start → 19:00 that day (hard EOD cap)
+      // This prevents multi-day elapsed time from inflating a single entry
+      const timerDateObj  = new Date(startTime);
+      const eodMs         = new Date(
+        timerDateObj.getFullYear(),
+        timerDateObj.getMonth(),
+        timerDateObj.getDate(),
+        19, 0, 0  // 7:00 PM hard cap
+      ).getTime();
+      const windowStartMs = startTime;
+      const windowEndMs   = Math.min(eodMs, data.updatedAt || eodMs); // respect last known activity
+      const windowMins    = Math.max(0, Math.round((windowEndMs - windowStartMs) / 60000));
 
-      const clockStart = new Date(startTime).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-      const clockEnd   = '20:30'; // Mark as end-of-working-day
+      // Sum all existing logs for this user + project + date within the window
+      const existingMins = timeLogs
+        .filter(l =>
+          l.userId    === id &&
+          l.date      === timerDate &&
+          l.projectId === (data.projectId || null) &&
+          !l.autoCompleted
+        )
+        .reduce((sum, l) => sum + (l.durationMins || 0), 0);
 
-      // Save time log under the user's account
+      const gapMins = Math.max(0, windowMins - existingMins);
+
+      console.log(`🔍 ${data.userName || id} | window: ${windowMins}m | already logged: ${existingMins}m | gap: ${gapMins}m`);
+
+      // Delete stale doc regardless — cleanup always happens
+      await db.collection("activeTimers").doc(id).delete();
+
+      // If gap is 5 minutes or less — nothing meaningful to add
+      if (gapMins <= 5) {
+        console.log(`⏭️ Gap too small (${gapMins}m) for ${data.userName || id} — no entry written`);
+        skipped.push(data.userName || id);
+        continue;
+      }
+
+      // Calculate clock times for the gap entry
+      // Gap starts at: timerStart + existingMins (i.e. after all their real sessions)
+      const gapStartMs  = windowStartMs + (existingMins * 60000);
+      const gapEndMs    = gapStartMs + (gapMins * 60000);
+      const clockStart  = new Date(gapStartMs).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', hour12:false});
+      const clockEnd    = new Date(Math.min(gapEndMs, eodMs)).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', hour12:false});
+
       const logEntry = {
-        id:          genId(),
-        userId:      id, // activeTimers doc ID = userId
-        date:        timerDate,
-        projectId:   data.projectId   || null,
-        projectName: data.projectName || 'Unknown Project',
-        phase:       data.phase       || '',
-        typology:    data.typology    || '',
-        activity:    '',
-        durationMins: cappedMins,
-        startTime:   clockStart,
-        endTime:     clockEnd,
-        desc:        `${data.phase || data.projectName || 'Work on project'} (Auto-completed — timer left running overnight)`,
-        productive:  true,
-        ts:          Date.now(),
+        id:           genId(),
+        userId:       id,
+        date:         timerDate,
+        projectId:    data.projectId   || null,
+        projectName:  data.projectName || 'Unknown Project',
+        phase:        data.phase       || '',
+        typology:     data.typology    || '',
+        activity:     '',
+        durationMins: gapMins,
+        startTime:    clockStart,
+        endTime:      clockEnd,
+        desc:         `${data.phase || data.projectName || 'Work on project'} (Auto-completed — ${gapMins}m unaccounted gap after ${existingMins}m of logged sessions)`,
+        productive:   true,
+        ts:           Date.now(),
         autoCompleted: true
       };
 
-      // Save log to Firebase directly
       await db.collection("timeLogs").doc(logEntry.id).set({
         ...logEntry,
         updatedAt: new Date().toISOString()
       });
-
-      // Add to local array
       timeLogs.push(logEntry);
+      autoCompleted.push({ name: data.userName || id, mins: gapMins });
 
-      // Remove stale active timer from Firebase
-      await db.collection("activeTimers").doc(id).delete();
-
-      console.log(`✅ Auto-completed stale timer for user ${data.userName || id}: ${minsToHM(cappedMins)} on ${timerDate}`);
+      console.log(`✅ Gap-fill for ${data.userName || id}: ${minsToHM(gapMins)} (window ${windowMins}m − logged ${existingMins}m)`);
     }
 
-    if (stale.length > 0) {
-      // Refresh dashboard to show updated logs
+    if (autoCompleted.length > 0 || skipped.length > 0) {
       renderDashboard();
       renderTimeLog();
-      // Show admin notification
       if (currentUser?.isAdmin) {
-        const names = stale.map(s => s.data.userName || s.id).join(', ');
-        showNotificationToast(
-          '🧹 Stale Timers Auto-Completed',
-          `${stale.length} overnight timer(s) auto-completed: ${names}`,
-          'warning'
-        );
+        if (autoCompleted.length > 0) {
+          const details = autoCompleted.map(a => `${a.name}: ${minsToHM(a.mins)}`).join(', ');
+          showNotificationToast('🧹 Stale Timers Gap-Filled', details, 'warning');
+        }
+        if (skipped.length > 0) {
+          console.log(`⏭️ Stale timers with no gap to fill: ${skipped.join(', ')}`);
+        }
       }
     }
   } catch(e) {
