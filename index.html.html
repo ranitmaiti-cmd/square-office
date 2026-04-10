@@ -556,7 +556,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.22 Production:</strong> Definitive timer fix — pause/complete/autocomplete now use timerStartedAt directly as session start. Zero subtraction, zero rounding errors, zero overlap. timerStartedAt always resets on resume so it always equals exact session start.
+            📌 <strong>V14.2.23 Production:</strong> 6 bug fixes — (1) Timer no longer resets to zero on page reload/refresh, full elapsed time preserved. (2) Stale overnight cleanup no longer drops multi-project logs. (3) Dashboard 30s refresh no longer overwrites running timer entries. (4) User delete now fully cleans Firebase (plan entries, presence, active timer). (5) End-of-day warning corrected to 6:30 PM, force-complete to 7:00 PM. (6) Dashboard refresh forced to server source to prevent stale cache reads.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1965,16 +1965,25 @@ function startDashboardAutoRefresh() {
   dashboardRefreshInterval = setInterval(async () => {
     console.log('🔄 Auto-refreshing Dashboard data...');
     
-    // Reload time logs from Firebase
+    // V14.2.23 FIX: Guard — never clobber timeLogs while a timer is actively running.
+    // If timerRunning, the in-memory timeLogs may have an unsaved entry from the
+    // current session. Overwriting from Firebase would lose that entry.
+    if (timerRunning) {
+      console.log('⏭️ Dashboard refresh skipped — timer is running, protecting in-memory logs');
+      renderLiveTimeLogFeed();
+      return;
+    }
+
+    // Reload time logs from Firebase — always force server read to avoid cache
     try {
-      const snapshot = await db.collection("timeLogs").get();
+      const snapshot = await db.collection("timeLogs").get({source:'server'});
       timeLogs = [];
       snapshot.forEach(doc => {
         timeLogs.push({ id: doc.id, ...doc.data() });
       });
       console.log('✅ Time logs refreshed:', timeLogs.length);
-      // V14.2.10: Reset unsaved flag — this was a read, not a user change
-      hasUnsavedChanges = false;
+      // Only clear unsaved flag if we are sure there's nothing pending
+      if (!timerRunning) hasUnsavedChanges = false;
       // Re-render Recent Time Logs widget
       renderLiveTimeLogFeed();
       // Update stats
@@ -3035,7 +3044,33 @@ function renderManage(){
     const item=document.createElement('div'); item.className='list-item';
     item.innerHTML=`<div><div style="font-weight:600;">${u.name}${u.isAdmin?` <span class="admin-badge">ADMIN</span>`:''}</div><div style="font-size:11px;color:#718096;">${u.email}</div></div>`;
     const btn=document.createElement('button'); btn.className='btn btn-danger btn-sm'; btn.textContent='Delete';
-    btn.onclick=()=>{ if(u.id===currentUser.id){ alert("Can't delete yourself"); return; } users.splice(i,1); autoSave(); renderManage(); };
+    btn.onclick = async () => {
+      if (u.id === currentUser.id) { alert("Can't delete yourself"); return; }
+      if (!confirm(`Delete ${u.name}? This will also remove their plan entries and presence data from Firebase. Their time logs will be kept for project records.`)) return;
+      // V14.2.23 FIX: Full Firebase cleanup on user delete
+      // Previously only spliced in-memory array — Firebase docs remained forever
+      try {
+        // Remove from users array
+        users.splice(i, 1);
+        // Delete plan entries for this user from Firebase
+        const planSnap = await db.collection("planEntries").where("userId", "==", u.id).get();
+        const planBatch = db.batch();
+        planSnap.forEach(doc => planBatch.delete(doc.ref));
+        await planBatch.commit();
+        // Remove from local planEntries array
+        planEntries = planEntries.filter(p => p.userId !== u.id);
+        // Delete presence doc
+        await db.collection("presence").doc(u.id).delete().catch(()=>{});
+        // Delete active timer if any
+        await db.collection("activeTimers").doc(u.id).delete().catch(()=>{});
+        // Note: timeLogs intentionally kept for project history/reporting
+        await autoSave();
+        renderManage();
+        showNotificationToast('✅ User Deleted', `${u.name} removed from system.`, 'info');
+      } catch(e) {
+        alert(`Error deleting user: ${e.message}`);
+      }
+    };
     item.appendChild(btn); ul.appendChild(item);
   });
   const cl=document.getElementById('clientsList'); cl.innerHTML='';
@@ -3436,10 +3471,8 @@ document.getElementById('timerStartBtn').addEventListener('click', () => {
 document.getElementById('timerPauseBtn').addEventListener('click',()=>{
   clearInterval(timerInterval); timerRunning=false;
 
-  // V14.2.22 DEFINITIVE FIX:
-  // timerStartedAt is ALWAYS reset on every resume/start, so it equals last session start.
-  // Elapsed = now - timerStartedAt = exactly this session duration. No subtraction needed.
-  // No rounding edge cases, no overlap possible, no dependency on log history.
+  // V14.2.23: timerStartedAt is always reset on every resume/start (or restored with
+  // full elapsed offset on page reload). Elapsed = now - timerStartedAt = exact session time.
   const now = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
   const mins = Math.max(1, Math.floor(sessionSecs / 60));
@@ -3521,7 +3554,7 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
 document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>{
   clearInterval(timerInterval); timerRunning=false;
 
-  // V14.2.22 DEFINITIVE FIX: Same as pause — use timerStartedAt directly
+  // V14.2.23: Same as pause — timerStartedAt always reflects full session start
   const now = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
   const mins = Math.max(1, Math.floor(sessionSecs / 60));
@@ -3613,12 +3646,18 @@ async function cleanupStaleTimers() {
       const startTime   = data.startTime;
       const timerDate   = fmt(new Date(startTime));
 
-      // V14.2.12 FIX: Skip auto-complete if real log entries already exist
-      // for this user on this date — prevents inflated duplicate entries
-      const existingLogs = timeLogs.filter(l => l.userId === id && l.date === timerDate);
-      if (existingLogs.length > 0) {
-        console.log(`⏭️ Skipping stale timer for ${data.userName || id} on ${timerDate} — ${existingLogs.length} real log(s) already exist`);
-        // Still delete the stale active timer
+      // V14.2.23 FIX: Skip auto-complete only if an autoCompleted log already
+      // exists for THIS user + THIS project on this date — not any log.
+      // Previous logic skipped if ANY log existed, causing real work to be
+      // silently dropped when someone worked on multiple projects in a day.
+      const existingAutoLog = timeLogs.find(l =>
+        l.userId === id &&
+        l.date === timerDate &&
+        l.projectId === (data.projectId || null) &&
+        l.autoCompleted === true
+      );
+      if (existingAutoLog) {
+        console.log(`⏭️ Skipping stale timer for ${data.userName || id} on ${timerDate} — auto-complete log already exists for this project`);
         await db.collection("activeTimers").doc(id).delete();
         continue;
       }
@@ -3736,10 +3775,12 @@ async function restoreTimerState() {
     }
 
     // Timer is recent (< 8h) — restore normally
-    // V14.2.22 FIX: On page restore, timerStartedAt = NOW
-    // Page load = new session start. This guarantees pause always logs
-    // only time since this page load, never cumulative from original start.
-    timerStartedAt = Date.now();
+    // V14.2.23 FIX: Carry forward full elapsed time on page restore.
+    // Old V14.2.22 code set timerStartedAt = NOW, discarding all pre-reload time.
+    // Fix: compute elapsed before reload, then set timerStartedAt = NOW - elapsed
+    // so that (Date.now() - timerStartedAt) always equals total session time.
+    const elapsedBeforeRestore = Math.max(0, Date.now() - state.startedAt - (state.pausedMs || 0));
+    timerStartedAt = Date.now() - elapsedBeforeRestore;
     window.lastSessionStartedAt = timerStartedAt;
     timerPausedMs  = 0;
     timerLinkedPlan = state.linkedPlan;
@@ -3899,8 +3940,8 @@ function startEndOfDayMonitor() {
     const hour = now.getHours();
     const min  = now.getMinutes();
 
-    // 6:30 PM warning
-    if (hour === 20 && min >= 0 && min < 5 && !endOfDayWarningShown) {
+    // 6:30 PM warning — V14.2.23 FIX: was incorrectly checking hour===20 (8PM)
+    if (hour === 18 && min >= 30 && min < 35 && !endOfDayWarningShown) {
       endOfDayWarningShown = true;
       const projectName = timerLinkedPlan?.project || 'Unplanned';
       const elapsed = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
@@ -3913,10 +3954,10 @@ function startEndOfDayMonitor() {
       openModal('endOfDayModal');
     }
 
-    // 7:00 PM force auto-complete
-    if (hour === 20 && min === 30 && timerRunning) {
+    // 7:00 PM force auto-complete — V14.2.23 FIX: was incorrectly firing at 8:30PM
+    if (hour === 19 && min === 0 && timerRunning) {
       closeModal('endOfDayModal');
-      // V14.2.22 DEFINITIVE FIX: Use timerStartedAt directly
+      // V14.2.23: timerStartedAt reflects full session including pre-reload time
       const autoNow = Date.now();
       const autoSecs = Math.floor((autoNow - timerStartedAt) / 1000);
       const mins = Math.max(1, Math.floor(autoSecs / 60));
