@@ -487,6 +487,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
             <button class="btn btn-success" id="trPdfBtn" style="display:none;">⬇️ Export PDF</button>
           </div>
         </div>
+        <div id="trLimitWarning" style="display:none;background:#fffaf0;border:1px solid #fbd38d;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#c05621;"></div>
         <div id="trOutput" style="display:none;">
           <div class="stats-grid" id="trStats"></div>
           <div style="background:white;border-radius:10px;padding:14px 18px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.06);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
@@ -1644,6 +1645,9 @@ loadData().then(async () => {
         // V14.2.5: Start end-of-day monitor
         startEndOfDayMonitor();
 
+        // V14.2.24: Hourly stale cleanup — covers weekend timers
+        setInterval(() => { if (currentUser) cleanupStaleTimers(); }, 60 * 60 * 1000);
+
         // V14.2.9: Clean up any stale timers from previous day
         await cleanupStaleTimers();
 
@@ -2714,6 +2718,18 @@ function runTimeReport(){
   const { fromDate, toDate, label } = trGetDateRange(trActivePreset);
   document.getElementById('trPeriodDisplay').style.display = 'block';
   document.getElementById('trPeriodLabel').textContent = label;
+
+  // V14.2.24: Warn if date range is older than 90-day load limit
+  const ninetyDaysAgoStr = fmt(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000));
+  const limitWarning = document.getElementById('trLimitWarning');
+  if (limitWarning) {
+    if (fromDate < ninetyDaysAgoStr) {
+      limitWarning.style.display = 'block';
+      limitWarning.textContent = `⚠️ Data older than ${ninetyDaysAgoStr} is not loaded. Report may be incomplete for this date range.`;
+    } else {
+      limitWarning.style.display = 'none';
+    }
+  }
 
   const userId=document.getElementById('trUser').value, projId=document.getElementById('trProject').value;
   const view=document.getElementById('trView').value;
