@@ -151,18 +151,43 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .bar-wrap{background:#e2e8f0;border-radius:4px;height:6px;min-width:50px;}
 .bar-fill{height:6px;border-radius:4px;background:#2b6cb0;}
 
-/* TIMER WIDGET */
-.timer-widget{position:fixed;bottom:24px;right:24px;background:white;border-radius:14px;padding:0;box-shadow:0 8px 30px rgba(0,0,0,0.18);z-index:400;display:flex;flex-direction:column;width:240px;border:2px solid #e2e8f0;user-select:none;}
-.timer-widget.running{border-color:#38a169;box-shadow:0 8px 30px rgba(56,161,105,0.2);}
-.timer-handle{background:#f7fafc;border-radius:12px 12px 0 0;padding:7px 12px;cursor:grab;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:600;color:#718096;}
+/* TIMER WIDGET V14.2.24 — tap to switch */
+.timer-widget{position:fixed;bottom:24px;right:24px;background:white;border-radius:20px;padding:0;box-shadow:0 12px 40px rgba(0,0,0,0.14);z-index:400;display:flex;flex-direction:column;width:288px;border:1.5px solid #e2e8f0;user-select:none;}
+.timer-widget.running{border-color:#38a169;box-shadow:0 12px 40px rgba(56,161,105,0.18);}
+.timer-handle{background:#f7fafc;border-radius:18px 18px 0 0;padding:9px 16px;cursor:grab;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:600;color:#a0aec0;letter-spacing:0.04em;}
 .timer-handle:active{cursor:grabbing;}
-.timer-body{padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
-.timer-display{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums;text-align:center;color:#1a202c;letter-spacing:2px;line-height:1;}
-.timer-display.running{color:#38a169;}
-.timer-status{font-size:11px;color:#718096;text-align:center;}
-.timer-project{font-size:11px;font-weight:600;color:#2b6cb0;text-align:center;background:#ebf4ff;padding:3px 8px;border-radius:5px;}
-.timer-btns{display:flex;gap:5px;flex-wrap:wrap;}
-.timer-btns .btn{flex:1;font-size:11px;padding:6px 8px;}
+.timer-body{padding:16px;display:flex;flex-direction:column;gap:10px;}
+.timer-display{font-size:42px;font-weight:800;font-variant-numeric:tabular-nums;text-align:center;color:#1a202c;letter-spacing:3px;line-height:1;}
+.timer-display.running{color:#276749;}
+.timer-status{font-size:11px;color:#a0aec0;text-align:center;letter-spacing:0.03em;}
+.timer-project{font-size:11px;font-weight:600;color:#2b6cb0;text-align:center;background:#ebf4ff;padding:5px 10px;border-radius:6px;line-height:1.3;}
+.timer-project.unplanned{background:#fff5f5;color:#c53030;}
+
+/* Task switch list */
+.tw-task-list{display:flex;flex-direction:column;gap:5px;}
+.tw-task{width:100%;padding:9px 12px;background:#f7fafc;border:1.5px solid #e2e8f0;border-radius:10px;cursor:pointer;text-align:left;transition:all 0.15s;display:flex;align-items:center;gap:10px;}
+.tw-task:hover{background:#ebf4ff;border-color:#90cdf4;}
+.tw-task.lunch{background:#fafafa;border-style:dashed;}
+.tw-task.lunch:hover{background:#fffaf0;border-color:#f6ad55;}
+.tw-task-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.tw-task-icon.proj{background:#ebf4ff;color:#2b6cb0;}
+.tw-task-icon.lunch{background:#fef3c7;color:#92400e;}
+.tw-task-icon.unplanned{background:#faf5ff;color:#6b46c1;}
+.tw-task-text{flex:1;min-width:0;}
+.tw-task-name{font-size:12px;font-weight:600;color:#1a202c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tw-task-sub{font-size:10px;color:#718096;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+
+/* Big action buttons */
+.tw-btn-stop{width:100%;padding:13px;background:#1a202c;color:white;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
+.tw-btn-stop:hover{background:#2d3748;}
+.tw-btn-start{width:100%;padding:13px;background:#38a169;color:white;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
+.tw-btn-start:hover{background:#276749;}
+.tw-btn-unplanned{width:100%;padding:9px;background:transparent;color:#718096;border:1.5px dashed #cbd5e0;border-radius:10px;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:6px;}
+.tw-btn-unplanned:hover{border-color:#2b6cb0;color:#2b6cb0;background:#ebf4ff;}
+
+/* Progress bar */
+.tw-progress{height:3px;background:#e2e8f0;border-radius:2px;overflow:hidden;}
+.tw-progress-fill{height:3px;background:#38a169;border-radius:2px;transition:width 1s linear;width:0%;}
 
 /* MANAGE */
 .manage-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
@@ -366,6 +391,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
             <button class="btn btn-ghost btn-sm" id="planPrev">← Prev</button>
             <span id="planWeekLabel" style="font-weight:700;font-size:14px;"></span>
             <button class="btn btn-ghost btn-sm" id="planNext">Next →</button>
+            <button class="btn btn-primary btn-sm" id="addMyTaskBtn" style="display:none;">+ Add My Task Today</button>
           </div>
         </div>
         <div style="background:#fffaf0;border:1px solid #fbd38d;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#c05621;">
@@ -556,7 +582,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.23 Production:</strong> 8 fixes — (1) Timer no longer resets to zero on page reload, full elapsed time preserved. (2) Stale overnight cleanup replaced with smart gap-fill: only logs unaccounted gap, never inflates already-logged time. (3) Dashboard 30s refresh no longer overwrites running timer entries. (4) User delete now fully cleans Firebase. (5) End-of-day warning corrected to 6:30 PM, force-complete to 7:00 PM. (6) Dashboard refresh forced to server source. (7) Gap-fill capped at 7PM EOD. (8) New Task button added to paused state — start a different task without marking current one done.
+            📌 <strong>V14.2.24 Production:</strong> All known issues fixed — (1) Leave balance now syncs to both Firebase locations on approval, no more reset on reload. (2) EOD daily summary modal at 7PM — staff confirm what was logged before leaving. (3) Stale timer cleanup now runs every hour, not just on login — weekend timers handled. (4) Rai planner fix — Add My Task Today button, own row highlighted, only own cells clickable for non-admin. (5) Time logs load limited to last 90 days — prevents memory bloat. (6) EOD modal text corrected to 6:30PM/7PM. (7) All V14.2.23 fixes retained. (8) Tap-to-switch timer.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -580,23 +606,55 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div><!-- /main -->
 </div><!-- /app -->
 
-<!-- FLOATING TIMER -->
+<!-- FLOATING TIMER V14.2.24 — tap to switch -->
 <div class="timer-widget" id="timerWidget" style="display:none;">
-  <div class="timer-handle" id="timerHandle"><span>⏱️ Live Timer</span><span id="timerRunningLabel" style="color:#38a169;font-size:10px;"></span></div>
+  <div class="timer-handle" id="timerHandle">
+    <span style="display:flex;align-items:center;gap:6px;">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      SQUARE Timer
+    </span>
+    <span id="timerRunningLabel" style="color:#38a169;font-size:10px;"></span>
+  </div>
   <div class="timer-body">
     <div class="timer-display" id="timerDisplay">00:00:00</div>
-    <div class="timer-status" id="timerStatus">Timer ready</div>
-    <div class="timer-project" id="timerProject" style="display:none;"></div>
-    <div id="timerPreStart"><button class="btn btn-success" style="width:100%;" id="timerStartBtn">▶ Start Timer</button></div>
+    <div class="tw-progress"><div class="tw-progress-fill" id="twProgressFill"></div></div>
+    <div class="timer-status" id="timerStatus">Ready to track</div>
+    <div id="timerProject" class="timer-project" style="display:none;"></div>
+
+    <div id="twTaskSection" style="display:none;">
+      <div style="font-size:10px;font-weight:600;color:#a0aec0;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:5px;">Switch to</div>
+      <div class="tw-task-list" id="twTaskList"></div>
+    </div>
+
+    <div id="timerPreStart">
+      <button class="tw-btn-start" id="timerStartBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Start tracking
+      </button>
+    </div>
+
     <div id="timerRunning" style="display:none;">
-      <button class="btn" id="timerPauseBtn" style="width:100%;background:#f59e0b;color:white;margin-bottom:8px;">⏸️ Pause Break</button>
-      <button class="btn" id="timerCompleteBtn" style="width:100%;background:#e53e3e;color:white;">⏹️ Stop & Complete</button>
+      <button class="tw-btn-stop" id="timerCompleteBtn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        Stop & save
+      </button>
     </div>
+
     <div id="timerPaused" style="display:none;">
-      <button class="btn btn-success" id="timerResumeBtn" style="width:100%;margin-bottom:8px;">▶️ Resume</button>
-      <button class="btn" id="timerNewTaskBtn" style="width:100%;background:#2b6cb0;color:white;margin-bottom:8px;">⏭️ New Task</button>
-      <button class="btn" id="timerCompletePausedBtn" style="width:100%;background:#e53e3e;color:white;">⏹️ Stop & Complete</button>
+      <button class="tw-btn-start" id="timerResumeBtn" style="margin-bottom:6px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Resume
+      </button>
+      <button class="tw-btn-stop" id="timerCompletePausedBtn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        Stop & save
+      </button>
     </div>
+
+    <button class="tw-btn-unplanned" id="twUnplannedBtn" style="display:none;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add unplanned task
+    </button>
   </div>
 </div>
 
@@ -818,7 +876,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
     <div class="modal-head"><h3>🌆 End of Day Reminder</h3></div>
     <div style="background:#fff5f5;border:2px solid #feb2b2;border-radius:10px;padding:14px;margin-bottom:16px;">
       <div style="font-size:13px;font-weight:700;color:#9b2c2c;margin-bottom:4px;">⚠️ You have an active timer!</div>
-      <div style="font-size:13px;color:#4a5568;">It's 8:00 PM. Please complete your timer before leaving — it will be auto-completed at 8:30 PM.</div>
+      <div style="font-size:13px;color:#4a5568;">It's 6:30 PM. Please complete your timer before leaving — it will be auto-completed at 7:00 PM.</div>
     </div>
     <div id="endOfDayTimerInfo" style="font-size:13px;color:#2d3748;margin-bottom:16px;background:#f7fafc;border-radius:8px;padding:10px;"></div>
     <div style="display:flex;gap:8px;">
@@ -828,7 +886,23 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div>
 </div>
 
-<!-- V14.2.7: Quick Plan + Start Modal (no plan for today) -->
+<!-- V14.2.24: EOD Daily Summary — confirmation screen at 7PM -->
+<div class="modal-backdrop" id="eodSummaryModal" style="z-index:610;">
+  <div class="modal-box" style="max-width:500px;">
+    <div class="modal-head">
+      <h3>📋 End of Day — Please Confirm</h3>
+    </div>
+    <div style="background:#f0fff4;border:1px solid #9ae6b4;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#276749;">
+      Here's what was logged today. Please review and confirm before you leave.
+    </div>
+    <div id="eodSummaryContent" style="margin-bottom:16px;max-height:280px;overflow-y:auto;"></div>
+    <div id="eodSummaryWarning" style="display:none;background:#fff5f5;border:1px solid #feb2b2;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#9b2c2c;"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-success" id="eodConfirmBtn">✅ Confirmed — Logging off</button>
+      <button class="btn btn-ghost" onclick="closeModal('eodSummaryModal')">I'll log more first</button>
+    </div>
+  </div>
+</div>
 <div class="modal-backdrop" id="quickPlanModal" style="z-index:550;">
   <div class="modal-box" style="max-width:500px;">
     <div class="modal-head">
@@ -872,17 +946,20 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div>
 </div>
 
-<!-- V14.2.7: Task Selection Modal (multiple plans today) -->
+<!-- V14.2.24: Task Selection Modal -->
 <div class="modal-backdrop" id="taskSelectModal" style="z-index:550;">
-  <div class="modal-box" style="max-width:480px;">
+  <div class="modal-box" style="max-width:440px;">
     <div class="modal-head">
-      <h3>▶ Select Task to Start</h3>
+      <h3>▶ What are you working on?</h3>
       <button class="close-btn" onclick="closeModal('taskSelectModal')">×</button>
     </div>
-    <div style="font-size:13px;color:#718096;margin-bottom:14px;">Choose which planned task to time now:</div>
-    <div id="taskSelectList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;"></div>
+    <div style="font-size:12px;color:#718096;margin-bottom:14px;">Your planned tasks for today — tap to start tracking</div>
+    <div id="taskSelectList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;"></div>
     <div style="border-top:1px solid #e2e8f0;padding-top:12px;">
-      <button class="btn btn-warning btn-sm" id="taskSelectAddNew">+ Add a different task for today</button>
+      <button class="tw-btn-unplanned" id="taskSelectAddNew" style="display:flex;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add unplanned task
+      </button>
     </div>
   </div>
 </div>
@@ -1308,11 +1385,17 @@ async function loadData() {
       projectsSnapshot.forEach(doc => { projectsData.push(doc.data()); });
       console.log('✅ Loaded projects from server:', projectsData.length);
       
-      // Load time logs
-      const timeLogsSnapshot = await db.collection("timeLogs").get({source:'server'});
+      // Load time logs — V14.2.24: limit to last 90 days to prevent unbounded memory growth
+      // Reports older than 90 days are still in Firebase but not loaded into memory
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      const cutoffDate = fmt(ninetyDaysAgo);
+      const timeLogsSnapshot = await db.collection("timeLogs")
+        .where("date", ">=", cutoffDate)
+        .get({source:'server'});
       timeLogs = [];
       timeLogsSnapshot.forEach(doc => { timeLogs.push(doc.data()); });
-      console.log('✅ Loaded time logs from server:', timeLogs.length);
+      console.log('✅ Loaded time logs from server:', timeLogs.length, '(last 90 days from', cutoffDate, ')');
       
       // Load plan entries
       const planEntriesSnapshot = await db.collection("planEntries").get({source:'server'});
@@ -1446,14 +1529,12 @@ function startInactivityMonitor() {
     const THRESHOLD = 30 * 60 * 1000; // 30 minutes hidden
 
     if (hiddenDuration > THRESHOLD) {
-      console.log('⏸️ Auto-pausing timer — tab hidden for 30+ minutes');
-      const pauseBtn = document.getElementById('timerPauseBtn');
-      if (pauseBtn) {
-        pauseBtn.click();
-        tabHiddenAt = null; // Reset so we don't trigger again
+      console.log('⏸️ Auto-saving timer — tab hidden for 30+ minutes');
+      if (timerRunning && timerLinkedPlan) {
+        document.getElementById('timerCompleteBtn').click();
+        tabHiddenAt = null;
         setTimeout(() => {
-          showNotificationToast('⏸️ Timer Auto-Paused',
-            'SQUARE was in the background for 30 minutes. Time saved — click Resume when ready.', 'warning');
+          showNotificationToast('⏹️ Timer Auto-Saved', 'SQUARE was in the background for 30 minutes. Time saved — start tracking again when ready.', 'warning');
         }, 500);
       }
     }
@@ -1481,7 +1562,7 @@ function showNotificationToast(title, message, type) {
 // ═══════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════
-function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
+function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 // V14.2.4 FIX: Timezone-safe date formatting — prevents 1-day shift in IST (UTC+5:30)
 // new Date("2026-04-02").toISOString() returns "2026-04-01T18:30:00Z" in IST — wrong!
 // Solution: use local year/month/date directly instead of going through UTC ISO string
@@ -1610,8 +1691,14 @@ async function doLogin(){
     // V14.2.2: FIX #6 - Start inactivity monitoring
     startInactivityMonitor();
     
-    // V14.2.5: Start end-of-day monitor
+    // V14.2.24: Start end-of-day monitor
     startEndOfDayMonitor();
+
+    // V14.2.24: Also run stale cleanup every hour (not just on login)
+    // Prevents weekend stale timers from surviving until Monday
+    setInterval(() => {
+      if (currentUser) cleanupStaleTimers();
+    }, 60 * 60 * 1000); // every hour
 
     // V14.2.9: Clean up any stale timers from previous day
     await cleanupStaleTimers();
@@ -2114,7 +2201,18 @@ function renderPlanner(){
     : 'You can only plan your own work';
   const permEl = document.getElementById('planPermissionText');
   if (permEl) permEl.textContent = permText;
-  
+
+  // V14.2.24: Show Add My Task button for non-admin users
+  const addMyTaskBtn = document.getElementById('addMyTaskBtn');
+  if (addMyTaskBtn) {
+    if (!currentUser.isAdmin) {
+      addMyTaskBtn.style.display = 'inline-block';
+      addMyTaskBtn.onclick = () => openPlanModal(currentUser.id, fmt(new Date()), null);
+    } else {
+      addMyTaskBtn.style.display = 'none';
+    }
+  }
+
   const days=[]; for(let i=0;i<7;i++) days.push(addDays(planWeek,i));
   document.getElementById('planWeekLabel').textContent='Week of '+planWeek.toLocaleDateString('en-IN',{month:'short',day:'numeric',year:'numeric'});
   const grid=document.getElementById('plannerGrid'); grid.innerHTML='';
@@ -2126,17 +2224,27 @@ function renderPlanner(){
   }).join(''); grid.appendChild(head);
   users.forEach(user=>{
     const row=document.createElement('div'); row.className='planner-row';
-    const nc=document.createElement('div'); nc.className='planner-name'; nc.textContent=user.name; row.appendChild(nc);
+    // V14.2.24: Highlight current user's own row
+    const isMyRow = user.id === currentUser.id;
+    const nc=document.createElement('div'); nc.className='planner-name';
+    nc.textContent=user.name;
+    if (isMyRow) nc.style.cssText='display:flex;align-items:center;font-size:12px;font-weight:700;padding:0 6px;color:#2b6cb0;';
+    row.appendChild(nc);
     days.forEach(day=>{
       const ds=fmt(day), entries=planEntries.filter(p=>p.userId===user.id&&p.date===ds);
       const cell=document.createElement('div');
       cell.className='planner-cell'+(entries.length?' has-items':'')+(isHoliday(day)?' holiday':'');
+      // V14.2.24: Highlight own row cells
+      if (isMyRow && !isHoliday(day)) cell.style.borderColor='#bee3f8';
       entries.forEach(pl=>{
         const c=document.createElement('div'); c.className=`plan-chip ${pl.done?'done':pl.type}`;
         c.textContent=`${pl.type==='emergency'?'🚨':''}${pl.project}${pl.phase?' · '+pl.phase.split(' ')[0]:''}`;
         c.title=pl.desc; c.onclick=(e)=>{ e.stopPropagation(); openPlanModal(user.id,ds,pl.id); }; cell.appendChild(c);
       });
-      if(!isHoliday(day)) cell.addEventListener('click',()=>openPlanModal(user.id,ds,null));
+      // V14.2.24: Only allow clicking own row for non-admin (prevents accidental wrong-row clicks)
+      if(!isHoliday(day) && (currentUser.isAdmin || isMyRow)) {
+        cell.addEventListener('click',()=>openPlanModal(user.id,ds,null));
+      }
       row.appendChild(cell);
     });
     grid.appendChild(row);
@@ -2991,8 +3099,15 @@ function renderApprovals(){
           approvedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });
-        // Save updated user leave balance
+        // Save updated user leave balance — both granular and main doc
         await saveUser(u);
+        // V14.2.24 FIX: Also update users array in main companyData doc
+        // saveUser() writes to users/{id} subcollection but loadData() reads
+        // from companyData/squareDB users array — keep both in sync
+        await db.collection("companyData").doc("squareDB").update({
+          users: users,
+          updatedAt: new Date().toISOString()
+        });
         // V14.2.9: Reload leave requests from server to sync in-memory array
         const fresh = await db.collection("leaveRequests").get({source:'server'});
         leaveRequests = [];
@@ -3373,24 +3488,24 @@ document.getElementById('qpStartBtn').addEventListener('click', () => {
   renderPlanner(); renderDashboard();
 });
 
-// Task selection modal — show cards for each plan
+// Task selection modal — clean cards
 function openTaskSelectModal(plans) {
   const list = document.getElementById('taskSelectList');
   list.innerHTML = '';
   plans.forEach(plan => {
     const card = document.createElement('div');
-    card.style.cssText = 'background:#f7fafc;border:2px solid #e2e8f0;border-radius:10px;padding:12px 16px;cursor:pointer;transition:border-color 0.2s;';
+    card.className = 'tw-task';
     card.innerHTML = `
-      <div style="font-weight:700;font-size:14px;color:#2b6cb0;">📁 ${plan.project}</div>
-      <div style="font-size:12px;color:#4a5568;margin-top:3px;">${plan.phase || '—'} · ${plan.typology || '—'}</div>
-      <div style="font-size:11px;color:#a0aec0;margin-top:2px;">${plan.type === 'emergency' ? '🚨 Emergency' : '📅 Planned'}</div>
+      <div class="tw-task-icon proj">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div class="tw-task-text">
+        <div class="tw-task-name">${plan.project}</div>
+        <div class="tw-task-sub">${plan.phase||'—'} · ${plan.typology||'—'}</div>
+      </div>
+      ${plan.type==='emergency'?'<span style="font-size:10px;background:#fff5f5;color:#c53030;padding:2px 7px;border-radius:4px;font-weight:600;">urgent</span>':''}
     `;
-    card.onmouseenter = () => card.style.borderColor = '#2b6cb0';
-    card.onmouseleave = () => card.style.borderColor = '#e2e8f0';
-    card.onclick = () => {
-      closeModal('taskSelectModal');
-      startTimerWithPlan(plan);
-    };
+    card.onclick = () => { closeModal('taskSelectModal'); startTimerWithPlan(plan); };
     list.appendChild(card);
   });
   openModal('taskSelectModal');
@@ -3404,186 +3519,152 @@ document.getElementById('taskSelectAddNew').addEventListener('click', () => {
   document.querySelector('#quickPlanModal [style*="fffaf0"]').style.display = 'none';
 });
 
-// Core function: actually start the timer with a linked plan
+// V14.2.24: Render tap-to-switch task list inside widget
+function renderWidgetTaskList(activePlanId) {
+  const today   = fmt(new Date());
+  const myPlans = planEntries.filter(p => p.userId === currentUser?.id && p.date === today && !p.done);
+  const list    = document.getElementById('twTaskList');
+  const section = document.getElementById('twTaskSection');
+  const unplBtn = document.getElementById('twUnplannedBtn');
+
+  list.innerHTML = '';
+  myPlans.forEach(plan => {
+    if (plan.id === activePlanId) return;
+    const card = document.createElement('button');
+    card.className = 'tw-task';
+    card.innerHTML = `
+      <div class="tw-task-icon proj">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div class="tw-task-text">
+        <div class="tw-task-name">${plan.project}</div>
+        <div class="tw-task-sub">${plan.phase||''}</div>
+      </div>`;
+    card.onclick = () => switchTaskTo(plan);
+    list.appendChild(card);
+  });
+
+  // Lunch break always available
+  const lunch = document.createElement('button');
+  lunch.className = 'tw-task lunch';
+  lunch.innerHTML = `
+    <div class="tw-task-icon lunch">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </div>
+    <div class="tw-task-text">
+      <div class="tw-task-name" style="color:#718096;">Lunch break</div>
+      <div class="tw-task-sub">non-productive</div>
+    </div>`;
+  lunch.onclick = () => switchTaskTo({id:'lunch',project:'Lunch Break',phase:'',typology:'',projectId:null,type:'lunch'});
+  list.appendChild(lunch);
+
+  section.style.display = 'block';
+  unplBtn.style.display = 'flex';
+}
+
+// V14.2.24: Switch task — auto-saves current, starts new immediately
+function switchTaskTo(newPlan) {
+  if (!timerRunning || !timerStartedAt) { startTimerWithPlan(newPlan); return; }
+  const now         = Date.now();
+  const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
+  const mins        = Math.max(1, Math.floor(sessionSecs / 60));
+  const today       = fmt(new Date());
+  const clockStart  = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const clockEnd    = new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  if (sessionSecs >= 30 && timerLinkedPlan) {
+    const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (switched to ${newPlan.project})`;
+    timeLogs.push({id:genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',ts:Date.now()});
+    autoSave(); renderTimeLog(); renderProjectsBudget();
+    showNotificationToast(`✓ ${minsToHM(mins)} saved`, `${timerLinkedPlan.project} → ${newPlan.project}`, 'info');
+  }
+  clearInterval(timerInterval);
+  startTimerWithPlan(newPlan);
+}
+
+// Core function: start the timer with a linked plan
 function startTimerWithPlan(plan) {
   timerLinkedPlan = plan;
   timerStartedAt  = Date.now();
   timerPausedMs   = 0;
   timerRunning    = true;
-  // V14.2.14: Track session start separately — resets on every resume
-  // Saved to localStorage so it survives page refresh
   window.lastSessionStartedAt = Date.now();
-
   localStorage.setItem('timerState', JSON.stringify({
-    startedAt: timerStartedAt,
-    lastSessionStartedAt: window.lastSessionStartedAt,
-    pausedMs: timerPausedMs,
-    running: true,
-    linkedPlan: timerLinkedPlan
+    startedAt: timerStartedAt, lastSessionStartedAt: window.lastSessionStartedAt,
+    pausedMs: timerPausedMs, running: true, linkedPlan: timerLinkedPlan
   }));
-
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPreStart').style.display  = 'none';
   document.getElementById('timerRunning').style.display   = 'block';
   document.getElementById('timerPaused').style.display    = 'none';
   document.getElementById('timerDisplay').classList.add('running');
-  document.getElementById('timerStatus').textContent = '● Recording...';
-
+  document.getElementById('timerStatus').textContent      = '● recording';
+  document.getElementById('twProgressFill').style.width   = '0%';
   const projBadge = document.getElementById('timerProject');
-  projBadge.style.display    = 'block';
-  projBadge.textContent      = `📁 ${plan.project}`;
-  projBadge.style.background = '#ebf4ff';
-  projBadge.style.color      = '#2b6cb0';
-
+  projBadge.style.display = 'block';
+  projBadge.innerHTML = `📁 ${plan.project}${plan.phase?' · '+plan.phase:''}`;
+  projBadge.className = 'timer-project' + (plan.type==='lunch'?' unplanned':'');
   document.getElementById('timerNavLabel').textContent = '⏱ Running...';
   timerInterval = setInterval(() => {
-    document.getElementById('timerDisplay').textContent = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
+    const secs = getElapsed(timerStartedAt, timerPausedMs);
+    document.getElementById('timerDisplay').textContent = secsToHMS(secs);
+    document.getElementById('twProgressFill').style.width = Math.min((secs/(8*3600))*100,100)+'%';
   }, 1000);
-
+  renderWidgetTaskList(plan.id);
   saveActiveTimerToFirebase();
 }
 
-document.getElementById('timerStartBtn').addEventListener('click', () => {
-  // Prevent concurrent timers
-  if (timerRunning) {
-    alert('⚠️ Timer Already Running!\n\nPlease stop or pause your current timer before starting a new one.\n\nCurrent Task: ' + (timerLinkedPlan ? timerLinkedPlan.project : 'Unknown'));
-    return;
+// V14.2.24: openNewTaskPicker — replaces direct timerStartBtn logic
+function openNewTaskPicker() {
+  if (!window.__lastPlan) {
+    try { window.__lastPlan = JSON.parse(localStorage.getItem('lastPlan')); } catch(e) {}
   }
-
-  const today    = fmt(new Date());
-  const myPlans  = planEntries.filter(p => p.userId === currentUser.id && p.date === today && !p.done);
-
+  const today   = fmt(new Date());
+  const myPlans = planEntries.filter(p => p.userId === currentUser.id && p.date === today && !p.done);
   if (myPlans.length === 0) {
-    // No plans today — open Quick Plan modal
     openQuickPlanModal();
-    // Restore warning message visibility in case it was hidden
     const warn = document.querySelector('#quickPlanModal [style*="fffaf0"]');
     if (warn) warn.style.display = 'block';
   } else if (myPlans.length === 1) {
-    // Exactly one plan — start immediately
     startTimerWithPlan(myPlans[0]);
   } else {
-    // Multiple plans — show selection modal
     openTaskSelectModal(myPlans);
   }
+}
+
+document.getElementById('timerStartBtn').addEventListener('click', openNewTaskPicker);
+
+// Wire up unplanned task button
+document.getElementById('twUnplannedBtn').addEventListener('click', () => {
+  openQuickPlanModal();
+  const warn = document.querySelector('#quickPlanModal [style*="fffaf0"]');
+  if (warn) warn.style.display = 'block';
 });
 
-// V13.6: Pause Button - Save time but keep task active
-document.getElementById('timerPauseBtn').addEventListener('click',()=>{
-  clearInterval(timerInterval); timerRunning=false;
+// V14.2.24: Pause button removed — use tap-to-switch instead
 
-  // V14.2.23: timerStartedAt is always reset on every resume/start (or restored with
-  // full elapsed offset on page reload). Elapsed = now - timerStartedAt = exact session time.
-  const now = Date.now();
-  const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
-  const mins = Math.max(1, Math.floor(sessionSecs / 60));
-  const today = fmt(new Date());
-  const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  const clockEnd = new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-
-  // Block only genuine double-clicks (under 30 seconds)
-  if(sessionSecs < 30){
-    alert('Timer must run for at least 1 minute');
-    timerRunning = true;
-    timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
-    return;
-  }
-  
-  // If timer was unplanned, open log modal
-  if(!timerLinkedPlan){
-    document.getElementById('timerDisplay').textContent='00:00:00';
-    document.getElementById('timerWidget').classList.remove('running');
-    openLogModal();
-    document.getElementById('tmTmr').checked=true;
-    document.getElementById('mTimerDisp').textContent=secsToHMS(mins*60);
-    document.getElementById('logProdYes').checked=true;
-    document.getElementById('logProdFields').style.display='block';
-    document.getElementById('logNonProdFields').style.display='none';
-    document.getElementById('logProdYes').dispatchEvent(new Event('change'));
-    resetTimer();
-    return;
-  }
-  
-  // Save incremental log entry
-  const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (Paused)`;
-  timeLogs.push({id:genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
-  
-  autoSave(); renderTimeLog(); renderProjectsBudget();
-  
-  // Switch to paused state
-  document.getElementById('timerRunning').style.display='none';
-  document.getElementById('timerPaused').style.display='block';
-  document.getElementById('timerStatus').textContent='⏸️ Paused...';
-  document.getElementById('timerDisplay').textContent='00:00:00';
-  
-  removeActiveTimerFromFirebase();
-  alert(`⏸️ Timer Paused\n\n✅ Logged: ${minsToHM(mins)}\n📁 ${timerLinkedPlan.project}\n\nTask stays in Weekly Planner.\nClick Resume to continue.`);
-});
-
-// V13.6: Resume Button - Continue same task
+// V14.2.24: Resume Button
 document.getElementById('timerResumeBtn').addEventListener('click',()=>{
-  if(!timerLinkedPlan){
-    alert('No task to resume!');
-    return;
-  }
-  
-  // Restart timer for same task
+  if(!timerLinkedPlan){ alert('No task to resume!'); return; }
   timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
-  // V14.2.14: Reset session start and persist to localStorage
-  window.lastSessionStartedAt = Date.now();
-  localStorage.setItem('timerState', JSON.stringify({
-    startedAt: timerStartedAt,
-    lastSessionStartedAt: window.lastSessionStartedAt,
-    pausedMs: 0,
-    running: true,
-    linkedPlan: timerLinkedPlan
-  }));
+  window.lastSessionStartedAt=Date.now();
+  localStorage.setItem('timerState',JSON.stringify({startedAt:timerStartedAt,lastSessionStartedAt:window.lastSessionStartedAt,pausedMs:0,running:true,linkedPlan:timerLinkedPlan}));
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPaused').style.display='none';
   document.getElementById('timerRunning').style.display='block';
   document.getElementById('timerDisplay').textContent='00:00:00';
   document.getElementById('timerDisplay').classList.add('running');
-  document.getElementById('timerStatus').textContent='● Recording...';
+  document.getElementById('timerStatus').textContent='● recording';
   document.getElementById('timerNavLabel').textContent='⏱ Running...';
-  timerInterval=setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
-  
-  // Save to Firebase
+  timerInterval=setInterval(()=>{
+    const secs=getElapsed(timerStartedAt,timerPausedMs);
+    document.getElementById('timerDisplay').textContent=secsToHMS(secs);
+    document.getElementById('twProgressFill').style.width=Math.min((secs/(8*3600))*100,100)+'%';
+  },1000);
+  renderWidgetTaskList(timerLinkedPlan.id);
   saveActiveTimerToFirebase();
 });
 
-// V14.2.23: New Task Button (from paused) 
-// Lets staff start a different task without having to Complete the current one.
-// Current paused task stays as-is in Weekly Planner (not marked done).
-// Timer resets cleanly and opens the Start Timer modal for a new task.
-document.getElementById('timerNewTaskBtn').addEventListener('click', () => {
-  if (!confirm('Start a new task?\n\nYour current paused task will stay in the Weekly Planner — NOT marked as done. You can resume it later from the planner.\n\nContinue?')) return;
-
-  // Clear timer state fully — don't mark current plan as done
-  clearInterval(timerInterval);
-  timerRunning    = false;
-  timerStartedAt  = null;
-  timerPausedMs   = 0;
-  timerLinkedPlan = null;
-  window.lastSessionStartedAt = null;
-  localStorage.removeItem('timerState');
-
-  // Reset widget UI back to pre-start state
-  document.getElementById('timerPaused').style.display   = 'none';
-  document.getElementById('timerRunning').style.display  = 'none';
-  document.getElementById('timerPreStart').style.display = 'block';
-  document.getElementById('timerDisplay').textContent    = '00:00:00';
-  document.getElementById('timerDisplay').classList.remove('running');
-  document.getElementById('timerWidget').classList.remove('running');
-  document.getElementById('timerStatus').textContent     = '';
-  document.getElementById('timerProject').style.display  = 'none';
-  document.getElementById('timerNavLabel').textContent   = 'Start Timer';
-
-  // Remove from Firebase activeTimers
-  removeActiveTimerFromFirebase();
-
-  // Open the Start Timer modal so they can pick a new task immediately
-  openModal('quickPlanModal');
-});
+// V14.2.24: New Task button removed — replaced by tap-to-switch task list in widget
 document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>{
   clearInterval(timerInterval); timerRunning=false;
 
@@ -4038,7 +4119,7 @@ function startEndOfDayMonitor() {
       const mins = Math.max(1, Math.floor(autoSecs / 60));
       const projectName = timerLinkedPlan?.project || 'Unplanned';
       const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-      const clockEnd = '20:30';
+      const clockEnd = '19:00';
 
       if (timerLinkedPlan) {
         timeLogs.push({
@@ -4060,6 +4141,15 @@ function startEndOfDayMonitor() {
       endOfDayWarningShown = false;
       showNotificationToast('⏹️ Timer Auto-Completed', `${minsToHM(mins)} logged for ${projectName} at 7:00 PM.`, 'warning');
       console.log('⏹️ End-of-day auto-complete fired at 7:00 PM');
+
+      // V14.2.24: Show EOD summary after auto-complete
+      setTimeout(() => showEodSummary(), 1000);
+    }
+
+    // 7:05 PM — show EOD summary even if no timer was running
+    if (hour === 19 && min === 5 && !endOfDayWarningShown) {
+      endOfDayWarningShown = true; // prevent re-showing
+      showEodSummary();
     }
 
     // Reset flag at midnight for next day
@@ -4069,47 +4159,109 @@ function startEndOfDayMonitor() {
 }
 
 async function resetTimer() {
-  timerRunning = false;
-  timerStartedAt = null;
-  timerPausedMs = 0;
-  timerLinkedPlan = null;
+  const lastPlan = timerLinkedPlan;
+
+  timerRunning = false; timerStartedAt = null; timerPausedMs = 0; timerLinkedPlan = null;
   window.lastSessionStartedAt = null;
   if (timerInterval) clearInterval(timerInterval);
-  
-  // V14.1: Clear timer state from localStorage
   localStorage.removeItem('timerState');
-  
+
   const display = document.getElementById('timerDisplay');
-  if (display) {
-    display.textContent = '00:00:00';
-    display.classList.remove('running');
-  }
-  
+  if (display) { display.textContent = '00:00:00'; display.classList.remove('running'); }
   const status = document.getElementById('timerStatus');
-  if (status) status.textContent = 'Timer ready';
-  
+  if (status) status.textContent = 'Ready to track';
   const projBadge = document.getElementById('timerProject');
   if (projBadge) projBadge.style.display = 'none';
-  
-  const preStart = document.getElementById('timerPreStart');
-  if (preStart) preStart.style.display = 'block';
-  
   const runningDiv = document.getElementById('timerRunning');
   if (runningDiv) runningDiv.style.display = 'none';
-  
   const pausedDiv = document.getElementById('timerPaused');
   if (pausedDiv) pausedDiv.style.display = 'none';
-  
   const widget = document.getElementById('timerWidget');
   if (widget) widget.classList.remove('running');
-  
-  // V14.2.2: FIX #5 - Await Firebase cleanup
+  const twSection = document.getElementById('twTaskSection');
+  if (twSection) twSection.style.display = 'none';
+  const twUnpl = document.getElementById('twUnplannedBtn');
+  if (twUnpl) twUnpl.style.display = 'none';
+  if (document.getElementById('twProgressFill')) document.getElementById('twProgressFill').style.width = '0%';
+
+  // V14.2.24: Show Continue button if last task available
+  const preStart = document.getElementById('timerPreStart');
+  if (preStart) {
+    if (lastPlan && lastPlan.type !== 'lunch') {
+      window.__lastPlan = lastPlan;
+      try { localStorage.setItem('lastPlan', JSON.stringify(lastPlan)); } catch(e) {}
+      preStart.innerHTML = `
+        <button class="tw-btn-start" id="timerStartBtn" onclick="startTimerWithPlan(window.__lastPlan)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Continue: ${lastPlan.project}
+        </button>
+        <button class="tw-btn-unplanned" id="timerStartNewBtn" style="display:flex;margin-top:6px;" onclick="openNewTaskPicker()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Start different task
+        </button>`;
+    } else {
+      preStart.innerHTML = `
+        <button class="tw-btn-start" id="timerStartBtn" onclick="openNewTaskPicker()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Start tracking
+        </button>`;
+    }
+    preStart.style.display = 'block';
+  }
+
   await removeActiveTimerFromFirebase();
 }
 
-// ═══════════════════════════════════════════════════════
-// V11 OFFLINE PROTECTION
-// ═══════════════════════════════════════════════════════
+// V14.2.24: EOD Summary — shows what was logged today, asks staff to confirm
+function showEodSummary() {
+  if (!currentUser) return;
+  const today = fmt(new Date());
+  const todayLogs = timeLogs.filter(l => l.userId === currentUser.id && l.date === today && l.productive);
+  const totalMins = todayLogs.reduce((s, l) => s + (l.durationMins || 0), 0);
+
+  const content = document.getElementById('eodSummaryContent');
+  const warning = document.getElementById('eodSummaryWarning');
+
+  if (todayLogs.length === 0) {
+    content.innerHTML = `<div style="text-align:center;padding:20px;color:#718096;font-size:13px;">No time logged today.</div>`;
+    warning.style.display = 'block';
+    warning.innerHTML = `⚠️ <strong>Nothing logged today.</strong> Please log your work before leaving, or speak to your manager.`;
+  } else {
+    // Group by project
+    const byProject = {};
+    todayLogs.forEach(l => {
+      if (!byProject[l.projectName]) byProject[l.projectName] = 0;
+      byProject[l.projectName] += l.durationMins || 0;
+    });
+    content.innerHTML = `
+      <div style="margin-bottom:12px;background:#ebf4ff;border-radius:8px;padding:10px 14px;">
+        <div style="font-size:18px;font-weight:800;color:#2b6cb0;">${minsToHM(totalMins)}</div>
+        <div style="font-size:11px;color:#718096;">${todayLogs.length} entries logged today</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        ${Object.entries(byProject).map(([proj, mins]) => `
+          <div style="display:flex;justify-content:space-between;padding:7px 10px;background:#f7fafc;border-radius:6px;font-size:13px;">
+            <span style="font-weight:600;">📁 ${proj}</span>
+            <span style="color:#2b6cb0;font-weight:700;">${minsToHM(mins)}</span>
+          </div>`).join('')}
+      </div>`;
+
+    // Warn if total seems low vs expected working hours
+    if (totalMins < 240) { // less than 4h
+      warning.style.display = 'block';
+      warning.innerHTML = `⚠️ Only <strong>${minsToHM(totalMins)}</strong> logged. If you worked more, please add your remaining time before confirming.`;
+    } else {
+      warning.style.display = 'none';
+    }
+  }
+
+  document.getElementById('eodConfirmBtn').onclick = () => {
+    closeModal('eodSummaryModal');
+    showNotificationToast('✅ Day Confirmed', `${minsToHM(totalMins)} logged. Have a good evening!`, 'info');
+  };
+
+  openModal('eodSummaryModal');
+}
 
 function updateConnectionStatus(online) {
   isOnline = online;
