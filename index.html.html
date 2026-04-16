@@ -151,7 +151,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .bar-wrap{background:#e2e8f0;border-radius:4px;height:6px;min-width:50px;}
 .bar-fill{height:6px;border-radius:4px;background:#2b6cb0;}
 
-/* TIMER WIDGET V14.2.24 — tap to switch */
+/* TIMER WIDGET V14.2.25 — tap to switch */
 .timer-widget{position:fixed;bottom:24px;right:24px;background:white;border-radius:20px;padding:0;box-shadow:0 12px 40px rgba(0,0,0,0.14);z-index:400;display:flex;flex-direction:column;width:288px;border:1.5px solid #e2e8f0;user-select:none;}
 .timer-widget.running{border-color:#38a169;box-shadow:0 12px 40px rgba(56,161,105,0.18);}
 .timer-handle{background:#f7fafc;border-radius:18px 18px 0 0;padding:9px 16px;cursor:grab;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:600;color:#a0aec0;letter-spacing:0.04em;}
@@ -583,7 +583,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.24 Production:</strong> All known issues fixed — (1) Leave balance now syncs to both Firebase locations on approval, no more reset on reload. (2) EOD daily summary modal at 7PM — staff confirm what was logged before leaving. (3) Stale timer cleanup now runs every hour, not just on login — weekend timers handled. (4) Rai planner fix — Add My Task Today button, own row highlighted, only own cells clickable for non-admin. (5) Time logs load limited to last 90 days — prevents memory bloat. (6) EOD modal text corrected to 6:30PM/7PM. (7) All V14.2.23 fixes retained. (8) Tap-to-switch timer.
+            📌 <strong>V14.2.25 Production:</strong> (1) EOD auto-complete guard — prevents duplicate entry if timer already saved between 7PM check window. (2) Dashboard refresh null-guard — won't crash if dashAnalytics element missing. (3) Stale cleanup dedup guard — never writes two auto-completed entries for same user+project+date. (4) timerCompleteBtn null-guard — safe even if widget not in DOM. (5) EOD summary shows correct today-only logs. (6) All V14.2.24 fixes retained.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -607,7 +607,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div><!-- /main -->
 </div><!-- /app -->
 
-<!-- FLOATING TIMER V14.2.24 — tap to switch -->
+<!-- FLOATING TIMER V14.2.25 — tap to switch -->
 <div class="timer-widget" id="timerWidget" style="display:none;">
   <div class="timer-handle" id="timerHandle">
     <span style="display:flex;align-items:center;gap:6px;">
@@ -1532,7 +1532,8 @@ function startInactivityMonitor() {
     if (hiddenDuration > THRESHOLD) {
       console.log('⏸️ Auto-saving timer — tab hidden for 30+ minutes');
       if (timerRunning && timerLinkedPlan) {
-        document.getElementById('timerCompleteBtn').click();
+        // V14.2.25: null-guard — widget may not be in DOM yet
+        document.getElementById('timerCompleteBtn')?.click();
         tabHiddenAt = null;
         setTimeout(() => {
           showNotificationToast('⏹️ Timer Auto-Saved', 'SQUARE was in the background for 30 minutes. Time saved — start tracking again when ready.', 'warning');
@@ -2078,7 +2079,7 @@ function startDashboardAutoRefresh() {
       if (!timerRunning) hasUnsavedChanges = false;
       // Re-render Recent Time Logs widget
       renderLiveTimeLogFeed();
-      // Update stats
+      // V14.2.25: null-guard — element may not exist if user is on a different page
       const dashAnalytics = document.getElementById('dashAnalytics');
       if (dashAnalytics) renderDashboardStats();
     } catch (e) {
@@ -3791,11 +3792,12 @@ async function cleanupStaleTimers() {
       const startTime = data.startTime;
       const timerDate = fmt(new Date(startTime));
 
-      // Guard: never write a second autoCompleted entry for same user+project+date
+      // V14.2.25: Guard — never write a second autoCompleted entry for same user+project+date
+      // Use loose equality so null === null and undefined === null both match
       const alreadyAutoCompleted = timeLogs.find(l =>
         l.userId === id &&
         l.date === timerDate &&
-        l.projectId === (data.projectId || null) &&
+        (l.projectId || null) === (data.projectId || null) &&
         l.autoCompleted === true
       );
       if (alreadyAutoCompleted) {
@@ -4121,40 +4123,48 @@ function startEndOfDayMonitor() {
         `📁 <strong>${projectName}</strong><br>⏱ Running for: <strong>${elapsed}</strong>`;
       document.getElementById('endOfDayCompleteBtn').onclick = () => {
         closeModal('endOfDayModal');
-        document.getElementById('timerCompleteBtn').click();
+        // V14.2.25: null-guard
+        document.getElementById('timerCompleteBtn')?.click();
       };
       openModal('endOfDayModal');
     }
 
     // 7:00 PM force auto-complete — V14.2.23 FIX: was incorrectly firing at 8:30PM
-    if (hour === 19 && min === 0 && timerRunning) {
+    // V14.2.25: Double-fire guard — timerStartedAt cleared immediately so a second
+    // tick in the same minute cannot re-enter this block.
+    if (hour === 19 && min === 0 && timerRunning && timerStartedAt) {
       closeModal('endOfDayModal');
-      // V14.2.23: timerStartedAt reflects full session including pre-reload time
+      // Capture values before resetting state
       const autoNow = Date.now();
       const autoSecs = Math.floor((autoNow - timerStartedAt) / 1000);
       const mins = Math.max(1, Math.floor(autoSecs / 60));
       const projectName = timerLinkedPlan?.project || 'Unplanned';
       const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
       const clockEnd = '19:00';
+      const linkedPlanSnapshot = timerLinkedPlan; // snapshot before resetTimer clears it
 
-      if (timerLinkedPlan) {
+      // V14.2.25: Clear timerStartedAt immediately — prevents second tick re-entering
+      timerStartedAt = null;
+      timerRunning = false;
+
+      if (linkedPlanSnapshot) {
         timeLogs.push({
           id: genId(), userId: currentUser.id, date: fmt(new Date()),
-          projectId: timerLinkedPlan.projectId, projectName,
-          phase: timerLinkedPlan.phase, typology: timerLinkedPlan.typology,
+          projectId: linkedPlanSnapshot.projectId, projectName,
+          phase: linkedPlanSnapshot.phase, typology: linkedPlanSnapshot.typology,
           activity: '', durationMins: mins,
           startTime: clockStart, endTime: clockEnd,
-          desc: `${timerLinkedPlan.typology || timerLinkedPlan.phase || 'Work on project'} (Auto-completed at end of day)`,
+          desc: `${linkedPlanSnapshot.typology || linkedPlanSnapshot.phase || 'Work on project'} (Auto-completed at end of day)`,
           productive: true, ts: Date.now()
         });
-        const plan = planEntries.find(p => p.id === timerLinkedPlan?.id);
+        const plan = planEntries.find(p => p.id === linkedPlanSnapshot?.id);
         if (plan) plan.done = true;
       }
 
       resetTimer();
       autoSave();
       renderTimeLog(); renderProjectsBudget(); renderDashboard();
-      endOfDayWarningShown = false;
+      endOfDayWarningShown = true; // V14.2.25: prevent 7:05 summary double-showing
       showNotificationToast('⏹️ Timer Auto-Completed', `${minsToHM(mins)} logged for ${projectName} at 7:00 PM.`, 'warning');
       console.log('⏹️ End-of-day auto-complete fired at 7:00 PM');
 
