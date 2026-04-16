@@ -628,7 +628,13 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       SQUARE Timer
     </span>
-    <span id="timerRunningLabel" style="color:#68d391;font-size:10px;font-weight:700;letter-spacing:0.05em;"></span>
+    <span style="display:flex;align-items:center;gap:8px;">
+      <span id="timerRunningLabel" style="color:#68d391;font-size:10px;font-weight:700;letter-spacing:0.05em;"></span>
+      <button id="pipBtn" title="Float timer over other apps" onclick="openPiP()" style="background:none;border:1px solid #4a5568;border-radius:5px;padding:2px 6px;cursor:pointer;color:#a0aec0;font-size:9px;font-weight:700;letter-spacing:0.04em;display:flex;align-items:center;gap:3px;transition:all 0.15s;" onmouseover="this.style.borderColor='#68d391';this.style.color='#68d391';" onmouseout="this.style.borderColor='#4a5568';this.style.color='#a0aec0';">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 22 2 22 7"/><line x1="12" y1="12" x2="22" y2="2"/></svg>
+        PiP
+      </button>
+    </span>
   </div>
   <div class="timer-body">
     <div class="timer-display" id="timerDisplay">00:00:00</div>
@@ -4662,6 +4668,181 @@ document.addEventListener('input', (e) => {
 console.log('✅ V9 Aggressive Auto-Save initialized');
 console.log('⏰ Auto-save interval: Every 30 seconds');
 console.log('💾 Save on: tab close, tab switch, periodic, manual actions');
+
+// ═══════════════════════════════════════════════════════
+// V14.2.25: Picture-in-Picture floating timer
+// Uses Document Picture-in-Picture API (Chrome 116+)
+// Falls back to canvas PiP for older Chrome
+// ═══════════════════════════════════════════════════════
+let pipWindow = null;
+let pipCanvas = null;
+let pipCtx = null;
+let pipInterval = null;
+let pipVideoEl = null;
+
+async function openPiP() {
+  // Close existing PiP if open
+  if (pipWindow && !pipWindow.closed) {
+    pipWindow.close();
+    pipWindow = null;
+    clearInterval(pipInterval);
+    return;
+  }
+
+  // Try Document PiP API first (Chrome 116+)
+  if ('documentPictureInPicture' in window) {
+    try {
+      pipWindow = await window.documentPictureInPicture.requestWindow({
+        width: 220,
+        height: 160
+      });
+
+      // Write styled content into PiP window
+      pipWindow.document.head.innerHTML = `<style>
+        * { margin:0; padding:0; box-sizing:border-box; font-family: -apple-system, sans-serif; }
+        body { background:#1a202c; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; gap:6px; user-select:none; }
+        #pt { font-size:48px; font-weight:900; color:#68d391; letter-spacing:4px; font-variant-numeric:tabular-nums; line-height:1; }
+        #ps { font-size:10px; font-weight:700; color:#68d391; letter-spacing:0.08em; text-transform:uppercase; }
+        #pp { font-size:11px; color:#90cdf4; background:rgba(66,153,225,0.15); padding:3px 10px; border-radius:5px; max-width:200px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        #pi { font-size:9px; color:#4a5568; margin-top:2px; }
+        .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:#68d391; margin-right:4px; animation: blink 1.5s ease-in-out infinite; }
+        @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.2;} }
+      </style>`;
+      pipWindow.document.body.innerHTML = `
+        <div id="ps"><span class="dot"></span>RECORDING</div>
+        <div id="pt">00:00:00</div>
+        <div id="pp">Loading...</div>
+        <div id="pi">SQUARE · drag to reposition</div>
+      `;
+
+      // Tick updater
+      pipInterval = setInterval(() => {
+        if (!pipWindow || pipWindow.closed) { clearInterval(pipInterval); return; }
+        const timeEl = pipWindow.document.getElementById('pt');
+        const projEl = pipWindow.document.getElementById('pp');
+        const statusEl = pipWindow.document.getElementById('ps');
+        if (!timeEl) return;
+
+        if (timerRunning && timerStartedAt) {
+          const secs = getElapsed(timerStartedAt, timerPausedMs);
+          timeEl.textContent = secsToHMS(secs);
+          timeEl.style.color = '#68d391';
+          if (statusEl) { statusEl.innerHTML = '<span class="dot"></span>RECORDING'; statusEl.style.color = '#68d391'; }
+          if (projEl) projEl.textContent = timerLinkedPlan?.project ? `${timerLinkedPlan.project}${timerLinkedPlan.phase ? ' · ' + timerLinkedPlan.phase.split(' ')[0] : ''}` : 'Unplanned';
+        } else {
+          timeEl.textContent = '⏸ Paused';
+          timeEl.style.color = '#fc8181';
+          timeEl.style.fontSize = '28px';
+          if (statusEl) { statusEl.innerHTML = '⚠ Timer not running'; statusEl.style.color = '#fc8181'; }
+          if (projEl) projEl.textContent = 'Start a task to track time';
+        }
+      }, 1000);
+
+      pipWindow.addEventListener('pagehide', () => {
+        clearInterval(pipInterval);
+        pipWindow = null;
+      });
+
+      // Update PiP button label
+      const btn = document.getElementById('pipBtn');
+      if (btn) { btn.style.borderColor = '#68d391'; btn.style.color = '#68d391'; }
+
+      console.log('✅ Document PiP opened');
+      return;
+    } catch(e) {
+      console.warn('Document PiP failed, trying canvas PiP:', e);
+    }
+  }
+
+  // Fallback: Canvas + Video PiP (works on Chrome < 116)
+  try {
+    if (!('pictureInPictureEnabled' in document)) {
+      alert('Picture-in-Picture is not supported in this browser.\n\nPlease use Chrome 80+ for this feature.');
+      return;
+    }
+
+    // Create offscreen canvas to draw timer
+    pipCanvas = document.createElement('canvas');
+    pipCanvas.width = 440;
+    pipCanvas.height = 320;
+    pipCtx = pipCanvas.getContext('2d');
+
+    // Create video element and stream from canvas
+    pipVideoEl = document.createElement('video');
+    pipVideoEl.srcObject = pipCanvas.captureStream(2); // 2fps is enough
+    pipVideoEl.muted = true;
+    document.body.appendChild(pipVideoEl);
+    await pipVideoEl.play();
+    await pipVideoEl.requestPictureInPicture();
+
+    // Draw loop
+    function drawPiP() {
+      if (!pipCtx) return;
+      const c = pipCtx;
+      const w = pipCanvas.width, h = pipCanvas.height;
+
+      c.fillStyle = '#1a202c';
+      c.fillRect(0, 0, w, h);
+
+      // Border
+      c.strokeStyle = timerRunning ? '#38a169' : '#e53e3e';
+      c.lineWidth = 6;
+      c.strokeRect(3, 3, w-6, h-6);
+
+      if (timerRunning && timerStartedAt) {
+        const secs = getElapsed(timerStartedAt, timerPausedMs);
+        const hms = secsToHMS(secs);
+
+        // Status dot + label
+        c.fillStyle = '#68d391';
+        c.beginPath(); c.arc(30, 50, 7, 0, Math.PI*2); c.fill();
+        c.font = 'bold 22px -apple-system,sans-serif';
+        c.fillStyle = '#68d391';
+        c.fillText('RECORDING', 46, 58);
+
+        // Time
+        c.font = 'bold 96px -apple-system,sans-serif';
+        c.fillStyle = '#68d391';
+        c.textAlign = 'center';
+        c.fillText(hms, w/2, 180);
+
+        // Project
+        c.font = 'bold 22px -apple-system,sans-serif';
+        c.fillStyle = '#90cdf4';
+        const proj = timerLinkedPlan?.project || 'Unplanned';
+        c.fillText(proj, w/2, 230);
+
+        // Footer
+        c.font = '18px -apple-system,sans-serif';
+        c.fillStyle = '#4a5568';
+        c.fillText('SQUARE · drag to reposition', w/2, 290);
+      } else {
+        c.font = 'bold 40px -apple-system,sans-serif';
+        c.fillStyle = '#fc8181';
+        c.textAlign = 'center';
+        c.fillText('⚠ Timer not running', w/2, h/2);
+        c.font = '22px -apple-system,sans-serif';
+        c.fillStyle = '#718096';
+        c.fillText('Start a task to track time', w/2, h/2 + 50);
+      }
+    }
+
+    pipInterval = setInterval(drawPiP, 500);
+    drawPiP();
+
+    pipVideoEl.addEventListener('leavepictureinpicture', () => {
+      clearInterval(pipInterval);
+      if (pipVideoEl) { pipVideoEl.remove(); pipVideoEl = null; }
+      pipCanvas = null; pipCtx = null;
+      console.log('Canvas PiP closed');
+    });
+
+    console.log('✅ Canvas PiP opened (fallback)');
+  } catch(e) {
+    console.error('PiP failed:', e);
+    alert('Could not open Picture-in-Picture.\n\nMake sure you are using Chrome and have interacted with the page first.');
+  }
+}
 
 </script>
 </body>
