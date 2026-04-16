@@ -152,42 +152,55 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .bar-fill{height:6px;border-radius:4px;background:#2b6cb0;}
 
 /* TIMER WIDGET V14.2.25 — tap to switch */
-.timer-widget{position:fixed;bottom:24px;right:24px;background:white;border-radius:20px;padding:0;box-shadow:0 12px 40px rgba(0,0,0,0.14);z-index:400;display:flex;flex-direction:column;width:288px;border:1.5px solid #e2e8f0;user-select:none;}
-.timer-widget.running{border-color:#38a169;box-shadow:0 12px 40px rgba(56,161,105,0.18);}
-.timer-handle{background:#f7fafc;border-radius:18px 18px 0 0;padding:9px 16px;cursor:grab;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:600;color:#a0aec0;letter-spacing:0.04em;}
+.timer-widget{position:fixed;bottom:28px;right:28px;background:#1a202c;border-radius:24px;padding:0;box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:9999;display:flex;flex-direction:column;width:310px;border:2px solid #2d3748;user-select:none;transition:box-shadow 0.4s ease,border-color 0.4s ease;}
+.timer-widget.running{border-color:#38a169;box-shadow:0 20px 60px rgba(56,161,105,0.35),0 0 0 4px rgba(56,161,105,0.12);}
+.timer-widget.running .timer-pulse-ring{opacity:1;}
+/* Pulse ring — outer glow that breathes when running */
+.timer-pulse-ring{position:absolute;inset:-6px;border-radius:28px;border:2px solid rgba(56,161,105,0.5);opacity:0;pointer-events:none;animation:timerPulse 2s ease-in-out infinite;}
+@keyframes timerPulse{0%,100%{transform:scale(1);opacity:0.6;}50%{transform:scale(1.03);opacity:0.15;}}
+/* Idle warning pulse — red when NOT running and logged in */
+.timer-widget.idle-warn{border-color:#e53e3e;box-shadow:0 20px 60px rgba(229,62,62,0.25),0 0 0 4px rgba(229,62,62,0.1);}
+.timer-widget.idle-warn .timer-pulse-ring{border-color:rgba(229,62,62,0.5);opacity:1;animation:timerPulseRed 3s ease-in-out infinite;}
+@keyframes timerPulseRed{0%,100%{transform:scale(1);opacity:0.5;}50%{transform:scale(1.04);opacity:0.1;}}
+.timer-handle{background:#2d3748;border-radius:22px 22px 0 0;padding:10px 18px;cursor:grab;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #4a5568;font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.06em;text-transform:uppercase;}
 .timer-handle:active{cursor:grabbing;}
-.timer-body{padding:16px;display:flex;flex-direction:column;gap:10px;}
-.timer-display{font-size:42px;font-weight:800;font-variant-numeric:tabular-nums;text-align:center;color:#1a202c;letter-spacing:3px;line-height:1;}
-.timer-display.running{color:#276749;}
-.timer-status{font-size:11px;color:#a0aec0;text-align:center;letter-spacing:0.03em;}
-.timer-project{font-size:11px;font-weight:600;color:#2b6cb0;text-align:center;background:#ebf4ff;padding:5px 10px;border-radius:6px;line-height:1.3;}
-.timer-project.unplanned{background:#fff5f5;color:#c53030;}
+.timer-body{padding:18px;display:flex;flex-direction:column;gap:11px;}
+.timer-display{font-size:52px;font-weight:900;font-variant-numeric:tabular-nums;text-align:center;color:#e2e8f0;letter-spacing:4px;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,0.4);}
+.timer-display.running{color:#68d391;text-shadow:0 0 24px rgba(104,211,145,0.4);}
+/* Running blink colon */
+.timer-display.running .tc{animation:colonBlink 1s step-end infinite;}
+@keyframes colonBlink{0%,100%{opacity:1;}50%{opacity:0.2;}}
+.timer-status{font-size:12px;color:#718096;text-align:center;letter-spacing:0.04em;font-weight:500;}
+.timer-status.st-running{color:#68d391;font-weight:700;letter-spacing:0.06em;}
+.timer-status.st-idle{color:#fc8181;font-weight:600;}
+.timer-project{font-size:12px;font-weight:600;color:#90cdf4;text-align:center;background:rgba(66,153,225,0.15);padding:6px 12px;border-radius:8px;line-height:1.4;border:1px solid rgba(66,153,225,0.25);}
+.timer-project.unplanned{background:rgba(245,101,101,0.15);color:#fc8181;border-color:rgba(245,101,101,0.25);}
 
 /* Task switch list */
 .tw-task-list{display:flex;flex-direction:column;gap:5px;}
-.tw-task{width:100%;padding:9px 12px;background:#f7fafc;border:1.5px solid #e2e8f0;border-radius:10px;cursor:pointer;text-align:left;transition:all 0.15s;display:flex;align-items:center;gap:10px;}
-.tw-task:hover{background:#ebf4ff;border-color:#90cdf4;}
-.tw-task.lunch{background:#fafafa;border-style:dashed;}
-.tw-task.lunch:hover{background:#fffaf0;border-color:#f6ad55;}
+.tw-task{width:100%;padding:9px 12px;background:#2d3748;border:1.5px solid #4a5568;border-radius:10px;cursor:pointer;text-align:left;transition:all 0.15s;display:flex;align-items:center;gap:10px;}
+.tw-task:hover{background:#3d4f66;border-color:#63b3ed;}
+.tw-task.lunch{background:#2d3748;border-style:dashed;}
+.tw-task.lunch:hover{background:#3d3728;border-color:#f6ad55;}
 .tw-task-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.tw-task-icon.proj{background:#ebf4ff;color:#2b6cb0;}
-.tw-task-icon.lunch{background:#fef3c7;color:#92400e;}
-.tw-task-icon.unplanned{background:#faf5ff;color:#6b46c1;}
+.tw-task-icon.proj{background:rgba(66,153,225,0.2);color:#90cdf4;}
+.tw-task-icon.lunch{background:rgba(246,173,85,0.2);color:#f6ad55;}
+.tw-task-icon.unplanned{background:rgba(159,122,234,0.2);color:#b794f4;}
 .tw-task-text{flex:1;min-width:0;}
-.tw-task-name{font-size:12px;font-weight:600;color:#1a202c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.tw-task-sub{font-size:10px;color:#718096;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+.tw-task-name{font-size:12px;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tw-task-sub{font-size:10px;color:#a0aec0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
 
 /* Big action buttons */
-.tw-btn-stop{width:100%;padding:13px;background:#1a202c;color:white;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
-.tw-btn-stop:hover{background:#2d3748;}
-.tw-btn-start{width:100%;padding:13px;background:#38a169;color:white;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
+.tw-btn-stop{width:100%;padding:14px;background:#e53e3e;color:white;border:none;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
+.tw-btn-stop:hover{background:#c53030;}
+.tw-btn-start{width:100%;padding:14px;background:#38a169;color:white;border:none;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
 .tw-btn-start:hover{background:#276749;}
-.tw-btn-unplanned{width:100%;padding:9px;background:transparent;color:#718096;border:1.5px dashed #cbd5e0;border-radius:10px;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:6px;}
-.tw-btn-unplanned:hover{border-color:#2b6cb0;color:#2b6cb0;background:#ebf4ff;}
+.tw-btn-unplanned{width:100%;padding:10px;background:transparent;color:#a0aec0;border:1.5px dashed #4a5568;border-radius:12px;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:6px;}
+.tw-btn-unplanned:hover{border-color:#4299e1;color:#90cdf4;background:rgba(66,153,225,0.1);}
 
 /* Progress bar */
-.tw-progress{height:3px;background:#e2e8f0;border-radius:2px;overflow:hidden;}
-.tw-progress-fill{height:3px;background:#38a169;border-radius:2px;transition:width 1s linear;width:0%;}
+.tw-progress{height:4px;background:#2d3748;border-radius:2px;overflow:hidden;}
+.tw-progress-fill{height:4px;background:linear-gradient(90deg,#38a169,#68d391);border-radius:2px;transition:width 1s linear;width:0%;box-shadow:0 0 8px rgba(104,211,145,0.5);}
 
 /* MANAGE */
 .manage-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
@@ -609,12 +622,13 @@ textarea.form-control{min-height:70px;resize:vertical;}
 
 <!-- FLOATING TIMER V14.2.25 — tap to switch -->
 <div class="timer-widget" id="timerWidget" style="display:none;">
+  <div class="timer-pulse-ring" id="timerPulseRing"></div>
   <div class="timer-handle" id="timerHandle">
-    <span style="display:flex;align-items:center;gap:6px;">
+    <span style="display:flex;align-items:center;gap:6px;color:#e2e8f0;">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       SQUARE Timer
     </span>
-    <span id="timerRunningLabel" style="color:#38a169;font-size:10px;"></span>
+    <span id="timerRunningLabel" style="color:#68d391;font-size:10px;font-weight:700;letter-spacing:0.05em;"></span>
   </div>
   <div class="timer-body">
     <div class="timer-display" id="timerDisplay">00:00:00</div>
@@ -1657,6 +1671,11 @@ loadData().then(async () => {
         
         // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
         await restoreTimerState();
+
+        // V14.2.25: Auto-show timer widget on session restore
+        const tw = document.getElementById('timerWidget');
+        if (tw) tw.style.display = 'flex';
+        updateTimerVisualState();
       }
     }
   } catch(e) {
@@ -1713,6 +1732,11 @@ async function doLogin(){
     
     // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
     await restoreTimerState();
+
+    // V14.2.25: Auto-show timer widget on login — always visible
+    const tw = document.getElementById('timerWidget');
+    if (tw) tw.style.display = 'flex';
+    updateTimerVisualState();
   } else {
     err.style.display='block';
     err.textContent='Invalid username or password.';
@@ -3408,8 +3432,34 @@ window.autoSave = function() {
 // FLOATING TIMER
 // ═══════════════════════════════════════════════════════
 document.getElementById('timerNavBtn').addEventListener('click',()=>{
-  const w=document.getElementById('timerWidget'); w.style.display=w.style.display==='none'?'flex':'none';
+  const w=document.getElementById('timerWidget');
+  w.style.display=w.style.display==='none'?'flex':'none';
 });
+
+// V14.2.25: Helper to update timer visual state (running / idle-warn / neutral)
+function updateTimerVisualState() {
+  const w = document.getElementById('timerWidget');
+  const status = document.getElementById('timerStatus');
+  const label = document.getElementById('timerRunningLabel');
+  if (!w) return;
+  if (timerRunning) {
+    w.classList.add('running');
+    w.classList.remove('idle-warn');
+    if (status) { status.textContent = '● RECORDING'; status.className = 'timer-status st-running'; }
+    if (label) label.textContent = '● LIVE';
+  } else if (currentUser) {
+    w.classList.remove('running');
+    w.classList.add('idle-warn');
+    if (status) { status.textContent = '⚠ Timer not running'; status.className = 'timer-status st-idle'; }
+    if (label) label.textContent = '';
+    document.title = 'SQUARE - Office Management';
+  } else {
+    w.classList.remove('running','idle-warn');
+    if (status) { status.textContent = 'Ready to track'; status.className = 'timer-status'; }
+    if (label) label.textContent = '';
+    document.title = 'SQUARE - Office Management';
+  }
+}
 
 // Draggable
 (function(){
@@ -3623,9 +3673,14 @@ function startTimerWithPlan(plan) {
   document.getElementById('timerNavLabel').textContent = '⏱ Running...';
   timerInterval = setInterval(() => {
     const secs = getElapsed(timerStartedAt, timerPausedMs);
-    document.getElementById('timerDisplay').textContent = secsToHMS(secs);
+    const hms = secsToHMS(secs);
+    document.getElementById('timerDisplay').textContent = hms;
     document.getElementById('twProgressFill').style.width = Math.min((secs/(8*3600))*100,100)+'%';
+    // V14.2.25: Live tab title — visible from any other tab or software
+    const proj = timerLinkedPlan?.project || 'Timer';
+    document.title = `⏱ ${hms} · ${proj}`;
   }, 1000);
+  updateTimerVisualState(); // V14.2.25
   renderWidgetTaskList(plan.id);
   saveActiveTimerToFirebase();
 }
@@ -3676,7 +3731,10 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
     const secs=getElapsed(timerStartedAt,timerPausedMs);
     document.getElementById('timerDisplay').textContent=secsToHMS(secs);
     document.getElementById('twProgressFill').style.width=Math.min((secs/(8*3600))*100,100)+'%';
+    const proj = timerLinkedPlan?.project || 'Timer';
+    document.title = `⏱ ${secsToHMS(secs)} · ${proj}`;
   },1000);
+  updateTimerVisualState(); // V14.2.25
   renderWidgetTaskList(timerLinkedPlan.id);
   saveActiveTimerToFirebase();
 });
@@ -3986,9 +4044,12 @@ async function restoreTimerState() {
 
     document.getElementById('timerNavLabel').textContent = '⏱ Running...';
     timerInterval = setInterval(() => {
-      document.getElementById('timerDisplay').textContent = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
+      const secs = getElapsed(timerStartedAt, timerPausedMs);
+      document.getElementById('timerDisplay').textContent = secsToHMS(secs);
+      const proj = timerLinkedPlan?.project || 'Timer';
+      document.title = `⏱ ${secsToHMS(secs)} · ${proj}`;
     }, 1000);
-
+    updateTimerVisualState(); // V14.2.25
     console.log('✅ Timer restored from localStorage');
   } catch(e) {
     console.error('Error restoring timer:', e);
@@ -4191,6 +4252,7 @@ async function resetTimer() {
   window.lastSessionStartedAt = null;
   if (timerInterval) clearInterval(timerInterval);
   localStorage.removeItem('timerState');
+  document.title = 'SQUARE - Office Management'; // V14.2.25: restore title on stop
 
   const display = document.getElementById('timerDisplay');
   if (display) { display.textContent = '00:00:00'; display.classList.remove('running'); }
@@ -4204,6 +4266,7 @@ async function resetTimer() {
   if (pausedDiv) pausedDiv.style.display = 'none';
   const widget = document.getElementById('timerWidget');
   if (widget) widget.classList.remove('running');
+  updateTimerVisualState(); // V14.2.25 — flip to idle-warn
   const twSection = document.getElementById('twTaskSection');
   if (twSection) twSection.style.display = 'none';
   const twUnpl = document.getElementById('twUnplannedBtn');
