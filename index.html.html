@@ -596,7 +596,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.27 Production:</strong> EOD cutoff extended — (1) Warning modal now fires at 7:30 PM (was 6:30 PM). (2) Force auto-complete now fires at 8:00 PM (was 7:00 PM). (3) Stale cleanup hard cap extended to 8:00 PM. Accommodates staff who work past 7PM. All V14.2.26 stability fixes retained (save lock, toast notifications, interval guards).
+            📌 <strong>V14.2.28 Production:</strong> Tab-hidden auto-pause DISABLED. Architects working in AutoCAD/Photoshop with SQUARE tab backgrounded were having their timers auto-stopped after 30 minutes. Timers now run uninterrupted until manually stopped or the 8PM EOD force-complete fires. All V14.2.27 EOD changes retained (7:30PM warning, 8PM auto-complete).
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1539,39 +1539,21 @@ window.autoSave = function() {
 // Previous version paused when mouse/keyboard were idle in the SQUARE tab
 // but architects work in AutoCAD, Revit etc — their browser tab looks idle
 // New logic: only auto-pause if the tab has been hidden (backgrounded) for 30+ minutes
+// V14.2.28: Tab-hidden auto-pause DISABLED
+// Architects routinely work in AutoCAD, Revit, Photoshop with SQUARE tab backgrounded
+// for hours at a time. The 30-minute threshold was cutting off real work sessions
+// (confirmed via Snaha's PiP showing "Paused" while she was actively in AutoCAD).
+// EOD auto-complete at 8PM + stale cleanup handle any legitimately abandoned timers.
 function startInactivityMonitor() {
-  let tabHiddenAt = null;
-
+  // Visibility tracking kept for potential future use, but no auto-pause
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      tabHiddenAt = Date.now(); // Tab just went to background
+      console.log('📱 Tab hidden — timer continues running');
     } else {
-      tabHiddenAt = null; // Tab came back to foreground — reset
+      console.log('📱 Tab visible again');
     }
   });
-
-  // Check every minute
-  if (inactivityChecker) clearInterval(inactivityChecker);
-  inactivityChecker = setInterval(() => {
-    if (!timerRunning) return;
-    if (!document.hidden) return; // Tab is visible — user is here, don't pause
-    if (!tabHiddenAt) return;
-
-    const hiddenDuration = Date.now() - tabHiddenAt;
-    const THRESHOLD = 30 * 60 * 1000; // 30 minutes hidden
-
-    if (hiddenDuration > THRESHOLD) {
-      console.log('⏸️ Auto-saving timer — tab hidden for 30+ minutes');
-      if (timerRunning && timerLinkedPlan) {
-        // V14.2.25: null-guard — widget may not be in DOM yet
-        document.getElementById('timerCompleteBtn')?.click();
-        tabHiddenAt = null;
-        setTimeout(() => {
-          showNotificationToast('⏹️ Timer Auto-Saved', 'SQUARE was in the background for 30 minutes. Time saved — start tracking again when ready.', 'warning');
-        }, 500);
-      }
-    }
-  }, 60000);
+  console.log('✅ Inactivity monitor: tab-hidden auto-pause disabled (V14.2.28)');
 }
 
 
