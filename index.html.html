@@ -596,7 +596,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.25 Production:</strong> (1) EOD auto-complete guard — prevents duplicate entry if timer already saved between 7PM check window. (2) Dashboard refresh null-guard — won't crash if dashAnalytics element missing. (3) Stale cleanup dedup guard — never writes two auto-completed entries for same user+project+date. (4) timerCompleteBtn null-guard — safe even if widget not in DOM. (5) EOD summary shows correct today-only logs. (6) All V14.2.24 fixes retained.
+            📌 <strong>V14.2.26 Production:</strong> Critical stability fixes — (1) Hourly stale cleanup no longer compounds across refreshes (was creating multiple intervals per session). (2) Timer interval cleared before re-creation in all paths (start/resume/restore) — prevents ghost ticks and double display updates. (3) Save errors no longer block the app with modal dialogs — replaced `alert`/`confirm` with silent toast notifications. (4) Save lock added — concurrent saveData calls no longer race. (5) All V14.2.25 fixes retained (PiP, tab title, visual state, bug guards).
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1224,26 +1224,32 @@ function showSaveIndicator() {
 async function saveData() {
   if (!dataLoaded) {
     console.error('⏸️ SAVE BLOCKED - Data not loaded yet!');
-    alert('⚠️ Cannot save: Data is still loading. Please wait a moment and try again.');
+    // V14.2.26: No alert during autoSave — silent skip
     return;
   }
-  
+
+  // V14.2.26: Save lock — prevents concurrent saveData calls from racing
+  if (window._saveInProgress) {
+    console.log('⏭️ Save already in progress — skipping duplicate call');
+    return;
+  }
+  window._saveInProgress = true;
+
+  try {
   // V11: Check connection before saving
   if (!navigator.onLine) {
-    console.error('🔴 SAVE BLOCKED - Browser is offline!');
-    alert('❌ CANNOT SAVE - YOU ARE OFFLINE!\n\nYour internet connection is down.\nChanges will NOT be saved.\n\nReconnect to the internet and try again.');
+    console.warn('🔴 SAVE SKIPPED - Browser is offline (will retry on next auto-save tick)');
+    // V14.2.26: Silent skip — no blocking alert. Periodic save will retry.
+    showNotificationToast('⚠ Offline', 'Changes will save when connection returns', 'warning');
     return;
   }
-  
+
   // Test Firebase connection
   const firebaseOnline = await checkFirebaseConnection();
   if (!firebaseOnline) {
-    console.error('🔴 SAVE BLOCKED - Firebase unreachable!');
-    const retry = confirm('❌ CANNOT REACH FIREBASE!\n\nYour changes cannot be saved right now.\n\nClick OK to queue this save and retry when connection returns.\nClick Cancel to abort.');
-    if (retry) {
-      saveQueue.push({ timestamp: new Date().toISOString(), data: 'pending' });
-      alert('📤 Save queued. Will automatically save when connection returns.');
-    }
+    console.warn('🔴 SAVE SKIPPED - Firebase unreachable (will retry)');
+    // V14.2.26: Silent skip — no confirm dialog. Keep hasUnsavedChanges = true so next tick retries.
+    showNotificationToast('⚠ Connection issue', 'Will retry automatically', 'warning');
     return;
   }
   
@@ -1384,7 +1390,12 @@ async function saveData() {
     showSaveIndicator();
   } catch(e) {
     console.error('❌ Save error:', e.message);
-    alert(`❌ Failed to save data to cloud!\n\nError: ${e.message}\n\nYour changes may be lost. Please try again or contact support.`);
+    // V14.2.26: Silent failure + toast — no blocking alert
+    showNotificationToast('⚠ Save failed', 'Will retry automatically. Your work is preserved locally.', 'warning');
+  }
+  } finally {
+    // V14.2.26: Always release the save lock
+    window._saveInProgress = false;
   }
 }
 
@@ -1666,8 +1677,12 @@ loadData().then(async () => {
         // V14.2.5: Start end-of-day monitor
         startEndOfDayMonitor();
 
-        // V14.2.24: Hourly stale cleanup — covers weekend timers
-        setInterval(() => { if (currentUser) cleanupStaleTimers(); }, 60 * 60 * 1000);
+        // V14.2.26: Hourly stale cleanup — guarded against compound intervals on re-login
+        if (!window._staleCleanupInterval) {
+          window._staleCleanupInterval = setInterval(() => {
+            if (currentUser) cleanupStaleTimers();
+          }, 60 * 60 * 1000);
+        }
 
         // V14.2.9: Clean up any stale timers from previous day
         await cleanupStaleTimers();
@@ -1724,11 +1739,12 @@ async function doLogin(){
     // V14.2.24: Start end-of-day monitor
     startEndOfDayMonitor();
 
-    // V14.2.24: Also run stale cleanup every hour (not just on login)
-    // Prevents weekend stale timers from surviving until Monday
-    setInterval(() => {
-      if (currentUser) cleanupStaleTimers();
-    }, 60 * 60 * 1000); // every hour
+    // V14.2.26: Hourly stale cleanup — guarded against compound intervals
+    if (!window._staleCleanupInterval) {
+      window._staleCleanupInterval = setInterval(() => {
+        if (currentUser) cleanupStaleTimers();
+      }, 60 * 60 * 1000);
+    }
 
     // V14.2.9: Clean up any stale timers from previous day
     await cleanupStaleTimers();
@@ -3656,6 +3672,8 @@ function switchTaskTo(newPlan) {
 
 // Core function: start the timer with a linked plan
 function startTimerWithPlan(plan) {
+  // V14.2.26: Clear any existing interval first — prevents compound ticks
+  if (timerInterval) clearInterval(timerInterval);
   timerLinkedPlan = plan;
   timerStartedAt  = Date.now();
   timerPausedMs   = 0;
@@ -3723,6 +3741,8 @@ document.getElementById('twUnplannedBtn').addEventListener('click', () => {
 // V14.2.24: Resume Button
 document.getElementById('timerResumeBtn').addEventListener('click',()=>{
   if(!timerLinkedPlan){ alert('No task to resume!'); return; }
+  // V14.2.26: Clear any existing interval first
+  if (timerInterval) clearInterval(timerInterval);
   timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
   window.lastSessionStartedAt=Date.now();
   localStorage.setItem('timerState',JSON.stringify({startedAt:timerStartedAt,lastSessionStartedAt:window.lastSessionStartedAt,pausedMs:0,running:true,linkedPlan:timerLinkedPlan}));
@@ -3760,6 +3780,7 @@ document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>
   if(sessionSecs < 30){
     alert('Timer must run for at least 1 minute');
     timerRunning = true;
+    if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(()=>{ document.getElementById('timerDisplay').textContent=secsToHMS(getElapsed(timerStartedAt,timerPausedMs)); },1000);
     return;
   }
@@ -3997,6 +4018,8 @@ let orphanSnoozeTimeout = null;
 
 async function restoreTimerState() {
   try {
+    // V14.2.26: Clear any existing interval first — prevents compound ticks on refresh
+    if (timerInterval) clearInterval(timerInterval);
     const saved = localStorage.getItem('timerState');
     if (!saved) return;
     const state = JSON.parse(saved);
