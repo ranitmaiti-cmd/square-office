@@ -596,7 +596,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.26 Production:</strong> Critical stability fixes — (1) Hourly stale cleanup no longer compounds across refreshes (was creating multiple intervals per session). (2) Timer interval cleared before re-creation in all paths (start/resume/restore) — prevents ghost ticks and double display updates. (3) Save errors no longer block the app with modal dialogs — replaced `alert`/`confirm` with silent toast notifications. (4) Save lock added — concurrent saveData calls no longer race. (5) All V14.2.25 fixes retained (PiP, tab title, visual state, bug guards).
+            📌 <strong>V14.2.27 Production:</strong> EOD cutoff extended — (1) Warning modal now fires at 7:30 PM (was 6:30 PM). (2) Force auto-complete now fires at 8:00 PM (was 7:00 PM). (3) Stale cleanup hard cap extended to 8:00 PM. Accommodates staff who work past 7PM. All V14.2.26 stability fixes retained (save lock, toast notifications, interval guards).
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -897,7 +897,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
     <div class="modal-head"><h3>🌆 End of Day Reminder</h3></div>
     <div style="background:#fff5f5;border:2px solid #feb2b2;border-radius:10px;padding:14px;margin-bottom:16px;">
       <div style="font-size:13px;font-weight:700;color:#9b2c2c;margin-bottom:4px;">⚠️ You have an active timer!</div>
-      <div style="font-size:13px;color:#4a5568;">It's 6:30 PM. Please complete your timer before leaving — it will be auto-completed at 7:00 PM.</div>
+      <div style="font-size:13px;color:#4a5568;">It's 7:30 PM. Please complete your timer before leaving — it will be auto-completed at 8:00 PM.</div>
     </div>
     <div id="endOfDayTimerInfo" style="font-size:13px;color:#2d3748;margin-bottom:16px;background:#f7fafc;border-radius:8px;padding:10px;"></div>
     <div style="display:flex;gap:8px;">
@@ -907,7 +907,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div>
 </div>
 
-<!-- V14.2.24: EOD Daily Summary — confirmation screen at 7PM -->
+<!-- V14.2.27: EOD Daily Summary — confirmation screen at 8PM -->
 <div class="modal-backdrop" id="eodSummaryModal" style="z-index:610;">
   <div class="modal-box" style="max-width:500px;">
     <div class="modal-head">
@@ -3842,7 +3842,7 @@ document.getElementById('timerCompletePausedBtn').addEventListener('click', asyn
 // someone had paused+logged multiple sessions and left the timer running.
 //
 // New behaviour:
-//  1. Find the timer's session window: startTime → 19:00 that day (hard EOD cap)
+//  1. Find the timer's session window: startTime → 20:00 that day (hard EOD cap)
 //  2. Sum all logs already recorded for that user+project+date that fall
 //     within that window (their real pause entries)
 //  3. Gap = window duration − already logged
@@ -3892,14 +3892,15 @@ async function cleanupStaleTimers() {
         continue;
       }
 
-      // Session window: timer start → 19:00 that day (hard EOD cap)
+      // Session window: timer start → 20:00 that day (hard EOD cap)
+      // V14.2.27: extended from 19:00 to 20:00
       // This prevents multi-day elapsed time from inflating a single entry
       const timerDateObj  = new Date(startTime);
       const eodMs         = new Date(
         timerDateObj.getFullYear(),
         timerDateObj.getMonth(),
         timerDateObj.getDate(),
-        19, 0, 0  // 7:00 PM hard cap
+        20, 0, 0  // 8:00 PM hard cap
       ).getTime();
       const windowStartMs = startTime;
       const windowEndMs   = Math.min(eodMs, data.updatedAt || eodMs); // respect last known activity
@@ -4191,7 +4192,8 @@ document.getElementById('orphanDiscardBtn').addEventListener('click', async () =
 });
 
 // ═══════════════════════════════════════════════════════
-// V14.2.5: End-of-Day Auto-Complete (6:30 PM warning, 7:00 PM force)
+// V14.2.27: End-of-Day Auto-Complete (7:30 PM warning, 8:00 PM force)
+// Extended by 1 hour from original 6:30/7PM to accommodate staff working late
 // ═══════════════════════════════════════════════════════
 let endOfDayWarningShown = false;
 let endOfDayInterval = null;
@@ -4204,8 +4206,8 @@ function startEndOfDayMonitor() {
     const hour = now.getHours();
     const min  = now.getMinutes();
 
-    // 6:30 PM warning — V14.2.23 FIX: was incorrectly checking hour===20 (8PM)
-    if (hour === 18 && min >= 30 && min < 35 && !endOfDayWarningShown) {
+    // 7:30 PM warning — V14.2.27: extended from 6:30 PM
+    if (hour === 19 && min >= 30 && min < 35 && !endOfDayWarningShown) {
       endOfDayWarningShown = true;
       const projectName = timerLinkedPlan?.project || 'Unplanned';
       const elapsed = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
@@ -4213,27 +4215,24 @@ function startEndOfDayMonitor() {
         `📁 <strong>${projectName}</strong><br>⏱ Running for: <strong>${elapsed}</strong>`;
       document.getElementById('endOfDayCompleteBtn').onclick = () => {
         closeModal('endOfDayModal');
-        // V14.2.25: null-guard
         document.getElementById('timerCompleteBtn')?.click();
       };
       openModal('endOfDayModal');
     }
 
-    // 7:00 PM force auto-complete — V14.2.23 FIX: was incorrectly firing at 8:30PM
-    // V14.2.25: Double-fire guard — timerStartedAt cleared immediately so a second
+    // 8:00 PM force auto-complete — V14.2.27: extended from 7PM
+    // Double-fire guard — timerStartedAt cleared immediately so a second
     // tick in the same minute cannot re-enter this block.
-    if (hour === 19 && min === 0 && timerRunning && timerStartedAt) {
+    if (hour === 20 && min === 0 && timerRunning && timerStartedAt) {
       closeModal('endOfDayModal');
-      // Capture values before resetting state
       const autoNow = Date.now();
       const autoSecs = Math.floor((autoNow - timerStartedAt) / 1000);
       const mins = Math.max(1, Math.floor(autoSecs / 60));
       const projectName = timerLinkedPlan?.project || 'Unplanned';
       const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-      const clockEnd = '19:00';
-      const linkedPlanSnapshot = timerLinkedPlan; // snapshot before resetTimer clears it
+      const clockEnd = '20:00';
+      const linkedPlanSnapshot = timerLinkedPlan;
 
-      // V14.2.25: Clear timerStartedAt immediately — prevents second tick re-entering
       timerStartedAt = null;
       timerRunning = false;
 
@@ -4254,24 +4253,23 @@ function startEndOfDayMonitor() {
       resetTimer();
       autoSave();
       renderTimeLog(); renderProjectsBudget(); renderDashboard();
-      endOfDayWarningShown = true; // V14.2.25: prevent 7:05 summary double-showing
-      showNotificationToast('⏹️ Timer Auto-Completed', `${minsToHM(mins)} logged for ${projectName} at 7:00 PM.`, 'warning');
-      console.log('⏹️ End-of-day auto-complete fired at 7:00 PM');
+      endOfDayWarningShown = true;
+      showNotificationToast('⏹️ Timer Auto-Completed', `${minsToHM(mins)} logged for ${projectName} at 8:00 PM.`, 'warning');
+      console.log('⏹️ End-of-day auto-complete fired at 8:00 PM');
 
-      // V14.2.24: Show EOD summary after auto-complete
       setTimeout(() => showEodSummary(), 1000);
     }
 
-    // 7:05 PM — show EOD summary even if no timer was running
-    if (hour === 19 && min === 5 && !endOfDayWarningShown) {
-      endOfDayWarningShown = true; // prevent re-showing
+    // 8:05 PM — show EOD summary even if no timer was running
+    if (hour === 20 && min === 5 && !endOfDayWarningShown) {
+      endOfDayWarningShown = true;
       showEodSummary();
     }
 
     // Reset flag at midnight for next day
     if (hour === 0 && min === 0) endOfDayWarningShown = false;
 
-  }, 60000); // Check every minute
+  }, 60000);
 }
 
 async function resetTimer() {
