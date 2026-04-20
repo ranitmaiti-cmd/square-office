@@ -596,7 +596,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.28 Production:</strong> Tab-hidden auto-pause DISABLED. Architects working in AutoCAD/Photoshop with SQUARE tab backgrounded were having their timers auto-stopped after 30 minutes. Timers now run uninterrupted until manually stopped or the 8PM EOD force-complete fires. All V14.2.27 EOD changes retained (7:30PM warning, 8PM auto-complete).
+            📌 <strong>V14.2.29 Production:</strong> PiP improvements — (1) "Paused" wording replaced with "Not tracking — no task running" so staff understand they need to start a task themselves, not that system stopped them. (2) Auto-reopen PiP window if it closes unexpectedly while a timer is still running (2s delay, only if user had explicitly opened PiP). (3) PiP button always visible with clear active/inactive state. All V14.2.28 fixes retained (tab-hidden auto-pause disabled, 8PM EOD).
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -630,8 +630,8 @@ textarea.form-control{min-height:70px;resize:vertical;}
     </span>
     <span style="display:flex;align-items:center;gap:8px;">
       <span id="timerRunningLabel" style="color:#68d391;font-size:10px;font-weight:700;letter-spacing:0.05em;"></span>
-      <button id="pipBtn" title="Float timer over other apps" onclick="openPiP()" style="background:none;border:1px solid #4a5568;border-radius:5px;padding:2px 6px;cursor:pointer;color:#a0aec0;font-size:9px;font-weight:700;letter-spacing:0.04em;display:flex;align-items:center;gap:3px;transition:all 0.15s;" onmouseover="this.style.borderColor='#68d391';this.style.color='#68d391';" onmouseout="this.style.borderColor='#4a5568';this.style.color='#a0aec0';">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 22 2 22 7"/><line x1="12" y1="12" x2="22" y2="2"/></svg>
+      <button id="pipBtn" title="Open floating timer window (works over any app)" onclick="openPiP()" style="background:none;border:1px solid #4a5568;border-radius:5px;padding:3px 8px;cursor:pointer;color:#a0aec0;font-size:10px;font-weight:700;letter-spacing:0.04em;display:flex;align-items:center;gap:4px;transition:all 0.15s;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 22 2 22 7"/><line x1="12" y1="12" x2="22" y2="2"/></svg>
         PiP
       </button>
     </span>
@@ -4682,15 +4682,48 @@ let pipCanvas = null;
 let pipCtx = null;
 let pipInterval = null;
 let pipVideoEl = null;
+// V14.2.29: Auto-reopen tracking
+let pipUserWants = false; // true once user opens PiP; stays true until user explicitly closes
+let pipReopenTimeout = null;
+
+// V14.2.29: Update PiP button visual state based on whether PiP is open
+function updatePipButton() {
+  const btn = document.getElementById('pipBtn');
+  if (!btn) return;
+  const pipOpen = (pipWindow && !pipWindow.closed) || (pipVideoEl && document.pictureInPictureElement === pipVideoEl);
+  if (pipOpen) {
+    btn.style.borderColor = '#68d391';
+    btn.style.color = '#68d391';
+    btn.style.background = 'rgba(104,211,145,0.08)';
+    btn.title = 'Close floating window';
+  } else {
+    btn.style.borderColor = '#4a5568';
+    btn.style.color = '#a0aec0';
+    btn.style.background = 'none';
+    btn.title = 'Open floating timer window (works over any app)';
+  }
+}
 
 async function openPiP() {
-  // Close existing PiP if open
+  // V14.2.29: If already open, user wants to close — set flag to prevent auto-reopen
   if (pipWindow && !pipWindow.closed) {
+    pipUserWants = false;
     pipWindow.close();
     pipWindow = null;
     clearInterval(pipInterval);
+    updatePipButton();
     return;
   }
+
+  // Also handle canvas PiP close
+  if (pipVideoEl && document.pictureInPictureElement === pipVideoEl) {
+    pipUserWants = false;
+    await document.exitPictureInPicture().catch(()=>{});
+    return;
+  }
+
+  // V14.2.29: User is opening — set flag so watchdog reopens on unexpected close
+  pipUserWants = true;
 
   // Try Document PiP API first (Chrome 116+)
   if ('documentPictureInPicture' in window) {
@@ -4733,22 +4766,32 @@ async function openPiP() {
           if (statusEl) { statusEl.innerHTML = '<span class="dot"></span>RECORDING'; statusEl.style.color = '#68d391'; }
           if (projEl) projEl.textContent = timerLinkedPlan?.project ? `${timerLinkedPlan.project}${timerLinkedPlan.phase ? ' · ' + timerLinkedPlan.phase.split(' ')[0] : ''}` : 'Unplanned';
         } else {
-          timeEl.textContent = '⏸ Paused';
+          timeEl.textContent = 'Not tracking';
           timeEl.style.color = '#fc8181';
-          timeEl.style.fontSize = '28px';
-          if (statusEl) { statusEl.innerHTML = '⚠ Timer not running'; statusEl.style.color = '#fc8181'; }
-          if (projEl) projEl.textContent = 'Start a task to track time';
+          timeEl.style.fontSize = '26px';
+          if (statusEl) { statusEl.innerHTML = '● NO TASK RUNNING'; statusEl.style.color = '#fc8181'; }
+          if (projEl) projEl.textContent = 'Click SQUARE tab to start a task';
         }
       }, 1000);
 
       pipWindow.addEventListener('pagehide', () => {
         clearInterval(pipInterval);
         pipWindow = null;
+        updatePipButton();
+        // V14.2.29: If user didn't close it intentionally, auto-reopen after 2s
+        if (pipUserWants && timerRunning) {
+          console.log('🔄 PiP closed unexpectedly — auto-reopening in 2s');
+          if (pipReopenTimeout) clearTimeout(pipReopenTimeout);
+          pipReopenTimeout = setTimeout(() => {
+            if (pipUserWants && timerRunning && !pipWindow) {
+              openPiP();
+            }
+          }, 2000);
+        }
       });
 
-      // Update PiP button label
-      const btn = document.getElementById('pipBtn');
-      if (btn) { btn.style.borderColor = '#68d391'; btn.style.color = '#68d391'; }
+      // V14.2.29: Update PiP button state
+      updatePipButton();
 
       console.log('✅ Document PiP opened');
       return;
@@ -4820,13 +4863,15 @@ async function openPiP() {
         c.fillStyle = '#4a5568';
         c.fillText('SQUARE · drag to reposition', w/2, 290);
       } else {
-        c.font = 'bold 40px -apple-system,sans-serif';
+        c.font = 'bold 36px -apple-system,sans-serif';
         c.fillStyle = '#fc8181';
         c.textAlign = 'center';
-        c.fillText('⚠ Timer not running', w/2, h/2);
-        c.font = '22px -apple-system,sans-serif';
+        c.fillText('Not tracking', w/2, h/2 - 10);
+        c.font = 'bold 18px -apple-system,sans-serif';
+        c.fillText('● NO TASK RUNNING', w/2, h/2 + 28);
+        c.font = '20px -apple-system,sans-serif';
         c.fillStyle = '#718096';
-        c.fillText('Start a task to track time', w/2, h/2 + 50);
+        c.fillText('Click SQUARE tab to start a task', w/2, h/2 + 68);
       }
     }
 
@@ -4837,7 +4882,18 @@ async function openPiP() {
       clearInterval(pipInterval);
       if (pipVideoEl) { pipVideoEl.remove(); pipVideoEl = null; }
       pipCanvas = null; pipCtx = null;
+      updatePipButton();
       console.log('Canvas PiP closed');
+      // V14.2.29: Auto-reopen on unexpected close
+      if (pipUserWants && timerRunning) {
+        console.log('🔄 PiP closed unexpectedly — auto-reopening in 2s');
+        if (pipReopenTimeout) clearTimeout(pipReopenTimeout);
+        pipReopenTimeout = setTimeout(() => {
+          if (pipUserWants && timerRunning && !pipVideoEl) {
+            openPiP();
+          }
+        }, 2000);
+      }
     });
 
     console.log('✅ Canvas PiP opened (fallback)');
