@@ -7,63 +7,63 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%232b6cb0'/%3E%3Ctext x='50' y='70' font-family='Arial,sans-serif' font-size='60' font-weight='bold' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f4f8;color:#2d3748;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#F7F5F2;color:#3D332A;}
 
 /* LOGIN */
-.login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#1a365d,#2b6cb0);}
+.login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#3D332A,#A96E35);}
 .login-card{background:white;padding:40px;border-radius:16px;width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.3);}
 .login-logo{text-align:center;margin-bottom:30px;}
-.login-logo h1{font-size:32px;font-weight:800;color:#2b6cb0;letter-spacing:4px;}
-.login-logo p{color:#718096;font-size:14px;margin-top:4px;}
-.login-error{background:#fed7d7;color:#9b2c2c;padding:10px;border-radius:6px;margin-bottom:16px;font-size:13px;}
+.login-logo h1{font-size:32px;font-weight:800;color:#A96E35;letter-spacing:4px;}
+.login-logo p{color:#8A7E74;font-size:14px;margin-top:4px;}
+.login-error{background:#F5E0DC;color:#7A2E28;padding:10px;border-radius:6px;margin-bottom:16px;font-size:13px;}
 
 /* LAYOUT */
 .app{display:flex;flex-direction:column;min-height:100vh;}
 .topbar{background:white;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.08);position:sticky;top:0;z-index:100;}
-.app-logo{font-size:20px;font-weight:800;color:#2b6cb0;letter-spacing:3px;}
-.user-badge{background:#ebf4ff;color:#2b6cb0;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;}
-.admin-badge{background:#faf5ff;color:#6b46c1;padding:3px 8px;border-radius:10px;font-size:11px;font-weight:600;margin-left:6px;}
+.app-logo{font-size:20px;font-weight:800;color:#A96E35;letter-spacing:3px;}
+.user-badge{background:#F0E6D6;color:#A96E35;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;}
+.admin-badge{background:#F5EFE8;color:#6B5A4E;padding:3px 8px;border-radius:10px;font-size:11px;font-weight:600;margin-left:6px;}
 .main{display:flex;flex:1;}
 .sidebar{width:220px;background:white;padding:16px 0;box-shadow:2px 0 8px rgba(0,0,0,0.05);flex-shrink:0;}
-.nav-section{padding:6px 20px 4px;font-size:10px;font-weight:700;text-transform:uppercase;color:#a0aec0;letter-spacing:1px;}
-.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;cursor:pointer;font-size:13px;font-weight:500;color:#4a5568;transition:all 0.2s;border-left:3px solid transparent;}
-.nav-item:hover{background:#f7fafc;color:#2b6cb0;}
-.nav-item.active{background:#ebf4ff;color:#2b6cb0;border-left-color:#2b6cb0;font-weight:600;}
-.nav-icon{font-size:15px;width:20px;text-align:center;}
-.nav-badge{margin-left:auto;background:#e53e3e;color:white;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;}
+.nav-section{padding:6px 20px 4px;font-size:10px;font-weight:700;text-transform:uppercase;color:#B0A89E;letter-spacing:1px;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;cursor:pointer;font-size:13px;font-weight:500;color:#5C4F42;transition:all 0.2s;border-left:3px solid transparent;}
+.nav-item:hover{background:#EDE9E3;color:#A96E35;}
+.nav-item.active{background:#F0E6D6;color:#A96E35;border-left-color:#A96E35;font-weight:600;}
+.nav-icon{font-size:14px;width:20px;text-align:center;color:#8A7E74;flex-shrink:0;}
+.nav-badge{margin-left:auto;background:#C0554A;color:white;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;}
 .content{flex:1;padding:24px;overflow-y:auto;max-height:calc(100vh - 60px);}
 .page{display:none;}.page.active{display:block;}
 
 /* FORMS */
 .form-group{margin-bottom:14px;}
-.form-label{display:block;margin-bottom:5px;font-weight:500;font-size:13px;color:#4a5568;}
-.form-control{width:100%;padding:9px 12px;border:2px solid #e2e8f0;border-radius:8px;font-size:13px;transition:border 0.2s;background:white;}
-.form-control:focus{outline:none;border-color:#2b6cb0;}
+.form-label{display:block;margin-bottom:5px;font-weight:500;font-size:13px;color:#5C4F42;}
+.form-control{width:100%;padding:9px 12px;border:2px solid #E0D8CE;border-radius:8px;font-size:13px;transition:border 0.2s;background:white;}
+.form-control:focus{outline:none;border-color:#A96E35;}
 textarea.form-control{min-height:70px;resize:vertical;}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .form-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
 
 /* BUTTONS */
 .btn{padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.2s;}
-.btn-primary{background:#2b6cb0;color:white;}.btn-primary:hover{background:#2c5282;}
-.btn-success{background:#38a169;color:white;}.btn-success:hover{background:#276749;}
-.btn-danger{background:#e53e3e;color:white;}.btn-danger:hover{background:#9b2c2c;}
-.btn-warning{background:#d69e2e;color:white;}.btn-warning:hover{background:#b7791f;}
-.btn-ghost{background:#edf2f7;color:#4a5568;}.btn-ghost:hover{background:#e2e8f0;}
+.btn-primary{background:#A96E35;color:white;}.btn-primary:hover{background:#8A5828;}
+.btn-success{background:#6E8F52;color:white;}.btn-success:hover{background:#3D5C28;}
+.btn-danger{background:#C0554A;color:white;}.btn-danger:hover{background:#7A2E28;}
+.btn-warning{background:#C4874A;color:white;}.btn-warning:hover{background:#A96E35;}
+.btn-ghost{background:#E8E3DC;color:#5C4F42;}.btn-ghost:hover{background:#E0D8CE;}
 .btn-sm{padding:5px 11px;font-size:12px;}
 .btn-block{width:100%;padding:12px;font-size:14px;}
 
 /* CARDS */
 .card{background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:16px;}
-.card-title{font-size:15px;font-weight:700;color:#1a202c;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.card-title{font-size:15px;font-weight:700;color:#2A201A;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
 .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
 .page-title{font-size:20px;font-weight:700;margin-bottom:20px;}
 
 /* BADGES */
 .badge{display:inline-block;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700;text-transform:uppercase;}
-.badge-pending{background:#feebc8;color:#c05621;}.badge-approved{background:#c6f6d5;color:#276749;}.badge-rejected{background:#fed7d7;color:#9b2c2c;}
-.badge-planned{background:#ebf4ff;color:#2b6cb0;}.badge-emergency{background:#fff5f5;color:#e53e3e;}
-.badge-done{background:#f0fff4;color:#276749;}
+.badge-pending{background:#F5ECD8;color:#8A5828;}.badge-approved{background:#DCE8CC;color:#3D5C28;}.badge-rejected{background:#F5E0DC;color:#7A2E28;}
+.badge-planned{background:#F0E6D6;color:#A96E35;}.badge-emergency{background:#FBF0EE;color:#C0554A;}
+.badge-done{background:#EDF2E6;color:#3D5C28;}
 
 /* MODAL */
 .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:500;align-items:center;justify-content:center;}
@@ -72,174 +72,238 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .modal-box.wide{max-width:720px;}
 .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
 .modal-head h3{font-size:17px;font-weight:700;}
-.close-btn{background:none;border:none;font-size:22px;cursor:pointer;color:#718096;line-height:1;padding:0 4px;}
+.close-btn{background:none;border:none;font-size:22px;cursor:pointer;color:#8A7E74;line-height:1;padding:0 4px;}
 
 /* CALENDAR / DASHBOARD */
 .week-nav{display:flex;justify-content:space-between;align-items:center;background:white;padding:12px 18px;border-radius:10px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.06);}
 .week-label{font-weight:700;font-size:14px;}
 .cal-wrap{background:white;border-radius:12px;overflow-x:auto;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,0.06);}
 .cal-grid{min-width:960px;}
-.cal-head{display:grid;grid-template-columns:150px repeat(7,1fr);gap:4px;margin-bottom:5px;}
-.cal-head-cell{text-align:center;font-size:11px;font-weight:700;color:#4a5568;padding:7px 4px;background:#f7fafc;border-radius:6px;}
-.cal-row{display:grid;grid-template-columns:150px repeat(7,1fr);gap:4px;margin-bottom:4px;}
-.cal-name{display:flex;align-items:center;font-size:12px;font-weight:600;padding:0 6px;}
-.cal-cell{background:#f7fafc;border-radius:6px;padding:4px;min-height:52px;border:1px solid #e2e8f0;position:relative;}
-.cal-cell.today{border-color:#2b6cb0;background:#ebf4ff;}
-.cal-cell.holiday{background:#fafafa;opacity:0.7;}
+.cal-head{display:grid;grid-template-columns:130px repeat(7,1fr);gap:3px;margin-bottom:3px;}
+.cal-head-cell{text-align:center;font-size:11px;font-weight:700;color:#5C4F42;padding:7px 4px;background:#EDE9E3;border-radius:6px;}
+.cal-row{display:grid;grid-template-columns:130px repeat(7,1fr);gap:3px;margin-bottom:0;border-bottom:1px solid #EDE9E3;}
+.cal-name{display:flex;align-items:flex-start;padding-top:8px;font-size:12px;font-weight:600;padding-left:6px;color:#3D332A;height:90px;}
+.cal-cell{background:#FAF8F5;border-radius:0;padding:4px;height:90px;overflow-y:auto;border:none;border-left:1px solid #EDE9E3;position:relative;}
+.cal-cell.today{background:#FAF3EB;border-left:2px solid #A96E35;}
+.cal-cell.holiday{background:#F5F0EB;opacity:0.55;}
 .chip{font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;cursor:pointer;border-left:3px solid;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
-.chip-task{background:#f0fff4;border-color:#38a169;}
-.chip-task.emergency{background:#fff5f5;border-color:#e53e3e;}
-.chip-task.planned{background:#ebf4ff;border-color:#2b6cb0;}
-.chip-leave{background:#fed7d7;color:#9b2c2c;border-color:#e53e3e;}
-.chip-log{background:#faf5ff;border-color:#6b46c1;}
+.chip-task{background:#EDF2E6;border-color:#6E8F52;}
+.chip-task.emergency{background:#FBF0EE;border-color:#C0554A;}
+.chip-task.planned{background:#F0E6D6;border-color:#A96E35;}
+.chip-leave{background:#F5E0DC;color:#7A2E28;border-color:#C0554A;}
+.chip-log{background:#F5EFE8;border-color:#6B5A4E;}
 
 /* PROJECT BUDGET */
-.project-card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:12px;border-left:5px solid #2b6cb0;}
-.project-card.over{border-left-color:#e53e3e;}
-.project-card.near{border-left-color:#d69e2e;}
-.project-card.ok{border-left-color:#38a169;}
-.phase-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #f0f4f8;font-size:13px;}
+.project-card{background:white;border:1px solid #E0D8CE;border-radius:12px;padding:16px;margin-bottom:12px;border-left:5px solid #A96E35;}
+.project-card.over{border-left-color:#C0554A;}
+.project-card.near{border-left-color:#C4874A;}
+.project-card.ok{border-left-color:#6E8F52;}
+.phase-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #F7F5F2;font-size:13px;}
 .phase-row:last-child{border-bottom:none;}
 .phase-name{width:220px;flex-shrink:0;font-weight:500;}
-.phase-bar-wrap{flex:1;background:#e2e8f0;border-radius:4px;height:8px;}
+.phase-bar-wrap{flex:1;background:#E0D8CE;border-radius:4px;height:8px;}
 .phase-bar-fill{height:8px;border-radius:4px;transition:width 0.4s;}
-.phase-bar-fill.ok{background:#38a169;}.phase-bar-fill.near{background:#d69e2e;}.phase-bar-fill.over{background:#e53e3e;}
-.phase-nums{width:160px;text-align:right;font-size:12px;color:#718096;flex-shrink:0;}
-.phase-nums strong{color:#1a202c;}
+.phase-bar-fill.ok{background:#6E8F52;}.phase-bar-fill.near{background:#C4874A;}.phase-bar-fill.over{background:#C0554A;}
+.phase-nums{width:160px;text-align:right;font-size:12px;color:#8A7E74;flex-shrink:0;}
+.phase-nums strong{color:#2A201A;}
 
 /* PLANNER */
 .planner-grid{min-width:1100px;}
-.planner-head{display:grid;grid-template-columns:150px repeat(7,1fr);gap:4px;margin-bottom:5px;}
-.planner-head-cell{text-align:center;font-size:11px;font-weight:700;padding:8px 4px;background:#f7fafc;border-radius:6px;color:#4a5568;}
-.planner-row{display:grid;grid-template-columns:150px repeat(7,1fr);gap:4px;margin-bottom:4px;}
-.planner-name{display:flex;align-items:center;font-size:12px;font-weight:600;padding:0 6px;}
-.planner-cell{background:#f7fafc;border-radius:6px;padding:5px;min-height:60px;border:2px dashed #e2e8f0;cursor:pointer;transition:border-color 0.2s;}
-.planner-cell:hover{border-color:#90cdf4;background:#f0f9ff;}
-.planner-cell.has-items{border-style:solid;border-color:#e2e8f0;}
+.planner-head{display:grid;grid-template-columns:130px repeat(7,1fr);gap:3px;margin-bottom:3px;}
+.planner-head-cell{text-align:center;font-size:11px;font-weight:700;padding:8px 4px;background:#EDE9E3;border-radius:6px;color:#5C4F42;}
+.planner-row{display:grid;grid-template-columns:130px repeat(7,1fr);gap:3px;margin-bottom:0;border-bottom:1px solid #EDE9E3;}
+.planner-name{display:flex;align-items:flex-start;padding-top:8px;font-size:12px;font-weight:600;padding-left:6px;color:#3D332A;height:90px;}
+.planner-cell{background:#FAF8F5;border-radius:0;padding:5px;height:90px;overflow-y:auto;border:none;border-left:1px solid #EDE9E3;cursor:pointer;transition:background 0.15s;}
+.planner-cell:hover{background:#FAF3EB;}
+.planner-cell.has-items{background:#FAF8F5;}
 .plan-chip{font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:block;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.plan-chip.planned{background:#ebf4ff;border-left:3px solid #2b6cb0;}
-.plan-chip.emergency{background:#fff5f5;border-left:3px solid #e53e3e;}
-.plan-chip.done{background:#f0fff4;border-left:3px solid #38a169;text-decoration:line-through;opacity:0.7;}
+.plan-chip.planned{background:#F0E6D6;border-left:3px solid #A96E35;}
+.plan-chip.emergency{background:#FBF0EE;border-left:3px solid #C0554A;}
+.plan-chip.done{background:#EDF2E6;border-left:3px solid #6E8F52;text-decoration:line-through;opacity:0.7;}
 
 /* TIME LOG */
-.log-card{background:white;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start;}
-.log-card:hover{border-color:#bee3f8;}
-.log-time{display:inline-flex;align-items:center;gap:4px;background:#ebf4ff;color:#2b6cb0;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;white-space:nowrap;}
+.log-card{background:white;border:1px solid #E0D8CE;border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start;}
+.log-card:hover{border-color:#DBC9A8;}
+.log-time{display:inline-flex;align-items:center;gap:4px;background:#F0E6D6;color:#A96E35;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;white-space:nowrap;}
 .log-body{flex:1;}
-.log-meta{font-size:11px;color:#718096;margin:3px 0;}
-.log-desc{font-size:13px;color:#4a5568;}
+.log-meta{font-size:11px;color:#8A7E74;margin:3px 0;}
+.log-desc{font-size:13px;color:#5C4F42;}
 .log-right{text-align:right;flex-shrink:0;}
-.log-date{font-size:11px;color:#a0aec0;}
-.linked-tag{background:#f0fff4;color:#276749;border:1px solid #9ae6b4;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;}
-.indep-tag{background:#faf5ff;color:#6b46c1;border:1px solid #d6bcfa;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;}
-.prod-tag{background:#ebfff4;color:#276749;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;border:1px solid #9ae6b4;}
-.nonprod-tag{background:#fff5f5;color:#e53e3e;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;border:1px solid #feb2b2;}
-.total-bar{background:#ebf4ff;color:#2b6cb0;padding:10px 16px;border-radius:10px;font-size:17px;font-weight:800;margin-bottom:14px;}
-.total-bar span{font-size:12px;font-weight:400;color:#718096;display:block;margin-top:2px;}
+.log-date{font-size:11px;color:#B0A89E;}
+.linked-tag{background:#EDF2E6;color:#3D5C28;border:1px solid #B8CFA0;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;}
+.indep-tag{background:#F5EFE8;color:#6B5A4E;border:1px solid #C4B0A0;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;}
+.prod-tag{background:#EDF2E6;color:#3D5C28;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;border:1px solid #B8CFA0;}
+.nonprod-tag{background:#FBF0EE;color:#C0554A;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;border:1px solid #DBA89E;}
+.total-bar{background:#F0E6D6;color:#A96E35;padding:10px 16px;border-radius:10px;font-size:17px;font-weight:800;margin-bottom:14px;}
+.total-bar span{font-size:12px;font-weight:400;color:#8A7E74;display:block;margin-top:2px;}
 .filter-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
 .filter-row .form-control{width:auto;min-width:130px;}
 
 /* REPORTS */
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
-.stat-card{background:white;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-top:4px solid #2b6cb0;}
-.stat-card.g{border-top-color:#38a169;}.stat-card.o{border-top-color:#d69e2e;}.stat-card.p{border-top-color:#6b46c1;}.stat-card.r{border-top-color:#e53e3e;}
-.stat-num{font-size:26px;font-weight:800;}.stat-lbl{font-size:11px;color:#718096;margin-top:2px;}
+.stat-card{background:white;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-top:4px solid #A96E35;}
+.stat-card.g{border-top-color:#6E8F52;}.stat-card.o{border-top-color:#C4874A;}.stat-card.p{border-top-color:#6B5A4E;}.stat-card.r{border-top-color:#C0554A;}
+.stat-num{font-size:26px;font-weight:800;}.stat-lbl{font-size:11px;color:#8A7E74;margin-top:2px;}
 .rpt-table{width:100%;border-collapse:collapse;font-size:12px;}
-.rpt-table th{background:#f7fafc;padding:9px 12px;text-align:left;font-weight:700;color:#4a5568;border-bottom:2px solid #e2e8f0;}
-.rpt-table td{padding:9px 12px;border-bottom:1px solid #f0f4f8;vertical-align:middle;}
-.rpt-table .sub td{padding:3px 12px 3px 26px;border:none;font-size:11px;color:#4a5568;background:transparent;}
-.bar-wrap{background:#e2e8f0;border-radius:4px;height:6px;min-width:50px;}
-.bar-fill{height:6px;border-radius:4px;background:#2b6cb0;}
+.rpt-table th{background:#EDE9E3;padding:9px 12px;text-align:left;font-weight:700;color:#5C4F42;border-bottom:2px solid #E0D8CE;}
+.rpt-table td{padding:9px 12px;border-bottom:1px solid #F7F5F2;vertical-align:middle;}
+.rpt-table .sub td{padding:3px 12px 3px 26px;border:none;font-size:11px;color:#5C4F42;background:transparent;}
+.bar-wrap{background:#E0D8CE;border-radius:4px;height:6px;min-width:50px;}
+.bar-fill{height:6px;border-radius:4px;background:#A96E35;}
 
 /* TIMER WIDGET V14.2.25 — tap to switch */
-.timer-widget{position:fixed;bottom:28px;right:28px;background:#1a202c;border-radius:24px;padding:0;box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:9999;display:flex;flex-direction:column;width:310px;border:2px solid #2d3748;user-select:none;transition:box-shadow 0.4s ease,border-color 0.4s ease;}
-.timer-widget.running{border-color:#38a169;box-shadow:0 20px 60px rgba(56,161,105,0.35),0 0 0 4px rgba(56,161,105,0.12);}
+.timer-widget{position:fixed;bottom:28px;right:28px;background:#2A201A;border-radius:24px;padding:0;box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:9999;display:flex;flex-direction:column;width:310px;border:2px solid #3D332A;user-select:none;transition:box-shadow 0.4s ease,border-color 0.4s ease;}
+.timer-widget.running{border-color:#6E8F52;box-shadow:0 20px 60px rgba(56,161,105,0.35),0 0 0 4px rgba(56,161,105,0.12);}
 .timer-widget.running .timer-pulse-ring{opacity:1;}
 /* Pulse ring — outer glow that breathes when running */
 .timer-pulse-ring{position:absolute;inset:-6px;border-radius:28px;border:2px solid rgba(56,161,105,0.5);opacity:0;pointer-events:none;animation:timerPulse 2s ease-in-out infinite;}
 @keyframes timerPulse{0%,100%{transform:scale(1);opacity:0.6;}50%{transform:scale(1.03);opacity:0.15;}}
 /* Idle warning pulse — red when NOT running and logged in */
-.timer-widget.idle-warn{border-color:#e53e3e;box-shadow:0 20px 60px rgba(229,62,62,0.25),0 0 0 4px rgba(229,62,62,0.1);}
+.timer-widget.idle-warn{border-color:#C0554A;box-shadow:0 20px 60px rgba(229,62,62,0.25),0 0 0 4px rgba(229,62,62,0.1);}
 .timer-widget.idle-warn .timer-pulse-ring{border-color:rgba(229,62,62,0.5);opacity:1;animation:timerPulseRed 3s ease-in-out infinite;}
 @keyframes timerPulseRed{0%,100%{transform:scale(1);opacity:0.5;}50%{transform:scale(1.04);opacity:0.1;}}
-.timer-handle{background:#2d3748;border-radius:22px 22px 0 0;padding:10px 18px;cursor:grab;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #4a5568;font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.06em;text-transform:uppercase;}
+.timer-handle{background:#3D332A;border-radius:22px 22px 0 0;padding:10px 18px;cursor:grab;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #5C4F42;font-size:11px;font-weight:700;color:#B0A89E;letter-spacing:0.06em;text-transform:uppercase;}
 .timer-handle:active{cursor:grabbing;}
 .timer-body{padding:18px;display:flex;flex-direction:column;gap:11px;}
-.timer-display{font-size:52px;font-weight:900;font-variant-numeric:tabular-nums;text-align:center;color:#e2e8f0;letter-spacing:4px;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,0.4);}
-.timer-display.running{color:#68d391;text-shadow:0 0 24px rgba(104,211,145,0.4);}
+.timer-display{font-size:52px;font-weight:900;font-variant-numeric:tabular-nums;text-align:center;color:#E0D8CE;letter-spacing:4px;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,0.4);}
+.timer-display.running{color:#A0C080;text-shadow:0 0 24px rgba(104,211,145,0.4);}
 /* Running blink colon */
 .timer-display.running .tc{animation:colonBlink 1s step-end infinite;}
 @keyframes colonBlink{0%,100%{opacity:1;}50%{opacity:0.2;}}
-.timer-status{font-size:12px;color:#718096;text-align:center;letter-spacing:0.04em;font-weight:500;}
-.timer-status.st-running{color:#68d391;font-weight:700;letter-spacing:0.06em;}
-.timer-status.st-idle{color:#fc8181;font-weight:600;}
-.timer-project{font-size:12px;font-weight:600;color:#90cdf4;text-align:center;background:rgba(66,153,225,0.15);padding:6px 12px;border-radius:8px;line-height:1.4;border:1px solid rgba(66,153,225,0.25);}
-.timer-project.unplanned{background:rgba(245,101,101,0.15);color:#fc8181;border-color:rgba(245,101,101,0.25);}
+.timer-status{font-size:12px;color:#8A7E74;text-align:center;letter-spacing:0.04em;font-weight:500;}
+.timer-status.st-running{color:#A0C080;font-weight:700;letter-spacing:0.06em;}
+.timer-status.st-idle{color:#E09088;font-weight:600;}
+.timer-project{font-size:12px;font-weight:600;color:#DBC9A8;text-align:center;background:rgba(66,153,225,0.15);padding:6px 12px;border-radius:8px;line-height:1.4;border:1px solid rgba(66,153,225,0.25);}
+.timer-project.unplanned{background:rgba(245,101,101,0.15);color:#E09088;border-color:rgba(245,101,101,0.25);}
 
 /* Task switch list */
 .tw-task-list{display:flex;flex-direction:column;gap:5px;}
-.tw-task{width:100%;padding:9px 12px;background:#2d3748;border:1.5px solid #4a5568;border-radius:10px;cursor:pointer;text-align:left;transition:all 0.15s;display:flex;align-items:center;gap:10px;}
-.tw-task:hover{background:#3d4f66;border-color:#63b3ed;}
-.tw-task.lunch{background:#2d3748;border-style:dashed;}
-.tw-task.lunch:hover{background:#3d3728;border-color:#f6ad55;}
+.tw-task{width:100%;padding:9px 12px;background:#3D332A;border:1.5px solid #5C4F42;border-radius:10px;cursor:pointer;text-align:left;transition:all 0.15s;display:flex;align-items:center;gap:10px;}
+.tw-task:hover{background:#5C4F42;border-color:#DEB98A;}
+.tw-task.lunch{background:#3D332A;border-style:dashed;}
+.tw-task.lunch:hover{background:#3d3728;border-color:#DEB98A;}
 .tw-task-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.tw-task-icon.proj{background:rgba(66,153,225,0.2);color:#90cdf4;}
-.tw-task-icon.lunch{background:rgba(246,173,85,0.2);color:#f6ad55;}
-.tw-task-icon.unplanned{background:rgba(159,122,234,0.2);color:#b794f4;}
+.tw-task-icon.proj{background:rgba(66,153,225,0.2);color:#DBC9A8;}
+.tw-task-icon.lunch{background:rgba(246,173,85,0.2);color:#DEB98A;}
+.tw-task-icon.unplanned{background:rgba(159,122,234,0.2);color:#B0A090;}
 .tw-task-text{flex:1;min-width:0;}
-.tw-task-name{font-size:12px;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.tw-task-sub{font-size:10px;color:#a0aec0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+.tw-task-name{font-size:12px;font-weight:600;color:#E0D8CE;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tw-task-sub{font-size:10px;color:#B0A89E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
 
 /* Big action buttons */
-.tw-btn-stop{width:100%;padding:14px;background:#e53e3e;color:white;border:none;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
-.tw-btn-stop:hover{background:#c53030;}
-.tw-btn-start{width:100%;padding:14px;background:#38a169;color:white;border:none;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
-.tw-btn-start:hover{background:#276749;}
-.tw-btn-unplanned{width:100%;padding:10px;background:transparent;color:#a0aec0;border:1.5px dashed #4a5568;border-radius:12px;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:6px;}
-.tw-btn-unplanned:hover{border-color:#4299e1;color:#90cdf4;background:rgba(66,153,225,0.1);}
+.tw-btn-stop{width:100%;padding:14px;background:#C0554A;color:white;border:none;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
+.tw-btn-stop:hover{background:#9A3830;}
+.tw-btn-start{width:100%;padding:14px;background:#6E8F52;color:white;border:none;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;justify-content:center;gap:8px;}
+.tw-btn-start:hover{background:#3D5C28;}
+.tw-btn-unplanned{width:100%;padding:10px;background:transparent;color:#B0A89E;border:1.5px dashed #5C4F42;border-radius:12px;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:6px;}
+.tw-btn-unplanned:hover{border-color:#C4874A;color:#DBC9A8;background:rgba(66,153,225,0.1);}
 
 /* Progress bar */
-.tw-progress{height:4px;background:#2d3748;border-radius:2px;overflow:hidden;}
-.tw-progress-fill{height:4px;background:linear-gradient(90deg,#38a169,#68d391);border-radius:2px;transition:width 1s linear;width:0%;box-shadow:0 0 8px rgba(104,211,145,0.5);}
+.tw-progress{height:4px;background:#3D332A;border-radius:2px;overflow:hidden;}
+.tw-progress-fill{height:4px;background:linear-gradient(90deg,#6E8F52,#A0C080);border-radius:2px;transition:width 1s linear;width:0%;box-shadow:0 0 8px rgba(104,211,145,0.5);}
 
 /* MANAGE */
 .manage-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 .add-row{display:flex;gap:8px;margin-bottom:10px;}
 .add-row .form-control{flex:1;}
-.list-item{display:flex;justify-content:space-between;align-items:center;padding:9px 4px;border-bottom:1px solid #f0f4f8;}
+.list-item{display:flex;justify-content:space-between;align-items:center;padding:9px 4px;border-bottom:1px solid #F7F5F2;}
 .list-item:last-child{border-bottom:none;}
 
 /* LEAVE */
 .balance-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;}
 .balance-card{background:white;border-radius:12px;padding:18px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);}
 .balance-num{font-size:34px;font-weight:800;margin-bottom:3px;}
-.balance-sub{font-size:12px;color:#718096;}
-.bal-bar{background:#e2e8f0;border-radius:4px;height:5px;margin-top:8px;}
+.balance-sub{font-size:12px;color:#8A7E74;}
+.bal-bar{background:#E0D8CE;border-radius:4px;height:5px;margin-top:8px;}
 .bal-fill{height:5px;border-radius:4px;}
 
 /* APPROVAL */
-.approval-card{background:white;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:10px;border-left:4px solid #d69e2e;}
-.change-box{background:#fffaf0;border:2px solid #d69e2e;border-radius:8px;padding:14px;margin-top:14px;}
-.change-box h4{color:#c05621;font-weight:700;margin-bottom:10px;}
+.approval-card{background:white;border:1px solid #E0D8CE;border-radius:10px;padding:14px;margin-bottom:10px;border-left:4px solid #C4874A;}
+.change-box{background:#FAF3EB;border:2px solid #C4874A;border-radius:8px;padding:14px;margin-top:14px;}
+.change-box h4{color:#8A5828;font-weight:700;margin-bottom:10px;}
 
 /* RADIO / INFO */
 .radio-group{display:flex;gap:14px;flex-wrap:wrap;}
 .radio-group label{display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;}
-.info-box{background:#f7fafc;border-radius:8px;padding:10px 12px;font-size:12px;color:#4a5568;margin-bottom:12px;}
+.info-box{background:#EDE9E3;border-radius:8px;padding:10px 12px;font-size:12px;color:#5C4F42;margin-bottom:12px;}
 
 /* NOTIFICATION TOAST */
-.notification-toast{position:fixed;top:80px;right:-400px;background:white;border-radius:12px;padding:16px 20px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:600;max-width:350px;transition:right 0.3s;border-left:4px solid #2b6cb0;}
+.notification-toast{position:fixed;top:80px;right:-400px;background:white;border-radius:12px;padding:16px 20px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:600;max-width:350px;transition:right 0.3s;border-left:4px solid #A96E35;}
 .notification-toast.show{right:24px;}
-.notification-toast.warning{border-left-color:#d69e2e;background:#fffaf0;}
-.notification-toast.error{border-left-color:#e53e3e;background:#fff5f5;}
+.notification-toast.warning{border-left-color:#C4874A;background:#FAF3EB;}
+.notification-toast.error{border-left-color:#C0554A;background:#FBF0EE;}
 .notif-title{font-weight:700;font-size:14px;margin-bottom:4px;}
-.notif-msg{font-size:13px;color:#4a5568;}
+.notif-msg{font-size:13px;color:#5C4F42;}
 
 /* SAVE INDICATOR */
-.save-indicator{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#38a169;color:white;padding:8px 18px;border-radius:20px;font-size:12px;font-weight:600;z-index:700;opacity:0;transition:opacity 0.3s;pointer-events:none;}
+.save-indicator{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#6E8F52;color:white;padding:8px 18px;border-radius:20px;font-size:12px;font-weight:600;z-index:700;opacity:0;transition:opacity 0.3s;pointer-events:none;}
 .save-indicator.show{opacity:1;}
 
 @media(max-width:700px){.sidebar{display:none;}.form-row,.form-row-3,.manage-grid,.balance-grid{grid-template-columns:1fr;}}
+
+/* ── HOURS TRACKER V14.2.31 ── */
+.ht-top{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap;}
+.ht-qtr-label{font-size:18px;font-weight:800;color:#A96E35;}
+.ht-qtr-sub{font-size:12px;color:#8A7E74;}
+.ht-nav-btn{background:white;border:2px solid #E0D8CE;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;color:#5C4F42;transition:all 0.2s;}
+.ht-nav-btn:hover:not(:disabled){border-color:#A96E35;color:#A96E35;}
+.ht-nav-btn:disabled{opacity:0.35;cursor:not-allowed;}
+.ht-target-pill{background:#F0E6D6;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;color:#A96E35;display:flex;align-items:center;gap:6px;}
+.ht-target-pill input{border:none;background:transparent;font-size:13px;font-weight:800;color:#A96E35;width:52px;text-align:center;outline:none;}
+.ht-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px;margin-bottom:24px;}
+.ht-card{background:white;border-radius:14px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.07);border-left:5px solid #E0D8CE;transition:transform 0.15s,box-shadow 0.15s;}
+.ht-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,0.1);}
+.ht-card.on-track{border-left-color:#6E8F52;}
+.ht-card.at-risk{border-left-color:#C4874A;}
+.ht-card.behind{border-left-color:#C0554A;}
+.ht-card.met{border-left-color:#A96E35;}
+.ht-card.me{background:#EDF2E6;}
+.ht-name{font-size:15px;font-weight:800;color:#3D332A;margin-bottom:2px;}
+.ht-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;margin-bottom:12px;}
+.ht-badge.on-track{background:#DCE8CC;color:#2E4A1E;}
+.ht-badge.at-risk{background:#F5ECD8;color:#7A4E18;}
+.ht-badge.behind{background:#F5E0DC;color:#5C2020;}
+.ht-badge.met{background:#F0E6D6;color:#8A5828;}
+.ht-progress-bg{background:#E0D8CE;border-radius:8px;height:12px;margin:6px 0 4px;}
+.ht-progress-fill{height:12px;border-radius:8px;transition:width 0.6s ease;}
+.ht-progress-fill.on-track{background:linear-gradient(90deg,#6E8F52,#A0C080);}
+.ht-progress-fill.at-risk{background:linear-gradient(90deg,#C4874A,#DEB98A);}
+.ht-progress-fill.behind{background:linear-gradient(90deg,#C0554A,#E09088);}
+.ht-progress-fill.met{background:linear-gradient(90deg,#A96E35,#DEB98A);}
+.ht-row{display:flex;justify-content:space-between;font-size:12px;color:#8A7E74;margin-bottom:10px;}
+.ht-row strong{color:#3D332A;}
+.ht-stats-mini{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;}
+.ht-mini{background:#EDE9E3;border-radius:8px;padding:8px 10px;text-align:center;}
+.ht-mini-val{font-size:17px;font-weight:800;color:#3D332A;}
+.ht-mini-lbl{font-size:10px;color:#8A7E74;font-weight:600;text-transform:uppercase;margin-top:1px;}
+.ht-qtr-months{margin-top:12px;padding-top:10px;border-top:1px solid #E0D8CE;}
+.ht-qtr-months-title{font-size:10px;font-weight:700;color:#B0A89E;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;}
+.ht-month-bars{display:flex;flex-direction:column;gap:5px;}
+.ht-month-row{display:grid;grid-template-columns:52px 1fr 44px;gap:6px;align-items:center;font-size:11px;}
+.ht-month-name{color:#8A7E74;font-weight:600;}
+.ht-month-bg{background:#E0D8CE;border-radius:4px;height:7px;}
+.ht-month-fill{height:7px;border-radius:4px;}
+.ht-month-val{color:#5C4F42;font-weight:700;text-align:right;}
+.ht-table-wrap{background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.07);margin-bottom:20px;}
+.ht-table-title{font-size:14px;font-weight:700;color:#3D332A;margin-bottom:14px;}
+.ht-table{width:100%;border-collapse:collapse;font-size:13px;}
+.ht-table th{background:#EDE9E3;padding:8px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#8A7E74;border-bottom:2px solid #E0D8CE;}
+.ht-table td{padding:10px 12px;border-bottom:1px solid #F7F5F2;vertical-align:middle;}
+.ht-table tr:last-child td{border-bottom:none;}
+.ht-table tr:hover td{background:#EDE9E3;}
+.ht-reconcile{background:#FAF3EB;border:2px solid #DEB98A;border-radius:12px;padding:18px;margin-bottom:20px;}
+.ht-reconcile h3{font-size:14px;font-weight:700;color:#7A4E18;margin-bottom:6px;}
+.ht-reconcile p{font-size:12px;color:#7A4E18;margin-bottom:14px;line-height:1.5;}
+.ht-rec-table{width:100%;border-collapse:collapse;font-size:13px;}
+.ht-rec-table th{background:#F5ECD8;padding:7px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#7A4E18;border-bottom:2px solid #DEB98A;}
+.ht-rec-table td{padding:9px 12px;border-bottom:1px dashed #F5ECD8;vertical-align:middle;}
+.ht-rec-table tr:last-child td{border-bottom:none;}
+.ht-deduct{color:#C0554A;font-weight:700;}
+.ht-ok-pay{color:#6E8F52;font-weight:700;}
+.ht-proj{color:#C4874A;font-weight:700;}
+.ht-my-card{background:white;border-radius:14px;padding:20px;box-shadow:0 4px 16px rgba(0,0,0,0.1);border:2px solid #A96E35;margin-bottom:20px;}
+.ht-my-title{font-size:13px;font-weight:700;color:#8A7E74;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;}
+.ht-my-name{font-size:22px;font-weight:800;color:#A96E35;margin-bottom:14px;}
 </style>
 
 <!-- Firebase SDK v10 - WORKING VERSION -->
@@ -250,8 +314,8 @@ textarea.form-control{min-height:70px;resize:vertical;}
 
 <!-- SAVE INDICATOR -->
 <div class="save-indicator" id="saveIndicator">✅ Saved to cloud</div>
-<div class="save-indicator" id="savingIndicator" style="background:#4299e1;">💾 Saving...</div>
-<div class="save-indicator" id="unsavedIndicator" style="background:#ed8936;">⚠️ Unsaved changes</div>
+<div class="save-indicator" id="savingIndicator" style="background:#C4874A;">💾 Saving...</div>
+<div class="save-indicator" id="unsavedIndicator" style="background:#C4874A;">⚠️ Unsaved changes</div>
 
 <!-- LOGIN -->
 <div class="login-screen" id="loginScreen">
@@ -268,7 +332,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
     </div>
     <button class="btn btn-primary btn-block" id="loginBtn">Login</button>
     <p style="text-align:center;margin-top:12px;font-size:12px;">
-      <a href="#" id="forgotPasswordLink" style="color:#2b6cb0;text-decoration:none;">Forgot Password?</a>
+      <a href="#" id="forgotPasswordLink" style="color:#A96E35;text-decoration:none;">Forgot Password?</a>
     </p>
   </div>
 </div>
@@ -277,7 +341,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
 <div class="modal-backdrop" id="forgotPasswordModal">
   <div class="modal-box" style="max-width:400px;">
     <div class="modal-head"><h3>🔑 Reset Password</h3><button class="close-btn" onclick="closeModal('forgotPasswordModal')">×</button></div>
-    <div style="background:#fff5f5;border:1px solid #feb2b2;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#9b2c2c;">
+    <div style="background:#FBF0EE;border:1px solid #DBA89E;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#7A2E28;">
       ⚠️ <strong>Admin only:</strong> Only administrators can reset passwords. Contact your admin if you've forgotten yours.
     </div>
     <div class="form-group">
@@ -310,11 +374,11 @@ textarea.form-control{min-height:70px;resize:vertical;}
   <div class="topbar">
     <span class="app-logo">SQUARE</span>
     <div style="display:flex;align-items:center;gap:10px;">
-      <div id="connectionStatus" style="display:flex;align-items:center;gap:6px;padding:4px 12px;background:#38a169;color:white;border-radius:12px;font-size:11px;font-weight:600;">
+      <div id="connectionStatus" style="display:flex;align-items:center;gap:6px;padding:4px 12px;background:#6E8F52;color:white;border-radius:12px;font-size:11px;font-weight:600;">
         <span id="connectionDot">🟢</span>
         <span id="connectionText">ONLINE</span>
       </div>
-      <div id="onlineUsersBtn" style="display:flex;align-items:center;gap:6px;padding:4px 12px;background:#4299e1;color:white;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;" title="Click to see who's online">
+      <div id="onlineUsersBtn" style="display:flex;align-items:center;gap:6px;padding:4px 12px;background:#C4874A;color:white;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;" title="Click to see who's online">
         <span>👥</span>
         <span id="onlineCount">Online: 0</span>
       </div>
@@ -324,7 +388,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div>
   
   <!-- OFFLINE WARNING BANNER -->
-  <div id="offlineWarning" style="display:none;background:#e53e3e;color:white;padding:12px;text-align:center;font-weight:600;font-size:13px;">
+  <div id="offlineWarning" style="display:none;background:#C0554A;color:white;padding:12px;text-align:center;font-weight:600;font-size:13px;">
     ⚠️ WARNING: YOU ARE OFFLINE! Changes will NOT be saved to cloud. Do not add data or it will be lost.
   </div>
   
@@ -332,19 +396,20 @@ textarea.form-control{min-height:70px;resize:vertical;}
     <!-- SIDEBAR -->
     <div class="sidebar">
       <div class="nav-section">Planning</div>
-      <div class="nav-item active" data-page="dashboard"><span class="nav-icon">📊</span>Dashboard</div>
-      <div class="nav-item" data-page="planner"><span class="nav-icon">📅</span>Weekly Planner</div>
+      <div class="nav-item active" data-page="dashboard"><span class="nav-icon">▦</span>Dashboard</div>
+      <div class="nav-item" data-page="planner"><span class="nav-icon">▤</span>Weekly Planner</div>
       <div class="nav-section">Work</div>
-      <div class="nav-item" data-page="timelog"><span class="nav-icon">⏱️</span>Time Log</div>
-      <div class="nav-item" data-page="projects"><span class="nav-icon">📁</span>Projects & Budget</div>
+      <div class="nav-item" data-page="timelog"><span class="nav-icon">◷</span>Time Log</div>
+      <div class="nav-item" data-page="projects"><span class="nav-icon">▣</span>Projects & Budget</div>
       <div class="nav-section">Admin</div>
-      <div class="nav-item" data-page="timereport"><span class="nav-icon">📈</span>Time Report</div>
-      <div class="nav-item" data-page="leaves"><span class="nav-icon">🌴</span>Leave</div>
-      <div class="nav-item" data-page="teamleave"><span class="nav-icon">📆</span>Team Leave</div>
-      <div class="nav-item" data-page="approvals"><span class="nav-icon">✅</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
-      <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">⚙️</span>Manage</div>
-      <div style="border-top:1px solid #e2e8f0;margin:10px 0;"></div>
-      <div class="nav-item" id="timerNavBtn" style="color:#38a169;font-weight:600;"><span class="nav-icon">▶</span><span id="timerNavLabel">Start Timer</span></div>
+      <div class="nav-item" data-page="timereport"><span class="nav-icon">▶</span>Time Report</div>
+      <div class="nav-item" data-page="hourstracker"><span class="nav-icon">◎</span>Hours Tracker</div>
+      <div class="nav-item" data-page="leaves"><span class="nav-icon">◌</span>Leave</div>
+      <div class="nav-item" data-page="teamleave"><span class="nav-icon">◫</span>Team Leave</div>
+      <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
+      <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">◈</span>Manage</div>
+      <div style="border-top:1px solid #E0D8CE;margin:10px 0;"></div>
+      <div class="nav-item" id="timerNavBtn" style="color:#6E8F52;font-weight:600;"><span class="nav-icon">▶</span><span id="timerNavLabel">Start Timer</span></div>
     </div>
 
     <!-- CONTENT -->
@@ -358,22 +423,22 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <!-- V13.4: Live Timer Widget -->
         <div class="card" style="margin-bottom:20px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <h3 style="margin:0;font-size:16px;font-weight:700;color:#2d3748;">⏱️ Who's Working Now</h3>
-            <span id="liveTimerCount" style="font-size:12px;color:#718096;font-weight:600;">0 active</span>
+            <h3 style="margin:0;font-size:16px;font-weight:700;color:#3D332A;">⏱️ Who's Working Now</h3>
+            <span id="liveTimerCount" style="font-size:12px;color:#8A7E74;font-weight:600;">0 active</span>
           </div>
           <div id="liveTimerFeed" style="display:flex;flex-direction:column;gap:8px;">
-            <div style="color:#a0aec0;font-size:13px;padding:12px;text-align:center;">No active timers</div>
+            <div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">No active timers</div>
           </div>
         </div>
         
         <!-- V13.3: Live Time Log Feed -->
         <div class="card" style="margin-bottom:20px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <h3 style="margin:0;font-size:16px;font-weight:700;color:#2d3748;">📡 Recent Time Logs</h3>
-            <a href="#" onclick="document.querySelector('[data-page=timelog]').click(); return false;" style="font-size:12px;color:#4299e1;text-decoration:none;font-weight:600;">View All →</a>
+            <h3 style="margin:0;font-size:16px;font-weight:700;color:#3D332A;">📡 Recent Time Logs</h3>
+            <a href="#" onclick="document.querySelector('[data-page=timelog]').click(); return false;" style="font-size:12px;color:#C4874A;text-decoration:none;font-weight:600;">View All →</a>
           </div>
           <div id="liveTimeLogFeed" style="display:flex;flex-direction:column;gap:8px;">
-            <div style="color:#a0aec0;font-size:13px;padding:12px;text-align:center;">Loading recent activity...</div>
+            <div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">Loading recent activity...</div>
           </div>
         </div>
         
@@ -387,11 +452,11 @@ textarea.form-control{min-height:70px;resize:vertical;}
           <button class="btn btn-ghost btn-sm" id="nextWeek">Next →</button>
         </div>
         <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
-          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#ebf4ff;border-left:3px solid #2b6cb0;display:inline-block;"></span> Planned</span>
-          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#fff5f5;border-left:3px solid #e53e3e;display:inline-block;"></span> Emergency</span>
-          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#faf5ff;border-left:3px solid #6b46c1;display:inline-block;"></span> Time Logged</span>
-          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#fed7d7;border-left:3px solid #e53e3e;display:inline-block;"></span> Leave</span>
-          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#fef3c7;border-left:3px solid #f59e0b;display:inline-block;"></span> Holiday</span>
+          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#F0E6D6;border-left:3px solid #A96E35;display:inline-block;"></span> Planned</span>
+          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#FBF0EE;border-left:3px solid #C0554A;display:inline-block;"></span> Emergency</span>
+          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#F5EFE8;border-left:3px solid #6B5A4E;display:inline-block;"></span> Time Logged</span>
+          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#F5E0DC;border-left:3px solid #C0554A;display:inline-block;"></span> Leave</span>
+          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;background:#F5ECD8;border-left:3px solid #C4874A;display:inline-block;"></span> Holiday</span>
         </div>
         <div class="cal-wrap"><div class="cal-grid" id="calGrid"></div></div>
       </div>
@@ -407,7 +472,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
             <button class="btn btn-primary btn-sm" id="addMyTaskBtn" style="display:none;">+ Add My Task Today</button>
           </div>
         </div>
-        <div style="background:#fffaf0;border:1px solid #fbd38d;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#c05621;">
+        <div style="background:#FAF3EB;border:1px solid #F0CFA0;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#8A5828;">
           📌 <strong>Planning:</strong> <span id="planPermissionText"></span>
         </div>
         <div class="cal-wrap"><div class="planner-grid" id="plannerGrid"></div></div>
@@ -452,7 +517,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
 
           <!-- V14.2.3: Quick Preset Buttons -->
           <div style="margin-bottom:14px;">
-            <div style="font-size:11px;font-weight:700;color:#a0aec0;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Quick Select</div>
+            <div style="font-size:11px;font-weight:700;color:#B0A89E;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Quick Select</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;" id="trPresetBtns">
               <button class="btn btn-ghost btn-sm tr-preset" data-preset="today">Today</button>
               <button class="btn btn-ghost btn-sm tr-preset" data-preset="yesterday">Yesterday</button>
@@ -466,8 +531,8 @@ textarea.form-control{min-height:70px;resize:vertical;}
           </div>
 
           <!-- Custom Date Range (hidden by default) -->
-          <div id="trCustomRange" style="display:none;background:#f7fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:14px;">
-            <div style="font-size:12px;font-weight:600;color:#4a5568;margin-bottom:8px;">Custom Date Range</div>
+          <div id="trCustomRange" style="display:none;background:#EDE9E3;border:1px solid #E0D8CE;border-radius:8px;padding:12px;margin-bottom:14px;">
+            <div style="font-size:12px;font-weight:600;color:#5C4F42;margin-bottom:8px;">Custom Date Range</div>
             <div class="form-row" style="margin-bottom:0;">
               <div class="form-group" style="margin:0;"><label class="form-label">From Date</label><input type="date" class="form-control" id="trCustomFrom"></div>
               <div class="form-group" style="margin:0;"><label class="form-label">To Date</label><input type="date" class="form-control" id="trCustomTo"></div>
@@ -475,7 +540,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
           </div>
 
           <!-- Selected Period Display -->
-          <div id="trPeriodDisplay" style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:13px;color:#2c5282;display:none;">
+          <div id="trPeriodDisplay" style="background:#F0E6D6;border:1px solid #DBC9A8;border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:13px;color:#8A5828;display:none;">
             📅 <span id="trPeriodLabel"></span>
           </div>
 
@@ -500,16 +565,16 @@ textarea.form-control{min-height:70px;resize:vertical;}
             <button class="btn btn-success" id="trPdfBtn" style="display:none;">⬇️ Export PDF</button>
           </div>
         </div>
-        <div id="trLimitWarning" style="display:none;background:#fffaf0;border:1px solid #fbd38d;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#c05621;"></div>
+        <div id="trLimitWarning" style="display:none;background:#FAF3EB;border:1px solid #F0CFA0;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#8A5828;"></div>
         <div id="trOutput" style="display:none;">
           <div class="stats-grid" id="trStats"></div>
           <div style="background:white;border-radius:10px;padding:14px 18px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.06);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-            <div><div style="font-weight:700;font-size:15px;" id="trTitle"></div><div style="font-size:12px;color:#718096;margin-top:2px;" id="trSubtitle"></div></div>
+            <div><div style="font-weight:700;font-size:15px;" id="trTitle"></div><div style="font-size:12px;color:#8A7E74;margin-top:2px;" id="trSubtitle"></div></div>
             <button class="btn btn-success btn-sm" id="trPdfBtn2">⬇️ Export PDF</button>
           </div>
-          <div id="trPersonSec" class="card" style="padding:0;overflow:hidden;"><div style="padding:12px 18px;border-bottom:1px solid #e2e8f0;font-weight:700;">👤 By Person</div><div style="overflow-x:auto;padding:14px;"><div id="trPersonTbl"></div></div></div>
-          <div id="trProjSec" class="card" style="padding:0;overflow:hidden;"><div style="padding:12px 18px;border-bottom:1px solid #e2e8f0;font-weight:700;">📁 By Project & Phase</div><div style="overflow-x:auto;padding:14px;"><div id="trProjTbl"></div></div></div>
-          <div class="card" style="padding:0;overflow:hidden;"><div style="padding:12px 18px;border-bottom:1px solid #e2e8f0;font-weight:700;">📋 Detail Log</div><div style="overflow-x:auto;padding:14px;"><div id="trDetailTbl"></div></div></div>
+          <div id="trPersonSec" class="card" style="padding:0;overflow:hidden;"><div style="padding:12px 18px;border-bottom:1px solid #E0D8CE;font-weight:700;">👤 By Person</div><div style="overflow-x:auto;padding:14px;"><div id="trPersonTbl"></div></div></div>
+          <div id="trProjSec" class="card" style="padding:0;overflow:hidden;"><div style="padding:12px 18px;border-bottom:1px solid #E0D8CE;font-weight:700;">📁 By Project & Phase</div><div style="overflow-x:auto;padding:14px;"><div id="trProjTbl"></div></div></div>
+          <div class="card" style="padding:0;overflow:hidden;"><div style="padding:12px 18px;border-bottom:1px solid #E0D8CE;font-weight:700;">📋 Detail Log</div><div style="overflow-x:auto;padding:14px;"><div id="trDetailTbl"></div></div></div>
         </div>
       </div>
 
@@ -534,21 +599,21 @@ textarea.form-control{min-height:70px;resize:vertical;}
             <button class="btn btn-ghost btn-sm" id="teamLeaveNext">Next →</button>
           </div>
         </div>
-        <div style="background:#ebf4ff;border:2px solid #2b6cb0;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;">
+        <div style="background:#F0E6D6;border:2px solid #A96E35;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;">
           <div style="font-weight:700;margin-bottom:4px;">📅 Who's Out?</div>
-          <div id="teamLeaveSummary" style="font-size:12px;color:#2d3748;"></div>
+          <div id="teamLeaveSummary" style="font-size:12px;color:#3D332A;"></div>
         </div>
         <div class="cal-wrap">
           <div id="teamLeaveCalendar"></div>
         </div>
         <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
-          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#fed7d7;border:1px solid #e53e3e;display:inline-block;border-radius:3px;"></span> On Leave</span>
-          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#fef3c7;border:1px solid #f59e0b;display:inline-block;border-radius:3px;"></span> Half Day</span>
+          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#F5E0DC;border:1px solid #C0554A;display:inline-block;border-radius:3px;"></span> On Leave</span>
+          <span style="font-size:12px;display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#F5ECD8;border:1px solid #C4874A;display:inline-block;border-radius:3px;"></span> Half Day</span>
         </div>
 
         <!-- V14.2.15: Leave Bank — admin only -->
         <div class="admin-only" style="margin-top:24px;">
-          <div style="font-weight:700;font-size:14px;margin-bottom:12px;color:#2d3748;">🏦 Team Leave Bank</div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:12px;color:#3D332A;">🏦 Team Leave Bank</div>
           <div id="teamLeaveBank" style="overflow-x:auto;"></div>
         </div>
       </div>
@@ -559,8 +624,14 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div id="approvalsList"></div>
       </div>
 
+      <!-- HOURS TRACKER -->
+      <div class="page" id="page-hourstracker">
+        <h2 class="page-title">🎯 Hours Tracker</h2>
+        <div id="hoursTrackerContent"></div>
+      </div>
+
       <!-- MANAGE -->
-      <div class="page admin-only" id="page-manage" style="display:none;">
+      <div class="page admin-only" id="page-manage">
         <h2 class="page-title">⚙️ Manage</h2>
         
         <div class="manage-grid">
@@ -593,10 +664,10 @@ textarea.form-control{min-height:70px;resize:vertical;}
         </div>
         
         <!-- DATA BACKUP & SECURITY -->
-        <div class="card" style="margin-top:16px;border:2px solid #2b6cb0;">
+        <div class="card" style="margin-top:16px;border:2px solid #A96E35;">
           <div class="card-title">💾 Data Backup & Security</div>
-          <div style="background:#ebf4ff;border:1px solid #90cdf4;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#2c5282;">
-            📌 <strong>V14.2.29 Production:</strong> PiP improvements — (1) "Paused" wording replaced with "Not tracking — no task running" so staff understand they need to start a task themselves, not that system stopped them. (2) Auto-reopen PiP window if it closes unexpectedly while a timer is still running (2s delay, only if user had explicitly opened PiP). (3) PiP button always visible with clear active/inactive state. All V14.2.28 fixes retained (tab-hidden auto-pause disabled, 8PM EOD).
+          <div style="background:#F0E6D6;border:1px solid #DBC9A8;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#8A5828;">
+            📌 <strong>V14.2.33 Production:</strong> Bug fix: Manage page now opens correctly (removed conflicting inline display:none). Planner fixed-height rows — all member rows same height, columns align. Nav icons replaced with clean monochrome symbols. Hours Tracker status labels cleaned, bar thresholds recalibrated. All V14.2.32 palette retained.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -604,12 +675,12 @@ textarea.form-control{min-height:70px;resize:vertical;}
             <button class="btn btn-ghost" id="viewAutoBackupsBtn">📜 View Auto-Backups (Last 5)</button>
             <input type="file" id="importFileInput" accept=".json" style="display:none;">
           </div>
-          <div id="lastSavedInfo" style="font-size:11px;color:#718096;margin-bottom:8px;"></div>
-          <div id="instanceInfo" style="font-size:10px;color:#a0aec0;"></div>
+          <div id="lastSavedInfo" style="font-size:11px;color:#8A7E74;margin-bottom:8px;"></div>
+          <div id="instanceInfo" style="font-size:10px;color:#B0A89E;"></div>
         </div>
         
         <!-- CHANGE LOG -->
-        <div class="card" style="margin-top:16px;border:2px solid #6b46c1;">
+        <div class="card" style="margin-top:16px;border:2px solid #6B5A4E;">
           <div class="card-title">📋 Change Log (Recent Activity)</div>
           <div id="changeLogList" style="font-size:12px;max-height:200px;overflow-y:auto;"></div>
           <button class="btn btn-ghost btn-sm" id="clearChangeLogBtn" style="margin-top:10px;">Clear Log</button>
@@ -624,13 +695,13 @@ textarea.form-control{min-height:70px;resize:vertical;}
 <div class="timer-widget" id="timerWidget" style="display:none;">
   <div class="timer-pulse-ring" id="timerPulseRing"></div>
   <div class="timer-handle" id="timerHandle">
-    <span style="display:flex;align-items:center;gap:6px;color:#e2e8f0;">
+    <span style="display:flex;align-items:center;gap:6px;color:#E0D8CE;">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       SQUARE Timer
     </span>
     <span style="display:flex;align-items:center;gap:8px;">
-      <span id="timerRunningLabel" style="color:#68d391;font-size:10px;font-weight:700;letter-spacing:0.05em;"></span>
-      <button id="pipBtn" title="Open floating timer window (works over any app)" onclick="openPiP()" style="background:none;border:1px solid #4a5568;border-radius:5px;padding:3px 8px;cursor:pointer;color:#a0aec0;font-size:10px;font-weight:700;letter-spacing:0.04em;display:flex;align-items:center;gap:4px;transition:all 0.15s;">
+      <span id="timerRunningLabel" style="color:#A0C080;font-size:10px;font-weight:700;letter-spacing:0.05em;"></span>
+      <button id="pipBtn" title="Open floating timer window (works over any app)" onclick="openPiP()" style="background:none;border:1px solid #5C4F42;border-radius:5px;padding:3px 8px;cursor:pointer;color:#B0A89E;font-size:10px;font-weight:700;letter-spacing:0.04em;display:flex;align-items:center;gap:4px;transition:all 0.15s;">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 22 2 22 7"/><line x1="12" y1="12" x2="22" y2="2"/></svg>
         PiP
       </button>
@@ -643,7 +714,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
     <div id="timerProject" class="timer-project" style="display:none;"></div>
 
     <div id="twTaskSection" style="display:none;">
-      <div style="font-size:10px;font-weight:600;color:#a0aec0;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:5px;">Switch to</div>
+      <div style="font-size:10px;font-weight:600;color:#B0A89E;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:5px;">Switch to</div>
       <div class="tw-task-list" id="twTaskList"></div>
     </div>
 
@@ -764,9 +835,9 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="info-box" id="sePreview">Duration: —</div>
     </div>
     <div id="tmrSection" style="display:none;">
-      <div style="background:#f0fff4;border:2px solid #9ae6b4;border-radius:10px;padding:14px;text-align:center;">
-        <div style="font-size:34px;font-weight:800;color:#38a169;font-variant-numeric:tabular-nums;" id="mTimerDisp">00:00:00</div>
-        <div style="font-size:11px;color:#718096;margin:4px 0 10px;" id="mTimerStatus">Not started</div>
+      <div style="background:#EDF2E6;border:2px solid #B8CFA0;border-radius:10px;padding:14px;text-align:center;">
+        <div style="font-size:34px;font-weight:800;color:#6E8F52;font-variant-numeric:tabular-nums;" id="mTimerDisp">00:00:00</div>
+        <div style="font-size:11px;color:#8A7E74;margin:4px 0 10px;" id="mTimerStatus">Not started</div>
         <div style="display:flex;gap:8px;justify-content:center;">
           <button type="button" class="btn btn-success btn-sm" id="mTimerStart">▶ Start</button>
           <button type="button" class="btn btn-warning btn-sm" id="mTimerPause" style="display:none;">⏸ Pause</button>
@@ -861,11 +932,11 @@ textarea.form-control{min-height:70px;resize:vertical;}
     <div class="modal-head">
       <h3>⏱️ Forgotten Timer Found</h3>
     </div>
-    <div style="background:#fffaf0;border:2px solid #f6ad55;border-radius:10px;padding:14px;margin-bottom:16px;">
-      <div style="font-size:13px;font-weight:700;color:#c05621;margin-bottom:6px;">You left a timer running!</div>
-      <div id="orphanTimerInfo" style="font-size:13px;color:#4a5568;line-height:1.6;"></div>
+    <div style="background:#FAF3EB;border:2px solid #DEB98A;border-radius:10px;padding:14px;margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:700;color:#8A5828;margin-bottom:6px;">You left a timer running!</div>
+      <div id="orphanTimerInfo" style="font-size:13px;color:#5C4F42;line-height:1.6;"></div>
     </div>
-    <div style="font-size:13px;font-weight:600;color:#2d3748;margin-bottom:10px;">How long did you actually work?</div>
+    <div style="font-size:13px;font-weight:600;color:#3D332A;margin-bottom:10px;">How long did you actually work?</div>
     <div class="form-row" style="margin-bottom:6px;">
       <div class="form-group" style="margin:0;">
         <label class="form-label">Hours</label>
@@ -887,7 +958,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <button class="btn btn-ghost btn-sm" id="orphanSnoozeBtn" style="margin-left:auto;">🔔 Remind Me in 1 Hour</button>
       <button class="btn btn-danger btn-sm" id="orphanDiscardBtn">🗑️ Discard Timer</button>
     </div>
-    <div style="font-size:11px;color:#a0aec0;margin-top:10px;text-align:center;" id="orphanSnoozeCount"></div>
+    <div style="font-size:11px;color:#B0A89E;margin-top:10px;text-align:center;" id="orphanSnoozeCount"></div>
   </div>
 </div>
 
@@ -895,11 +966,11 @@ textarea.form-control{min-height:70px;resize:vertical;}
 <div class="modal-backdrop" id="endOfDayModal" style="z-index:600;">
   <div class="modal-box" style="max-width:420px;">
     <div class="modal-head"><h3>🌆 End of Day Reminder</h3></div>
-    <div style="background:#fff5f5;border:2px solid #feb2b2;border-radius:10px;padding:14px;margin-bottom:16px;">
-      <div style="font-size:13px;font-weight:700;color:#9b2c2c;margin-bottom:4px;">⚠️ You have an active timer!</div>
-      <div style="font-size:13px;color:#4a5568;">It's 7:30 PM. Please complete your timer before leaving — it will be auto-completed at 8:00 PM.</div>
+    <div style="background:#FBF0EE;border:2px solid #DBA89E;border-radius:10px;padding:14px;margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:700;color:#7A2E28;margin-bottom:4px;">⚠️ You have an active timer!</div>
+      <div style="font-size:13px;color:#5C4F42;">It's 7:30 PM. Please complete your timer before leaving — it will be auto-completed at 8:00 PM.</div>
     </div>
-    <div id="endOfDayTimerInfo" style="font-size:13px;color:#2d3748;margin-bottom:16px;background:#f7fafc;border-radius:8px;padding:10px;"></div>
+    <div id="endOfDayTimerInfo" style="font-size:13px;color:#3D332A;margin-bottom:16px;background:#EDE9E3;border-radius:8px;padding:10px;"></div>
     <div style="display:flex;gap:8px;">
       <button class="btn btn-success" id="endOfDayCompleteBtn">⏹️ Complete Timer Now</button>
       <button class="btn btn-ghost" onclick="closeModal('endOfDayModal')">Later</button>
@@ -913,11 +984,11 @@ textarea.form-control{min-height:70px;resize:vertical;}
     <div class="modal-head">
       <h3>📋 End of Day — Please Confirm</h3>
     </div>
-    <div style="background:#f0fff4;border:1px solid #9ae6b4;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#276749;">
+    <div style="background:#EDF2E6;border:1px solid #B8CFA0;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#3D5C28;">
       Here's what was logged today. Please review and confirm before you leave.
     </div>
     <div id="eodSummaryContent" style="margin-bottom:16px;max-height:280px;overflow-y:auto;"></div>
-    <div id="eodSummaryWarning" style="display:none;background:#fff5f5;border:1px solid #feb2b2;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#9b2c2c;"></div>
+    <div id="eodSummaryWarning" style="display:none;background:#FBF0EE;border:1px solid #DBA89E;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#7A2E28;"></div>
     <div style="display:flex;gap:8px;">
       <button class="btn btn-success" id="eodConfirmBtn">✅ Confirmed — Logging off</button>
       <button class="btn btn-ghost" onclick="closeModal('eodSummaryModal')">I'll log more first</button>
@@ -930,24 +1001,24 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <h3>▶ Start Timer</h3>
       <button class="close-btn" onclick="closeModal('quickPlanModal')">×</button>
     </div>
-    <div style="background:#fffaf0;border:1px solid #fbd38d;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#c05621;">
+    <div style="background:#FAF3EB;border:1px solid #F0CFA0;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#8A5828;">
       📌 No task planned for today. Fill in the details below — this will create a planner entry and start your timer in one step.
     </div>
     <div class="form-group">
-      <label class="form-label">Project <span style="color:#e53e3e;">*</span></label>
+      <label class="form-label">Project <span style="color:#C0554A;">*</span></label>
       <select class="form-control" id="qpProject">
         <option value="">Select project...</option>
       </select>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Phase <span style="color:#e53e3e;">*</span></label>
+        <label class="form-label">Phase <span style="color:#C0554A;">*</span></label>
         <select class="form-control" id="qpPhase">
           <option value="">Select project first</option>
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Job Type <span style="color:#e53e3e;">*</span></label>
+        <label class="form-label">Job Type <span style="color:#C0554A;">*</span></label>
         <select class="form-control" id="qpTypology">
           <option value="">Select...</option>
         </select>
@@ -974,9 +1045,9 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <h3>▶ What are you working on?</h3>
       <button class="close-btn" onclick="closeModal('taskSelectModal')">×</button>
     </div>
-    <div style="font-size:12px;color:#718096;margin-bottom:14px;">Your planned tasks for today — tap to start tracking</div>
+    <div style="font-size:12px;color:#8A7E74;margin-bottom:14px;">Your planned tasks for today — tap to start tracking</div>
     <div id="taskSelectList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;"></div>
-    <div style="border-top:1px solid #e2e8f0;padding-top:12px;">
+    <div style="border-top:1px solid #E0D8CE;padding-top:12px;">
       <button class="tw-btn-unplanned" id="taskSelectAddNew" style="display:flex;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Add unplanned task
@@ -1650,7 +1721,10 @@ loadData().then(async () => {
         document.getElementById('mainApp').style.display = 'flex';
         document.getElementById('topbarName').textContent = user.name;
         document.getElementById('adminBadge').style.display = user.isAdmin ? 'inline-block' : 'none';
-        document.querySelectorAll('.admin-only').forEach(el => el.style.display = user.isAdmin ? 'flex' : 'none');
+        document.querySelectorAll('.admin-only').forEach(el => {
+          if (el.classList.contains('page')) return;
+          el.style.display = user.isAdmin ? 'flex' : 'none';
+        });
         initTimeReport(); renderDashboard(); updateApprovalBadge();
         
         // V14.2.2: Start inactivity monitoring
@@ -1712,7 +1786,10 @@ async function doLogin(){
     document.getElementById('mainApp').style.display='flex';
     document.getElementById('topbarName').textContent=user.name;
     document.getElementById('adminBadge').style.display=user.isAdmin?'inline-block':'none';
-    document.querySelectorAll('.admin-only').forEach(el=>el.style.display=user.isAdmin?'flex':'none');
+    document.querySelectorAll('.admin-only').forEach(el=>{
+      if (el.classList.contains('page')) return;
+      el.style.display=user.isAdmin?'flex':'none';
+    });
     initTimeReport(); renderDashboard(); updateApprovalBadge();
     
     // V14.2.2: FIX #6 - Start inactivity monitoring
@@ -1836,7 +1913,8 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='leaves')     renderLeaves();
     if(page==='teamleave')  { renderTeamLeave(); renderTeamLeaveBank(); }
     if(page==='approvals')  renderApprovals();
-    if(page==='manage')     renderManage();
+    if(page==='manage')       renderManage();
+    if(page==='hourstracker') renderHoursTracker();
   });
 });
 
@@ -1876,7 +1954,7 @@ function renderDashboard(){
   const head=document.createElement('div'); head.className='cal-head';
   head.innerHTML='<div class="cal-head-cell">Member</div>'+dn.map((d,i)=>{
     const dt=days[i],isWeekendDay=isWeekend(dt),tod=fmt(dt)===fmt(new Date());
-    return `<div class="cal-head-cell" style="${isWeekendDay?'color:#e53e3e;background:#fff5f5;':''}${tod?'color:#2b6cb0;background:#ebf4ff;font-weight:800;':''}">${d}<br><small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
+    return `<div class="cal-head-cell" style="${isWeekendDay?'color:#C0554A;background:#FBF0EE;':''}${tod?'color:#A96E35;background:#F0E6D6;font-weight:800;':''}">${d}<br><small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
   }).join(''); grid.appendChild(head);
 
   users.forEach(user=>{
@@ -1884,9 +1962,9 @@ function renderDashboard(){
     const nc=document.createElement('div'); nc.className='cal-name'; 
     // Highlight current user
     if(user.id === currentUser?.id){
-      nc.innerHTML = `<span style="font-weight:800;color:#2b6cb0;">👤 ${user.name}</span>`;
-      nc.style.background = '#ebf4ff';
-      nc.style.borderLeft = '4px solid #2b6cb0';
+      nc.innerHTML = `<span style="font-weight:800;color:#A96E35;">👤 ${user.name}</span>`;
+      nc.style.background = '#F0E6D6';
+      nc.style.borderLeft = '4px solid #A96E35';
       nc.style.paddingLeft = '10px';
     } else {
       nc.textContent = user.name;
@@ -1898,7 +1976,7 @@ function renderDashboard(){
       cell.className='cal-cell'+(fmt(day)===fmt(new Date())?' today':'')+(isWeekendDay?' holiday':'');
       // Highlight current user's cells
       if(user.id === currentUser?.id){
-        cell.style.borderLeft = '3px solid #2b6cb0';
+        cell.style.borderLeft = '3px solid #A96E35';
       }
       const lv=leaveRequests.find(l=>l.userId===user.id&&l.status==='approved'&&ds>=l.startDate&&ds<=l.endDate);
       if(lv){ const c=document.createElement('div'); c.className='chip chip-leave'; c.textContent=lv.type==='medical'?'🏥 Medical':'🌴 Casual'; cell.appendChild(c); }
@@ -1922,7 +2000,456 @@ function renderDashboard(){
   renderLiveTimeLogFeed();
 }
 
-// V13.5: Firebase Active Timer Functions
+// ═══════════════════════════════════════════════════════════════
+// HOURS TRACKER — V14.2.31
+// Fixed financial-year quarters: Q1=Apr-Jun, Q2=Jul-Sep,
+// Q3=Oct-Dec, Q4=Jan-Mar
+// Admin: full team view + reconciliation table
+// Staff: own card only + quarterly progress bars
+// ═══════════════════════════════════════════════════════════════
+let htTarget   = 170;  // configurable monthly target
+let htQtrOffset = 0;   // 0 = current quarter, -1 = previous, etc.
+
+function getQuarter(offset) {
+  // Returns { q, year, months:[{year,month,label}], label, shortLabel }
+  const now = new Date();
+  // Determine current quarter index (0-3) based on financial year (Apr start)
+  const m = now.getMonth(); // 0-11
+  // FY quarter: Apr=Q1(0), Jul=Q2(1), Oct=Q3(2), Jan=Q4(3)
+  const fyMonth = (m + 9) % 12; // shift so Apr=0
+  const currentQIdx = Math.floor(fyMonth / 3); // 0,1,2,3
+  const currentFYYear = m >= 3 ? now.getFullYear() : now.getFullYear() - 1; // FY start year
+
+  // Apply offset
+  let qIdx = currentQIdx + offset;
+  let fyYear = currentFYYear;
+  while (qIdx < 0)  { qIdx += 4; fyYear--; }
+  while (qIdx >= 4) { qIdx -= 4; fyYear++; }
+
+  // Quarter start months in calendar (0-indexed)
+  // Q0(FY Q1)=Apr(3), Q1=Jul(6), Q2=Oct(9), Q3=Jan(0) of next year
+  const startMonths = [3, 6, 9, 0]; // calendar months
+  const qLabels = ['Q1 (Apr–Jun)', 'Q2 (Jul–Sep)', 'Q3 (Oct–Dec)', 'Q4 (Jan–Mar)'];
+  const qShort  = ['Q1', 'Q2', 'Q3', 'Q4'];
+
+  const startCalMonth = startMonths[qIdx];
+  // For Q4 (Jan-Mar), the calendar year is fyYear+1
+  const calYear = qIdx === 3 ? fyYear + 1 : fyYear;
+
+  const months = [];
+  for (let i = 0; i < 3; i++) {
+    const cm = (startCalMonth + i) % 12;
+    const cy = (startCalMonth + i >= 12) ? calYear + 1 : calYear;
+    months.push({
+      year: cy,
+      month: cm,
+      label: new Date(cy, cm, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+    });
+  }
+
+  return {
+    q: qIdx + 1,
+    fyYear,
+    months,
+    label: qLabels[qIdx] + ' FY' + fyYear + '-' + String(fyYear + 1).slice(2),
+    shortLabel: qShort[qIdx]
+  };
+}
+
+function renderHoursTracker() {
+  const container = document.getElementById('hoursTrackerContent');
+  if (!container || !currentUser) return;
+
+  const isAdmin = currentUser.isAdmin;
+  const qtr = getQuarter(htQtrOffset);
+  const now = new Date();
+
+  // ── pure helpers ─────────────────────────────────────
+  function monthStr(m) {
+    return `${m.year}-${String(m.month + 1).padStart(2, '0')}`;
+  }
+  function prodMinsForUser(userId, m) {
+    return timeLogs
+      .filter(l => l.userId === userId && l.date && l.date.startsWith(monthStr(m)) && l.productive)
+      .reduce((s, l) => s + l.durationMins, 0);
+  }
+  function workingDaysInMonth(m) {
+    const last = new Date(m.year, m.month + 1, 0).getDate();
+    let d = 0;
+    for (let i = 1; i <= last; i++) {
+      const dow = new Date(m.year, m.month, i).getDay();
+      if (dow !== 0 && dow !== 6) d++;
+    }
+    return d;
+  }
+  function approvedLeaveDaysInMonth(userId, m) {
+    const first = monthStr(m) + '-01';
+    const last = monthStr(m) + '-' + String(new Date(m.year, m.month + 1, 0).getDate()).padStart(2, '0');
+    let days = 0;
+    leaveRequests.filter(l => l.userId === userId && l.status === 'approved').forEach(l => {
+      const s = l.startDate > first ? l.startDate : first;
+      const e = l.endDate   < last  ? l.endDate   : last;
+      if (s <= e) {
+        let d = new Date(s), end = new Date(e);
+        while (d <= end) { const dow = d.getDay(); if (dow !== 0 && dow !== 6) days++; d.setDate(d.getDate() + 1); }
+      }
+    });
+    return days;
+  }
+  function proRatedTarget(userId, m) {
+    const wd = workingDaysInMonth(m);
+    const lv = approvedLeaveDaysInMonth(userId, m);
+    return Math.round((htTarget / wd) * Math.max(1, wd - lv));
+  }
+  function elapsedWD(m) {
+    const isCurrent = m.year === now.getFullYear() && m.month === now.getMonth();
+    if (!isCurrent) return workingDaysInMonth(m);
+    let d = 0;
+    for (let i = 1; i <= now.getDate(); i++) {
+      const dow = new Date(m.year, m.month, i).getDay();
+      if (dow !== 0 && dow !== 6) d++;
+    }
+    return d;
+  }
+  function isPastMonth(m) {
+    return m.year < now.getFullYear() || (m.year === now.getFullYear() && m.month < now.getMonth());
+  }
+  function isCurrentMonth(m) {
+    return m.year === now.getFullYear() && m.month === now.getMonth();
+  }
+  function isFutureMonth(m) {
+    return m.year > now.getFullYear() || (m.year === now.getFullYear() && m.month > now.getMonth());
+  }
+  function getStatus(loggedMins, target, m) {
+    const h = loggedMins / 60;
+    const pct = target > 0 ? (h / target) * 100 : 0;
+    if (isFutureMonth(m)) return { key: 'future', label: '— Upcoming', pct: 0 };
+    if (isPastMonth(m)) {
+      if (h >= target) return { key: 'met',     label: '◉ Target Met', pct };
+      if (pct >= 80)   return { key: 'at-risk', label: `⚠ ${(target - h).toFixed(1)}h short`, pct };
+      return               { key: 'behind',   label: `${(target - h).toFixed(1)}h short`, pct };
+    }
+    // current month — pace check
+    const wd = workingDaysInMonth(m), elapsed = elapsedWD(m);
+    const expected = elapsed > 0 ? (target / wd) * elapsed : 0;
+    const pace = expected > 0 ? (h / expected) * 100 : 100;
+    if (pace >= 90) return { key: 'on-track', label: '◉ On Track', pct };
+    if (pace >= 65) return { key: 'at-risk',  label: '◐ At Risk',  pct };
+    return               { key: 'behind',   label: '◯ Behind',   pct };
+  }
+  function hf(mins) { // hours formatted
+    const h = (mins/60).toFixed(1); return h + 'h';
+  }
+  function segColor(pct, isFuture) {
+    if (isFuture) return '#E0D8CE';
+    if (pct >= 100) return '#A96E35';
+    if (pct >= 80)  return '#6E8F52';
+    if (pct >= 60)  return '#C4874A';
+    return '#C0554A';
+  }
+  function isCurrentQtr() {
+    const current = getQuarter(0);
+    return JSON.stringify(current.months) === JSON.stringify(qtr.months);
+  }
+
+  // ── quarter is fully in future? ───────────────────────
+  const allFuture = qtr.months.every(m => isFutureMonth(m));
+
+  // ── build user list ───────────────────────────────────
+  const staffUsers = users.filter(u => !u.isAdmin);
+  const viewUsers  = isAdmin ? staffUsers : staffUsers.filter(u => u.id === currentUser.id);
+
+  // ── per-user data ─────────────────────────────────────
+  const userData = viewUsers.map(user => {
+    const months = qtr.months.map(m => {
+      const mins   = prodMinsForUser(user.id, m);
+      const target = proRatedTarget(user.id, m);
+      const st     = getStatus(mins, target, m);
+      return { m, mins, target, st };
+    });
+    const totalMins   = months.reduce((s, d) => s + d.mins, 0);
+    const totalTarget = months.reduce((s, d) => s + d.target, 0);
+    const qtrSt       = getStatus(totalMins, totalTarget, qtr.months[2]); // judge by last month of qtr
+    // For current quarter judge overall differently
+    const activeMonths = months.filter(d => !isFutureMonth(d.m));
+    const activeMins   = activeMonths.reduce((s,d)=>s+d.mins,0);
+    const activeTarget = activeMonths.reduce((s,d)=>s+d.target,0);
+    const overallSt    = activeTarget > 0 ? getStatus(activeMins, activeTarget, activeMonths[activeMonths.length-1]?.m || qtr.months[0]) : { key:'future', label:'— Upcoming', pct:0 };
+    return { user, months, totalMins, totalTarget, overallSt };
+  });
+
+  // ── HTML ──────────────────────────────────────────────
+  let html = '';
+
+  // Header + nav
+  html += `
+  <div class="ht-top">
+    <button class="ht-nav-btn" id="htPrev">◀ Prev</button>
+    <div>
+      <div class="ht-qtr-label">${qtr.label}</div>
+      <div class="ht-qtr-sub">${qtr.months[0].label} · ${qtr.months[1].label} · ${qtr.months[2].label}</div>
+    </div>
+    <button class="ht-nav-btn" id="htNext" ${isCurrentQtr() ? 'disabled' : ''}>Next ▶</button>
+    ${isAdmin ? `<div class="ht-target-pill">🎯 Target: <input type="number" id="htTargetInp" value="${htTarget}" min="50" max="300">h/month</div>` : ''}
+  </div>`;
+
+  if (allFuture) {
+    html += `<div style="text-align:center;padding:40px;color:#B0A89E;font-size:15px;">This quarter hasn't started yet.</div>`;
+    container.innerHTML = html;
+    attachHtListeners();
+    return;
+  }
+
+  // ── Staff view: single card ───────────────────────────
+  if (!isAdmin) {
+    const d = userData[0];
+    if (!d) { container.innerHTML = html + '<p>No data.</p>'; return; }
+    const activeMinsStaff   = d.months.filter(md=>!isFutureMonth(md.m)).reduce((s,md)=>s+md.mins,0);
+    const activeTargetStaff = d.months.filter(md=>!isFutureMonth(md.m)).reduce((s,md)=>s+md.target,0);
+    const pct = activeTargetStaff > 0 ? Math.min(100, (activeMinsStaff/60 / activeTargetStaff) * 100) : 0;
+    html += `
+    <div class="ht-my-card">
+      <div class="ht-my-title">Your ${qtr.shortLabel} Progress — Productive Hours</div>
+      <div class="ht-my-name">${d.user.name}</div>
+      <span class="ht-badge ${d.overallSt.key}">${d.overallSt.label}</span>
+      <div class="ht-progress-bg" style="margin:12px 0 6px;">
+        <div class="ht-progress-fill ${d.overallSt.key}" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+      <div class="ht-row">
+        <span><strong>${(activeMinsStaff/60).toFixed(1)}h</strong> logged (productive)</span>
+        <span>vs <strong>${activeTargetStaff}h</strong> so far · ${pct.toFixed(0)}%</span>
+      </div>
+      <div class="ht-qtr-months">
+        <div class="ht-qtr-months-title">Month by Month (productive hrs)</div>
+        <div class="ht-month-bars">`;
+    d.months.forEach(md => {
+      const mpct = md.target > 0 ? Math.min(100, (md.mins/60 / md.target) * 100) : 0;
+      const future = isFutureMonth(md.m);
+      const past   = isPastMonth(md.m);
+      const barColor = future ? '#E0D8CE' : past && mpct >= 90 ? '#A96E35' : past && mpct >= 60 ? '#C4874A' : past ? '#C0554A' : segColor(mpct, false);
+      html += `
+          <div class="ht-month-row">
+            <div class="ht-month-name">${md.m.label.split(' ')[0]}</div>
+            <div class="ht-month-bg">
+              <div class="ht-month-fill" style="width:${future ? 0 : mpct.toFixed(1)}%;background:${barColor};"></div>
+            </div>
+            <div class="ht-month-val" style="color:${future?'#B0A89E':past&&mpct<80?'#C0554A':'#5C4F42'}">${future ? '—' : (md.mins/60).toFixed(1)+'h / '+md.target+'h'}</div>
+          </div>`;
+    });
+    html += `</div></div></div>`;
+    container.innerHTML = html;
+    attachHtListeners();
+    return;
+  }
+
+  // ── Admin view: cards grid ────────────────────────────
+  html += `<div class="ht-grid">`;
+  userData.forEach(d => {
+    // Only count months that have started (not future)
+    const activeMins   = d.months.filter(md=>!isFutureMonth(md.m)).reduce((s,md)=>s+md.mins,0);
+    const activeTarget = d.months.filter(md=>!isFutureMonth(md.m)).reduce((s,md)=>s+md.target,0);
+    const activeMonthCount = d.months.filter(md=>!isFutureMonth(md.m)).length;
+    // Progress % = logged vs target for elapsed months only
+    const pct = activeTarget > 0 ? Math.min(100, (activeMins/60 / activeTarget) * 100) : 0;
+    const remainH = Math.max(0, activeTarget - activeMins/60);
+
+    // Days left in current month of quarter
+    const currentM = d.months.find(md => isCurrentMonth(md.m));
+    const wdLeft = currentM ? workingDaysInMonth(currentM.m) - elapsedWD(currentM.m) : 0;
+    // Remaining needed across all remaining working days in quarter
+    // = remaining to hit active target + full future month targets
+    const futureTarget = d.months.filter(md=>isFutureMonth(md.m)).reduce((s,md)=>s+md.target,0);
+    const totalRemainingH = remainH + futureTarget;
+    // Total working days left in quarter
+    const totalWDLeft = d.months.reduce((s,md) => {
+      if (isPastMonth(md.m)) return s;
+      if (isCurrentMonth(md.m)) return s + workingDaysInMonth(md.m) - elapsedWD(md.m);
+      return s + workingDaysInMonth(md.m);
+    }, 0);
+    const neededPerDay = totalWDLeft > 0 && totalRemainingH > 0 ? (totalRemainingH / totalWDLeft).toFixed(1) : null;
+
+    html += `
+    <div class="ht-card ${d.overallSt.key}">
+      <div class="ht-name">${d.user.name}</div>
+      <span class="ht-badge ${d.overallSt.key}">${d.overallSt.label}</span>
+      <div style="font-size:10px;color:#8A7E74;margin-bottom:6px;">Productive hours only · ${activeMonthCount} of 3 months elapsed</div>
+      <div class="ht-progress-bg">
+        <div class="ht-progress-fill ${d.overallSt.key}" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+      <div class="ht-row">
+        <span><strong>${(activeMins/60).toFixed(1)}h</strong> productive logged</span>
+        <span>vs <strong>${activeTarget}h</strong> target · ${pct.toFixed(0)}%</span>
+      </div>
+      <div class="ht-stats-mini">
+        <div class="ht-mini">
+          <div class="ht-mini-val" style="color:${totalRemainingH > 0 ? '#C0554A' : '#6E8F52'}">${totalRemainingH > 0 ? totalRemainingH.toFixed(1)+'h' : '✅'}</div>
+          <div class="ht-mini-lbl">Still needed (qtr)</div>
+        </div>
+        <div class="ht-mini">
+          <div class="ht-mini-val" style="color:${neededPerDay && parseFloat(neededPerDay) > 8 ? '#C0554A' : '#3D332A'}">${neededPerDay ? neededPerDay+'h/d' : '—'}</div>
+          <div class="ht-mini-lbl">Pace needed</div>
+        </div>
+      </div>
+      <div class="ht-qtr-months">
+        <div class="ht-qtr-months-title">Month by Month (productive hrs)</div>
+        <div class="ht-month-bars">`;
+    d.months.forEach(md => {
+      const mpct = md.target > 0 ? Math.min(100, (md.mins / md.target / 60 * 60 / md.target) * 100) : 0;
+      // Fix: md.mins is in minutes, target is in hours
+      const mpctFixed = md.target > 0 ? Math.min(100, (md.mins / 60 / md.target) * 100) : 0;
+      const future = isFutureMonth(md.m);
+      const past   = isPastMonth(md.m);
+      const barColor = future ? '#E0D8CE' : past && mpctFixed < 100 ? '#C0554A' : past ? '#A96E35' : segColor(mpctFixed, false);
+      html += `
+          <div class="ht-month-row">
+            <div class="ht-month-name">${md.m.label.split(' ')[0]}</div>
+            <div class="ht-month-bg">
+              <div class="ht-month-fill" style="width:${future ? 0 : mpctFixed.toFixed(1)}%;background:${barColor};"></div>
+            </div>
+            <div class="ht-month-val" style="color:${future?'#B0A89E':past&&mpctFixed<80?'#C0554A':'#5C4F42'}">${future ? '—' : (md.mins/60).toFixed(1)+'h / '+md.target+'h'}</div>
+          </div>`;
+    });
+    html += `</div></div></div>`; });
+  html += `</div>`;
+
+  // ── Admin: Summary Table ──────────────────────────────
+  html += `
+  <div class="ht-table-wrap">
+    <div class="ht-table-title">📋 ${qtr.label} — Team Summary</div>
+    <table class="ht-table">
+      <thead><tr>
+        <th>Member</th>
+        ${qtr.months.map(m => `<th>${m.label.split(' ')[0]}</th>`).join('')}
+        <th>Total</th>
+        <th>Target</th>
+        <th>Gap</th>
+        <th>Status</th>
+      </tr></thead>
+      <tbody>`;
+  userData.forEach(d => {
+    const gap = (d.totalMins/60) - d.totalTarget;
+    html += `<tr>
+      <td style="font-weight:700;">${d.user.name}</td>
+      ${d.months.map(md => `<td style="font-weight:600;color:${isFutureMonth(md.m)?'#B0A89E':'#A96E35'}">${isFutureMonth(md.m) ? '—' : hf(md.mins)}</td>`).join('')}
+      <td style="font-weight:800;color:#A96E35;">${hf(d.totalMins)}</td>
+      <td>${d.totalTarget}h</td>
+      <td style="font-weight:700;color:${gap>=0?'#6E8F52':'#C0554A'}">${gap>=0?'+':''}${gap.toFixed(1)}h</td>
+      <td><span class="ht-badge ${d.overallSt.key}" style="margin:0;font-size:10px;">${d.overallSt.label}</span></td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
+
+  // ── Admin: Reconciliation (show for past quarters, or current with note) ──
+  const qtrComplete = qtr.months.every(m => isPastMonth(m));
+
+  if (!qtrComplete) {
+    // ── Quarter in progress: show tracking table only, NO salary deduction ──
+    html += `
+    <div class="ht-reconcile">
+      <h3>📋 ${qtr.shortLabel} Progress Tracker</h3>
+      <p>
+        Quarter ends after <strong>${qtr.months[2].label}</strong>. 
+        No salary deduction applies yet — deduction is calculated only at quarter end.<br>
+        Each person needs <strong>${htTarget * 3}h</strong> productive by end of ${qtr.months[2].label}.
+      </p>
+      <table class="ht-rec-table">
+        <thead><tr>
+          <th>Member</th>
+          <th>Logged so far</th>
+          <th>Q1 Target (${htTarget*3}h)</th>
+          <th>Still needed by ${qtr.months[2].label}</th>
+        </tr></thead>
+        <tbody>`;
+    userData.forEach(d => {
+      const loggedH   = d.totalMins / 60;
+      const fullTarget = htTarget * 3;
+      const stillNeed  = Math.max(0, fullTarget - loggedH);
+      // Working days remaining in the full quarter
+      const wdRemaining = qtr.months.reduce((s, m) => {
+        if (isPastMonth(m)) return s;
+        if (isCurrentMonth(m)) return s + workingDaysInMonth(m) - elapsedWD(m);
+        return s + workingDaysInMonth(m);
+      }, 0);
+      const paceNeeded = wdRemaining > 0 && stillNeed > 0
+        ? (stillNeed / wdRemaining).toFixed(1) + 'h/day'
+        : stillNeed <= 0 ? '✅ Done' : '—';
+      const pct = Math.min(100, (loggedH / fullTarget) * 100);
+      html += `<tr>
+        <td style="font-weight:700;">${d.user.name}</td>
+        <td>
+          <strong style="color:#A96E35;">${loggedH.toFixed(1)}h</strong>
+          <span style="font-size:11px;color:#8A7E74;"> productive</span>
+          <div style="background:#E0D8CE;border-radius:4px;height:5px;margin-top:4px;width:120px;">
+            <div style="height:5px;border-radius:4px;width:${pct.toFixed(0)}%;background:${pct>=100?'#A96E35':pct>=60?'#6E8F52':pct>=30?'#C4874A':'#C0554A'};"></div>
+          </div>
+          <span style="font-size:10px;color:#B0A89E;">${pct.toFixed(0)}% of ${fullTarget}h</span>
+        </td>
+        <td style="font-weight:700;color:#3D332A;">${fullTarget}h</td>
+        <td style="font-weight:700;color:${stillNeed<=0?'#6E8F52':parseFloat(paceNeeded)>9?'#C0554A':'#C4874A'}">
+          ${stillNeed<=0 ? '◉ Target met' : stillNeed.toFixed(1)+'h'}
+          ${stillNeed>0 ? `<div style="font-size:11px;font-weight:600;color:#8A7E74;margin-top:2px;">${paceNeeded} needed</div>` : ''}
+        </td>
+      </tr>`;
+    });
+    html += `</tbody></table>
+      <div style="margin-top:12px;padding:10px 12px;background:#F5ECD8;border-radius:8px;font-size:12px;color:#7A4E18;">
+        ⚖️ <strong>Salary deduction formula</strong> (applies at end of ${qtr.months[2].label} only):<br>
+        Month 3 pay = (3-month salary × total logged / ${htTarget*3}h) − months 1+2 salary already paid. Capped at month 3 gross.
+      </div>
+    </div>`;
+
+  } else {
+    // ── Quarter complete: show final deduction ──────────
+    html += `
+    <div class="ht-reconcile">
+      <h3>⚖️ ${qtr.shortLabel} Reconciliation — Final</h3>
+      <p>
+        This quarter is complete. Deduction applies to <strong>${qtr.months[2].label}</strong> salary.<br>
+        Formula: Month 3 pay = (3-month salary × logged / ${htTarget*3}h) − months 1+2 salary paid. Deduction capped at month 3 gross.
+      </p>
+      <table class="ht-rec-table">
+        <thead><tr>
+          <th>Member</th>
+          <th>Total Productive Logged</th>
+          <th>vs ${htTarget*3}h Target</th>
+          <th>Salary Impact (Month 3)</th>
+        </tr></thead>
+        <tbody>`;
+    userData.forEach(d => {
+      const loggedH    = d.totalMins / 60;
+      const fullTarget = htTarget * 3;
+      const shortfall  = fullTarget - loggedH;
+      const pct3       = Math.min(1, loggedH / fullTarget);
+      const deductPct  = ((1 - pct3) * 100).toFixed(1);
+      const salaryCell = pct3 >= 1
+        ? `<span class="ht-ok-pay">Full salary ✅</span>`
+        : `<span class="ht-deduct">−${deductPct}% of ${qtr.months[2].label} salary</span>`;
+      html += `<tr>
+        <td style="font-weight:700;">${d.user.name}</td>
+        <td style="font-weight:800;color:#A96E35;">${loggedH.toFixed(1)}h</td>
+        <td style="font-weight:700;color:${shortfall>0?'#C0554A':'#6E8F52'}">${shortfall>0?'−'+shortfall.toFixed(1)+'h short':'◉ Met'}</td>
+        <td>${salaryCell}</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+
+
+
+  container.innerHTML = html;
+  attachHtListeners();
+
+  function attachHtListeners() {
+    document.getElementById('htPrev')?.addEventListener('click', () => { htQtrOffset--; renderHoursTracker(); });
+    document.getElementById('htNext')?.addEventListener('click', () => { if (!isCurrentQtr()) { htQtrOffset++; renderHoursTracker(); } });
+    document.getElementById('htTargetInp')?.addEventListener('change', e => {
+      const v = parseInt(e.target.value);
+      if (v >= 50 && v <= 300) { htTarget = v; renderHoursTracker(); }
+    });
+  }
+}
+
+
 async function saveActiveTimerToFirebase() {
   if (!currentUser || !timerRunning || !timerStartedAt) return;
   
@@ -2015,7 +2542,7 @@ function renderLiveTimers() {
   }
 
   if (cachedActiveTimers.length === 0) {
-    feedEl.innerHTML = '<div style="color:#a0aec0;font-size:13px;padding:12px;text-align:center;">No active timers</div>';
+    feedEl.innerHTML = '<div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">No active timers</div>';
     return;
   }
 
@@ -2027,12 +2554,12 @@ function renderLiveTimers() {
   feedEl.innerHTML = sorted.map(item => {
     const timeStr = secsToHMS(item.elapsedSecs);
     return `
-      <div style="background:#f0fdf4;padding:10px;border-radius:6px;border-left:3px solid #10b981;">
+      <div style="background:#EDF2E6;padding:10px;border-radius:6px;border-left:3px solid #6E8F52;">
         <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px;">
-          <div style="font-weight:600;font-size:13px;color:#2d3748;">🟢 ${item.userName}</div>
-          <div style="font-size:14px;font-weight:700;color:#10b981;font-family:monospace;">${timeStr} ⬆️</div>
+          <div style="font-weight:600;font-size:13px;color:#3D332A;">🟢 ${item.userName}</div>
+          <div style="font-size:14px;font-weight:700;color:#6E8F52;font-family:monospace;">${timeStr} ⬆️</div>
         </div>
-        <div style="font-size:12px;color:#4a5568;">
+        <div style="font-size:12px;color:#5C4F42;">
           📁 ${item.projectName}${item.phase ? ` - ${item.phase}` : ''}
         </div>
       </div>
@@ -2154,7 +2681,7 @@ function renderLiveTimeLogFeed() {
   console.log('📡 Recent logs to display:', recentLogs.length, recentLogs.map(l => `${l.date} - ${users.find(u=>u.id===l.userId)?.name}`));
   
   if (recentLogs.length === 0) {
-    feedEl.innerHTML = '<div style="color:#a0aec0;font-size:13px;padding:12px;text-align:center;">No time logs yet</div>';
+    feedEl.innerHTML = '<div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">No time logs yet</div>';
     return;
   }
   
@@ -2173,23 +2700,23 @@ function renderLiveTimeLogFeed() {
     
     const isProductive = log.productive;
     const badge = isProductive ? 
-      '<span style="background:#c6f6d5;color:#22543d;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600;">Productive</span>' :
-      '<span style="background:#fed7d7;color:#742a2a;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600;">Non-Productive</span>';
+      '<span style="background:#DCE8CC;color:#2E4A1E;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600;">Productive</span>' :
+      '<span style="background:#F5E0DC;color:#5C2020;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600;">Non-Productive</span>';
     
     return `
-      <div style="background:#f7fafc;padding:10px;border-radius:6px;border-left:3px solid ${isProductive ? '#48bb78' : '#fc8181'};">
+      <div style="background:#EDE9E3;padding:10px;border-radius:6px;border-left:3px solid ${isProductive ? '#88AA6A' : '#E09088'};">
         <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px;">
-          <div style="font-weight:600;font-size:13px;color:#2d3748;">👤 ${user?.name || 'Unknown'}</div>
-          <div style="font-size:11px;color:#718096;">${timeAgo}</div>
+          <div style="font-weight:600;font-size:13px;color:#3D332A;">👤 ${user?.name || 'Unknown'}</div>
+          <div style="font-size:11px;color:#8A7E74;">${timeAgo}</div>
         </div>
-        <div style="font-size:14px;font-weight:700;color:#4299e1;margin-bottom:4px;">⏱ ${minsToHM(log.durationMins)}</div>
-        <div style="font-size:12px;color:#4a5568;margin-bottom:4px;">
+        <div style="font-size:14px;font-weight:700;color:#C4874A;margin-bottom:4px;">⏱ ${minsToHM(log.durationMins)}</div>
+        <div style="font-size:12px;color:#5C4F42;margin-bottom:4px;">
           ${project ? `📁 ${project.name}` : `📝 ${log.activity || 'Activity'}`}
           ${log.phase ? ` - ${log.phase}` : ''}
         </div>
         <div style="display:flex;gap:6px;align-items:center;">
           ${badge}
-          ${log.description ? `<span style="font-size:11px;color:#718096;">${log.description}</span>` : ''}
+          ${log.description ? `<span style="font-size:11px;color:#8A7E74;">${log.description}</span>` : ''}
         </div>
       </div>
     `;
@@ -2211,8 +2738,8 @@ document.getElementById('saveHolidayBtn').addEventListener('click',()=>{
 });
 document.getElementById('dashViewHolidays').addEventListener('click',()=>{
   const list=document.getElementById('holidaysList');
-  if(!holidays.length){ list.innerHTML='<p style="color:#718096;padding:20px;text-align:center;">No custom holidays added yet.</p>'; }
-  else{ list.innerHTML=holidays.map(h=>`<div class="list-item"><div><div style="font-weight:600;">${h.name}</div><div style="font-size:11px;color:#718096;">${fmtD(h.date)}</div></div><button class="btn btn-danger btn-sm" onclick="deleteHoliday('${h.id}')">Delete</button></div>`).join(''); }
+  if(!holidays.length){ list.innerHTML='<p style="color:#8A7E74;padding:20px;text-align:center;">No custom holidays added yet.</p>'; }
+  else{ list.innerHTML=holidays.map(h=>`<div class="list-item"><div><div style="font-weight:600;">${h.name}</div><div style="font-size:11px;color:#8A7E74;">${fmtD(h.date)}</div></div><button class="btn btn-danger btn-sm" onclick="deleteHoliday('${h.id}')">Delete</button></div>`).join(''); }
   openModal('viewHolidaysModal');
 });
 window.deleteHoliday=function(id){
@@ -2253,7 +2780,7 @@ function renderPlanner(){
   const head=document.createElement('div'); head.className='planner-head';
   head.innerHTML='<div class="planner-head-cell">Member</div>'+dn.map((d,i)=>{
     const dt=days[i],hol=isHoliday(dt),tod=fmt(dt)===fmt(new Date());
-    return `<div class="planner-head-cell" style="${hol?'background:#fff5f5;color:#e53e3e;':''}${tod?'background:#ebf4ff;color:#2b6cb0;':''}">${d} <small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
+    return `<div class="planner-head-cell" style="${hol?'background:#FBF0EE;color:#C0554A;':''}${tod?'background:#F0E6D6;color:#A96E35;':''}">${d} <small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
   }).join(''); grid.appendChild(head);
   users.forEach(user=>{
     const row=document.createElement('div'); row.className='planner-row';
@@ -2261,14 +2788,14 @@ function renderPlanner(){
     const isMyRow = user.id === currentUser.id;
     const nc=document.createElement('div'); nc.className='planner-name';
     nc.textContent=user.name;
-    if (isMyRow) nc.style.cssText='display:flex;align-items:center;font-size:12px;font-weight:700;padding:0 6px;color:#2b6cb0;';
+    if (isMyRow) nc.style.cssText='display:flex;align-items:center;font-size:12px;font-weight:700;padding:0 6px;color:#A96E35;';
     row.appendChild(nc);
     days.forEach(day=>{
       const ds=fmt(day), entries=planEntries.filter(p=>p.userId===user.id&&p.date===ds);
       const cell=document.createElement('div');
       cell.className='planner-cell'+(entries.length?' has-items':'')+(isHoliday(day)?' holiday':'');
       // V14.2.24: Highlight own row cells
-      if (isMyRow && !isHoliday(day)) cell.style.borderColor='#bee3f8';
+      if (isMyRow && !isHoliday(day)) cell.style.borderColor='#DBC9A8';
       entries.forEach(pl=>{
         const c=document.createElement('div'); c.className=`plan-chip ${pl.done?'done':pl.type}`;
         c.textContent=`${pl.type==='emergency'?'🚨':''}${pl.project}${pl.phase?' · '+pl.phase.split(' ')[0]:''}`;
@@ -2419,7 +2946,7 @@ function openLogModal(preLinked=null){
     logDateInput.setAttribute('min', today);
     logDateInput.setAttribute('max', today);
     logDateInput.setAttribute('readonly', 'readonly');
-    logDateInput.style.backgroundColor = '#f7fafc';
+    logDateInput.style.backgroundColor = '#EDE9E3';
     logDateInput.style.cursor = 'not-allowed';
     logDateInput.title = 'Date locked to today - cannot backdate';
   }
@@ -2542,13 +3069,13 @@ function renderTimeLog(){
   const total=logs.reduce((s,l)=>s+l.durationMins,0);
   document.getElementById('tlTotal').innerHTML=`${minsToHM(total)} total<span>${logs.length} entr${logs.length===1?'y':'ies'} · current filter</span>`;
   const el=document.getElementById('timeLogList');
-  if(!logs.length){ el.innerHTML='<p style="color:#718096;padding:20px;text-align:center;">No logs for selected period. <button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'tlMonth\').value=\'-1\';renderTimeLog();">Show All Months</button></p>'; return; }
+  if(!logs.length){ el.innerHTML='<p style="color:#8A7E74;padding:20px;text-align:center;">No logs for selected period. <button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'tlMonth\').value=\'-1\';renderTimeLog();">Show All Months</button></p>'; return; }
   el.innerHTML='';
   logs.forEach(log=>{
     const user=users.find(u=>u.id===log.userId);
     const el2=document.createElement('div'); el2.className='log-card';
     const projBadge=log.productive?`<strong>📁 ${log.projectName}</strong> · ${log.phase} · <span class="prod-tag">Productive</span>`:`<span class="nonprod-tag">Non-Productive</span> ${log.activity}`;
-    el2.innerHTML=`<div class="log-body"><div class="log-time">⏱ ${minsToHM(log.durationMins)}</div><div class="log-meta">${projBadge}${currentUser.isAdmin?` · 👤 <strong>${user?.name||'?'}</strong>`:''}</div>${log.typology?`<div style="font-size:11px;color:#718096;margin-bottom:3px;">🏷️ ${log.typology}</div>`:''}<div class="log-desc">${log.desc}</div>${log.startTime&&log.endTime?`<div style="font-size:11px;color:#718096;margin-top:3px;display:flex;align-items:center;gap:4px;">🕐 <strong>${log.startTime}</strong> → <strong>${log.endTime}</strong></div>`:'<div style="font-size:10px;color:#cbd5e0;margin-top:2px;font-style:italic;">No clock time recorded</div>'}</div><div class="log-right"><div class="log-date">${fmtD(log.date)}</div></div>`;
+    el2.innerHTML=`<div class="log-body"><div class="log-time">⏱ ${minsToHM(log.durationMins)}</div><div class="log-meta">${projBadge}${currentUser.isAdmin?` · 👤 <strong>${user?.name||'?'}</strong>`:''}</div>${log.typology?`<div style="font-size:11px;color:#8A7E74;margin-bottom:3px;">🏷️ ${log.typology}</div>`:''}<div class="log-desc">${log.desc}</div>${log.startTime&&log.endTime?`<div style="font-size:11px;color:#8A7E74;margin-top:3px;display:flex;align-items:center;gap:4px;">🕐 <strong>${log.startTime}</strong> → <strong>${log.endTime}</strong></div>`:'<div style="font-size:10px;color:#D0C4B8;margin-top:2px;font-style:italic;">No clock time recorded</div>'}</div><div class="log-right"><div class="log-date">${fmtD(log.date)}</div></div>`;
     el.appendChild(el2);
   });
 }
@@ -2560,7 +3087,7 @@ document.getElementById('addProjectBtn').addEventListener('click',()=>openProjec
 
 function renderProjectsBudget(){
   const el=document.getElementById('projectsBudgetList');
-  if(!projectsData.length){ el.innerHTML='<p style="color:#718096;padding:20px;">No projects yet.</p>'; return; }
+  if(!projectsData.length){ el.innerHTML='<p style="color:#8A7E74;padding:20px;">No projects yet.</p>'; return; }
   el.innerHTML='';
   projectsData.forEach(proj=>{
     const totalBudget=Object.values(proj.phases).reduce((s,h)=>s+h,0);
@@ -2568,14 +3095,14 @@ function renderProjectsBudget(){
     const pct=totalBudget>0?Math.round((loggedH/totalBudget)*100):0;
     const status=pct>=100?'over':pct>=80?'near':'ok';
     const card=document.createElement('div'); card.className=`project-card ${status}`;
-    card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px;"><div><div style="font-weight:800;font-size:16px;">${proj.name}</div><div style="font-size:12px;color:#718096;">🏢 ${proj.client} · ${fmtD(proj.startDate)} → ${fmtD(proj.endDate)}</div></div><div style="text-align:right;"><div style="font-size:18px;font-weight:800;color:${status==='over'?'#e53e3e':status==='near'?'#d69e2e':'#38a169'};">${pct}% used</div><div style="font-size:12px;color:#718096;">${hrsToHM(loggedH)} of ${totalBudget}h budget</div></div></div><div style="background:#e2e8f0;border-radius:4px;height:8px;margin-bottom:16px;"><div style="height:8px;border-radius:4px;background:${status==='over'?'#e53e3e':status==='near'?'#d69e2e':'#38a169'};width:${Math.min(100,pct)}%;transition:width 0.4s;"></div></div><div id="phases-${proj.id}"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="btn btn-ghost btn-sm" data-log="${proj.id}">⏱️ Log Time</button>${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" data-edit="${proj.id}">✏️ Edit</button>`:''}</div>`;
+    card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px;"><div><div style="font-weight:800;font-size:16px;">${proj.name}</div><div style="font-size:12px;color:#8A7E74;">🏢 ${proj.client} · ${fmtD(proj.startDate)} → ${fmtD(proj.endDate)}</div></div><div style="text-align:right;"><div style="font-size:18px;font-weight:800;color:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};">${pct}% used</div><div style="font-size:12px;color:#8A7E74;">${hrsToHM(loggedH)} of ${totalBudget}h budget</div></div></div><div style="background:#E0D8CE;border-radius:4px;height:8px;margin-bottom:16px;"><div style="height:8px;border-radius:4px;background:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};width:${Math.min(100,pct)}%;transition:width 0.4s;"></div></div><div id="phases-${proj.id}"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="btn btn-ghost btn-sm" data-log="${proj.id}">⏱️ Log Time</button>${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" data-edit="${proj.id}">✏️ Edit</button>`:''}</div>`;
     const phasesDiv=card.querySelector(`#phases-${proj.id}`);
     PHASES.forEach(ph=>{
       const budget=proj.phases[ph]||0; if(!budget) return;
       const loggedMins=phaseLoggedMins(proj.id,ph); const loggedHrs=loggedMins/60;
       const pp=budget>0?Math.min(100,Math.round((loggedHrs/budget)*100)):0; const st=pp>=100?'over':pp>=80?'near':'ok';
       const row=document.createElement('div'); row.className='phase-row';
-      row.innerHTML=`<span class="phase-name">${ph}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${st}" style="width:${pp}%;"></div></div><span class="phase-nums">${minsToHM(loggedMins)} / <strong>${budget}h</strong> <span style="color:${st==='over'?'#e53e3e':st==='near'?'#d69e2e':'#38a169'}">(${pp}%)</span></span>`;
+      row.innerHTML=`<span class="phase-name">${ph}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${st}" style="width:${pp}%;"></div></div><span class="phase-nums">${minsToHM(loggedMins)} / <strong>${budget}h</strong> <span style="color:${st==='over'?'#C0554A':st==='near'?'#C4874A':'#6E8F52'}">(${pp}%)</span></span>`;
       phasesDiv.appendChild(row);
     });
     card.querySelector('[data-log]')?.addEventListener('click',()=>openLogModal(proj.id));
@@ -2692,9 +3219,9 @@ function trSetPreset(preset) {
   trActivePreset = preset;
   // Highlight active button
   document.querySelectorAll('.tr-preset').forEach(b => {
-    b.style.background = b.dataset.preset === preset ? '#ebf4ff' : '';
-    b.style.borderColor = b.dataset.preset === preset ? '#2b6cb0' : '';
-    b.style.color = b.dataset.preset === preset ? '#2b6cb0' : '';
+    b.style.background = b.dataset.preset === preset ? '#F0E6D6' : '';
+    b.style.borderColor = b.dataset.preset === preset ? '#A96E35' : '';
+    b.style.color = b.dataset.preset === preset ? '#A96E35' : '';
     b.style.fontWeight = b.dataset.preset === preset ? '700' : '';
   });
   // Show/hide custom range picker
@@ -2786,8 +3313,8 @@ function buildTrPerson(logs,total){
   const sorted=Object.entries(byU).sort((a,b)=>b[1].mins-a[1].mins); const maxM=sorted[0]?.[1].mins||1;
   let html=`<table class="rpt-table"><thead><tr><th>Member</th><th>Breakdown</th><th style="text-align:right">Time</th><th style="text-align:right">Share</th></tr></thead><tbody>`;
   sorted.forEach(([uid,d])=>{ const u=users.find(u=>u.id===uid); const pct=((d.mins/total)*100).toFixed(1); const bar=((d.mins/maxM)*100).toFixed(1);
-    const rows=Object.entries(d.projects).sort((a,b)=>b[1]-a[1]).map(([p,m])=>`<tr class="sub"><td colspan="2">📁 ${p}</td><td style="text-align:right;color:#2b6cb0;font-weight:600;">${minsToHM(m)}</td><td style="text-align:right;color:#718096;">${((m/total)*100).toFixed(1)}%</td></tr>`).join('');
-    html+=`<tr><td><b>${u?.name||'?'}</b><br><span style="font-size:10px;color:#a0aec0;">${d.n} entries</span></td><td><div class="bar-wrap"><div class="bar-fill" style="width:${bar}%"></div></div></td><td style="text-align:right;font-weight:800;font-size:14px;">${minsToHM(d.mins)}</td><td style="text-align:right;font-weight:700;color:#6b46c1;">${pct}%</td></tr>${rows}<tr><td colspan="4" style="border:none;height:6px;"></td></tr>`;
+    const rows=Object.entries(d.projects).sort((a,b)=>b[1]-a[1]).map(([p,m])=>`<tr class="sub"><td colspan="2">📁 ${p}</td><td style="text-align:right;color:#A96E35;font-weight:600;">${minsToHM(m)}</td><td style="text-align:right;color:#8A7E74;">${((m/total)*100).toFixed(1)}%</td></tr>`).join('');
+    html+=`<tr><td><b>${u?.name||'?'}</b><br><span style="font-size:10px;color:#B0A89E;">${d.n} entries</span></td><td><div class="bar-wrap"><div class="bar-fill" style="width:${bar}%"></div></div></td><td style="text-align:right;font-weight:800;font-size:14px;">${minsToHM(d.mins)}</td><td style="text-align:right;font-weight:700;color:#6B5A4E;">${pct}%</td></tr>${rows}<tr><td colspan="4" style="border:none;height:6px;"></td></tr>`;
   });
   document.getElementById('trPersonTbl').innerHTML=html+'</tbody></table>';
 }
@@ -2798,12 +3325,12 @@ function buildTrProject(logs,total){
     const un=users.find(u=>u.id===l.userId)?.name||'?'; if(!byP[key].people[un])byP[key].people[un]=0; byP[key].people[un]+=l.durationMins;
   });
   const sorted=Object.entries(byP).sort((a,b)=>b[1].mins-a[1].mins); const maxM=sorted[0]?.[1].mins||1;
-  const cols=['#2b6cb0','#38a169','#d69e2e','#6b46c1','#e53e3e','#0987a0'];
+  const cols=['#A96E35','#6E8F52','#C4874A','#6B5A4E','#C0554A','#0987a0'];
   let html=`<table class="rpt-table"><thead><tr><th>Project</th><th>Team & Phases</th><th style="text-align:right">Time</th><th style="text-align:right">Share</th></tr></thead><tbody>`;
   sorted.forEach(([pname,d],idx)=>{ const color=cols[idx%cols.length]; const pct=((d.mins/total)*100).toFixed(1); const bar=((d.mins/maxM)*100).toFixed(1);
-    const phRows=Object.entries(d.phases).sort((a,b)=>b[1]-a[1]).map(([ph,m])=>`<tr class="sub"><td colspan="2">📐 ${ph}</td><td style="text-align:right;color:${color};font-weight:600;">${minsToHM(m)}</td><td style="text-align:right;color:#718096;">${((m/total)*100).toFixed(1)}%</td></tr>`).join('');
+    const phRows=Object.entries(d.phases).sort((a,b)=>b[1]-a[1]).map(([ph,m])=>`<tr class="sub"><td colspan="2">📐 ${ph}</td><td style="text-align:right;color:${color};font-weight:600;">${minsToHM(m)}</td><td style="text-align:right;color:#8A7E74;">${((m/total)*100).toFixed(1)}%</td></tr>`).join('');
     const peRows=Object.entries(d.people).sort((a,b)=>b[1]-a[1]).map(([pn,m])=>`<tr class="sub"><td colspan="2">👤 ${pn}</td><td style="text-align:right;color:${color};font-weight:600;">${minsToHM(m)}</td><td></td></tr>`).join('');
-    html+=`<tr><td><b style="color:${color};">📁 ${pname}</b><br><span style="font-size:10px;color:#a0aec0;">${d.n} entries</span></td><td><div class="bar-wrap"><div class="bar-fill" style="width:${bar}%;background:${color};"></div></div></td><td style="text-align:right;font-weight:800;font-size:14px;">${minsToHM(d.mins)}</td><td style="text-align:right;font-weight:700;color:#6b46c1;">${pct}%</td></tr>${phRows}${peRows}<tr><td colspan="4" style="border:none;height:6px;"></td></tr>`;
+    html+=`<tr><td><b style="color:${color};">📁 ${pname}</b><br><span style="font-size:10px;color:#B0A89E;">${d.n} entries</span></td><td><div class="bar-wrap"><div class="bar-fill" style="width:${bar}%;background:${color};"></div></div></td><td style="text-align:right;font-weight:800;font-size:14px;">${minsToHM(d.mins)}</td><td style="text-align:right;font-weight:700;color:#6B5A4E;">${pct}%</td></tr>${phRows}${peRows}<tr><td colspan="4" style="border:none;height:6px;"></td></tr>`;
   });
   document.getElementById('trProjTbl').innerHTML=html+'</tbody></table>';
 }
@@ -2812,17 +3339,17 @@ function buildTrDetail(logs){
   // V14.2.9: Added Clock Time column
   let html=`<table class="rpt-table"><thead><tr><th>Date</th><th>Member</th><th>Project / Activity</th><th>Phase</th><th>Typology</th><th>Clock Time</th><th>Description</th><th style="text-align:right">Time</th></tr></thead><tbody>`;
   sorted.forEach(l=>{ const u=users.find(u=>u.id===l.userId);
-    const clockTime = l.startTime && l.endTime ? `${l.startTime} → ${l.endTime}` : '<span style="color:#cbd5e0;font-style:italic;">—</span>';
-    html+=`<tr><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#2b6cb0;font-weight:600;">${l.productive?'📁 '+l.projectName:'🔸 '+l.activity}</td><td style="font-size:11px;">${l.phase||'-'}</td><td style="font-size:11px;">${l.typology||'-'}</td><td style="font-size:11px;white-space:nowrap;">${clockTime}</td><td>${l.desc}</td><td style="text-align:right;font-weight:700;color:#2b6cb0;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
+    const clockTime = l.startTime && l.endTime ? `${l.startTime} → ${l.endTime}` : '<span style="color:#D0C4B8;font-style:italic;">—</span>';
+    html+=`<tr><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#A96E35;font-weight:600;">${l.productive?'📁 '+l.projectName:'🔸 '+l.activity}</td><td style="font-size:11px;">${l.phase||'-'}</td><td style="font-size:11px;">${l.typology||'-'}</td><td style="font-size:11px;white-space:nowrap;">${clockTime}</td><td>${l.desc}</td><td style="text-align:right;font-weight:700;color:#A96E35;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
   });
   const tot=logs.reduce((s,l)=>s+l.durationMins,0);
-  html+=`<tr style="background:#f7fafc;font-weight:700;"><td colspan="7" style="text-align:right;">Grand Total:</td><td style="text-align:right;color:#2b6cb0;font-size:15px;">${minsToHM(tot)}</td></tr>`;
+  html+=`<tr style="background:#EDE9E3;font-weight:700;"><td colspan="7" style="text-align:right;">Grand Total:</td><td style="text-align:right;color:#A96E35;font-size:15px;">${minsToHM(tot)}</td></tr>`;
   document.getElementById('trDetailTbl').innerHTML=html+'</tbody></table>';
 }
 function exportPDF(){
   const title=document.getElementById('trTitle').textContent, subtitle=document.getElementById('trSubtitle').textContent;
   const pw=window.open('','_blank');
-  pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SQUARE Report</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,sans-serif;color:#1a202c;padding:28px;font-size:12px;}.hdr{border-bottom:3px solid #2b6cb0;padding-bottom:12px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;}.logo{font-size:24px;font-weight:800;color:#2b6cb0;letter-spacing:4px;}.rt{font-size:17px;font-weight:700;margin-top:3px;}.rs{font-size:11px;color:#718096;margin-top:2px;}.gen{font-size:10px;color:#a0aec0;text-align:right;}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}.sc{background:#f7fafc;border-radius:6px;padding:10px;text-align:center;border-top:3px solid #2b6cb0;}.sc:nth-child(2){border-top-color:#38a169;}.sc:nth-child(3){border-top-color:#e53e3e;}.sc:nth-child(4){border-top-color:#d69e2e;}.sn{font-size:18px;font-weight:800;}.sl{font-size:10px;color:#718096;margin-top:1px;}.sec{margin-bottom:22px;}.st{font-size:13px;font-weight:700;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;}table{width:100%;border-collapse:collapse;font-size:11px;}th{background:#f7fafc;padding:6px 10px;text-align:left;font-weight:700;border-bottom:2px solid #e2e8f0;}td{padding:6px 10px;border-bottom:1px solid #f0f4f8;}.sub td{padding:2px 10px 2px 20px;border:none;font-size:10px;}tr:last-child td{border-bottom:none;}.bar-wrap{background:#e2e8f0;border-radius:3px;height:5px;}.bar-fill{height:5px;border-radius:3px;background:#2b6cb0;}.ftr{margin-top:22px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:10px;color:#a0aec0;text-align:center;}@page{margin:1.5cm;}</style></head><body><div class="hdr"><div><div class="logo">SQUARE</div><div class="rt">Time Report – ${title}</div><div class="rs">${subtitle}</div></div><div class="gen">Generated ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</div></div><div class="stats">`);
+  pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SQUARE Report</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,sans-serif;color:#2A201A;padding:28px;font-size:12px;}.hdr{border-bottom:3px solid #A96E35;padding-bottom:12px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;}.logo{font-size:24px;font-weight:800;color:#A96E35;letter-spacing:4px;}.rt{font-size:17px;font-weight:700;margin-top:3px;}.rs{font-size:11px;color:#8A7E74;margin-top:2px;}.gen{font-size:10px;color:#B0A89E;text-align:right;}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}.sc{background:#EDE9E3;border-radius:6px;padding:10px;text-align:center;border-top:3px solid #A96E35;}.sc:nth-child(2){border-top-color:#6E8F52;}.sc:nth-child(3){border-top-color:#C0554A;}.sc:nth-child(4){border-top-color:#C4874A;}.sn{font-size:18px;font-weight:800;}.sl{font-size:10px;color:#8A7E74;margin-top:1px;}.sec{margin-bottom:22px;}.st{font-size:13px;font-weight:700;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #E0D8CE;}table{width:100%;border-collapse:collapse;font-size:11px;}th{background:#EDE9E3;padding:6px 10px;text-align:left;font-weight:700;border-bottom:2px solid #E0D8CE;}td{padding:6px 10px;border-bottom:1px solid #F7F5F2;}.sub td{padding:2px 10px 2px 20px;border:none;font-size:10px;}tr:last-child td{border-bottom:none;}.bar-wrap{background:#E0D8CE;border-radius:3px;height:5px;}.bar-fill{height:5px;border-radius:3px;background:#A96E35;}.ftr{margin-top:22px;padding-top:10px;border-top:1px solid #E0D8CE;font-size:10px;color:#B0A89E;text-align:center;}@page{margin:1.5cm;}</style></head><body><div class="hdr"><div><div class="logo">SQUARE</div><div class="rt">Time Report – ${title}</div><div class="rs">${subtitle}</div></div><div class="gen">Generated ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</div></div><div class="stats">`);
   const sn=document.querySelectorAll('#trStats .stat-num'),sl=document.querySelectorAll('#trStats .stat-lbl');
   for(let i=0;i<4;i++) pw.document.write(`<div class="sc"><div class="sn">${sn[i]?.textContent||'-'}</div><div class="sl">${sl[i]?.textContent||''}</div></div>`);
   pw.document.write('</div>');
@@ -2884,14 +3411,14 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
 function renderLeaves(){
   const user=users.find(u=>u.id===currentUser.id);
   const mU=12-user.medLeft,cU=5-user.casLeft;
-  document.getElementById('leaveBalance').innerHTML=`<div class="balance-card"><div style="font-size:12px;color:#718096;margin-bottom:6px;">🏥 Medical Leave</div><div class="balance-num" style="color:#3182ce;">${user.medLeft}</div><div class="balance-sub">${mU} used of 12</div><div class="bal-bar"><div class="bal-fill" style="width:${(mU/12)*100}%;background:#3182ce;"></div></div></div><div class="balance-card"><div style="font-size:12px;color:#718096;margin-bottom:6px;">🌴 Casual Leave</div><div class="balance-num" style="color:#38a169;">${user.casLeft}</div><div class="balance-sub">${cU} used of 5</div><div class="bal-bar"><div class="bal-fill" style="width:${(cU/5)*100}%;background:#38a169;"></div></div></div>`;
+  document.getElementById('leaveBalance').innerHTML=`<div class="balance-card"><div style="font-size:12px;color:#8A7E74;margin-bottom:6px;">🏥 Medical Leave</div><div class="balance-num" style="color:#A96E35;">${user.medLeft}</div><div class="balance-sub">${mU} used of 12</div><div class="bal-bar"><div class="bal-fill" style="width:${(mU/12)*100}%;background:#A96E35;"></div></div></div><div class="balance-card"><div style="font-size:12px;color:#8A7E74;margin-bottom:6px;">🌴 Casual Leave</div><div class="balance-num" style="color:#6E8F52;">${user.casLeft}</div><div class="balance-sub">${cU} used of 5</div><div class="bal-bar"><div class="bal-fill" style="width:${(cU/5)*100}%;background:#6E8F52;"></div></div></div>`;
   const el=document.getElementById('myLeaveList');
   const my=leaveRequests.filter(l=>l.userId===currentUser.id).slice().reverse();
-  if(!my.length){ el.innerHTML='<p style="color:#718096;padding:16px;">No applications yet.</p>'; return; }
+  if(!my.length){ el.innerHTML='<p style="color:#8A7E74;padding:16px;">No applications yet.</p>'; return; }
   el.innerHTML=my.map(lv=>{
     const dateRange = lv.isHalf ? fmtD(lv.startDate) + ' (Half Day)' : `${fmtD(lv.startDate)} → ${fmtD(lv.endDate)}`;
     const cancelBtn = lv.status==='pending' ? `<button class="btn btn-danger btn-sm" onclick="cancelLeave('${lv.id}')" style="margin-left:8px;">Cancel</button>` : '';
-    return `<div class="approval-card"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">${lv.type==='medical'?'🏥 Medical':'🌴 Casual'} Leave${lv.isHalf?' 🕐':''}</div><div style="font-size:11px;color:#718096;">${dateRange} · ${lv.days} day${lv.days!==1?'s':''}</div></div><span class="badge badge-${lv.status}">${lv.status}${cancelBtn}</span></div><div style="font-size:12px;color:#4a5568;">${lv.reason}</div></div>`;
+    return `<div class="approval-card"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">${lv.type==='medical'?'🏥 Medical':'🌴 Casual'} Leave${lv.isHalf?' 🕐':''}</div><div style="font-size:11px;color:#8A7E74;">${dateRange} · ${lv.days} day${lv.days!==1?'s':''}</div></div><span class="badge badge-${lv.status}">${lv.status}${cancelBtn}</span></div><div style="font-size:12px;color:#5C4F42;">${lv.reason}</div></div>`;
   }).join('');
 }
 
@@ -2937,7 +3464,7 @@ function renderTeamLeave() {
   
   // Header
   ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(day => {
-    calHTML += `<div style="text-align:center;font-size:11px;font-weight:700;padding:8px;background:#f7fafc;border-radius:6px;color:#4a5568;">${day}</div>`;
+    calHTML += `<div style="text-align:center;font-size:11px;font-weight:700;padding:8px;background:#EDE9E3;border-radius:6px;color:#5C4F42;">${day}</div>`;
   });
   
   // Empty cells before month starts
@@ -2957,15 +3484,15 @@ function renderTeamLeave() {
       return dateStr >= l.startDate && dateStr <= l.endDate;
     });
     
-    let bgColor = '#f7fafc';
-    let borderColor = '#e2e8f0';
+    let bgColor = '#EDE9E3';
+    let borderColor = '#E0D8CE';
     if (isToday) {
-      bgColor = '#ebf4ff';
-      borderColor = '#2b6cb0';
+      bgColor = '#F0E6D6';
+      borderColor = '#A96E35';
     } else if (onLeaveToday.length > 0) {
       const hasHalfDay = onLeaveToday.some(l => l.isHalf);
-      bgColor = hasHalfDay ? '#fef3c7' : '#fed7d7';
-      borderColor = hasHalfDay ? '#f59e0b' : '#e53e3e';
+      bgColor = hasHalfDay ? '#F5ECD8' : '#F5E0DC';
+      borderColor = hasHalfDay ? '#C4874A' : '#C0554A';
     }
     
     let leaveInfo = '';
@@ -2973,12 +3500,12 @@ function renderTeamLeave() {
       leaveInfo = onLeaveToday.map(l => {
         const user = users.find(u => u.id === l.userId);
         const halfIcon = l.isHalf ? ' 🕐' : '';
-        return `<div style="font-size:10px;color:#1a202c;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${user?.name} - ${l.type}${l.isHalf ? ' (Half Day)' : ''}">${user?.name}${halfIcon}</div>`;
+        return `<div style="font-size:10px;color:#2A201A;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${user?.name} - ${l.type}${l.isHalf ? ' (Half Day)' : ''}">${user?.name}${halfIcon}</div>`;
       }).join('');
     }
     
     calHTML += `<div style="background:${bgColor};border:2px solid ${borderColor};border-radius:8px;padding:8px;min-height:80px;${isWeekendDay ? 'opacity:0.6;' : ''}">
-      <div style="font-weight:700;font-size:14px;color:#1a202c;margin-bottom:4px;">${day}</div>
+      <div style="font-weight:700;font-size:14px;color:#2A201A;margin-bottom:4px;">${day}</div>
       ${leaveInfo}
     </div>`;
   }
@@ -3041,47 +3568,47 @@ function renderTeamLeaveBank() {
     const medLeft = u.medLeft ?? 12;
     const casLeft = u.casLeft ?? 5;
 
-    const medBar = `<div style="background:#e2e8f0;border-radius:4px;height:6px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${medLeft<=2?'#e53e3e':medLeft<=5?'#d69e2e':'#3182ce'};border-radius:4px;height:6px;width:${Math.round((medUsed/12)*80)}px;"></div></div>`;
-    const casBar = `<div style="background:#e2e8f0;border-radius:4px;height:6px;width:60px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${casLeft===0?'#e53e3e':casLeft<=1?'#d69e2e':'#38a169'};border-radius:4px;height:6px;width:${Math.round((casUsed/5)*60)}px;"></div></div>`;
+    const medBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${medLeft<=2?'#C0554A':medLeft<=5?'#C4874A':'#A96E35'};border-radius:4px;height:6px;width:${Math.round((medUsed/12)*80)}px;"></div></div>`;
+    const casBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:60px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${casLeft===0?'#C0554A':casLeft<=1?'#C4874A':'#6E8F52'};border-radius:4px;height:6px;width:${Math.round((casUsed/5)*60)}px;"></div></div>`;
 
-    return `<tr style="border-bottom:1px solid #f0f4f8;">
+    return `<tr style="border-bottom:1px solid #F7F5F2;">
       <td style="padding:10px 12px;font-weight:600;font-size:13px;">${u.name}</td>
       <td style="padding:10px 12px;text-align:center;">
-        <span style="font-size:13px;font-weight:700;color:#3182ce;">${fmtDays(medLeft)}</span>
-        <span style="font-size:11px;color:#a0aec0;"> / 12</span>
+        <span style="font-size:13px;font-weight:700;color:#A96E35;">${fmtDays(medLeft)}</span>
+        <span style="font-size:11px;color:#B0A89E;"> / 12</span>
         ${medBar}
       </td>
       <td style="padding:10px 12px;text-align:center;">
-        <span style="font-size:13px;color:#718096;">${fmtDays(medUsed)}</span>
-        <span style="font-size:11px;color:#a0aec0;"> day${medUsed!==1?'s':''}</span>
+        <span style="font-size:13px;color:#8A7E74;">${fmtDays(medUsed)}</span>
+        <span style="font-size:11px;color:#B0A89E;"> day${medUsed!==1?'s':''}</span>
       </td>
       <td style="padding:10px 12px;text-align:center;">
-        <span style="font-size:13px;font-weight:700;color:#38a169;">${fmtDays(casLeft)}</span>
-        <span style="font-size:11px;color:#a0aec0;"> / 5</span>
+        <span style="font-size:13px;font-weight:700;color:#6E8F52;">${fmtDays(casLeft)}</span>
+        <span style="font-size:11px;color:#B0A89E;"> / 5</span>
         ${casBar}
       </td>
       <td style="padding:10px 12px;text-align:center;">
-        <span style="font-size:13px;color:#718096;">${fmtDays(casUsed)}</span>
-        <span style="font-size:11px;color:#a0aec0;"> day${casUsed!==1?'s':''}</span>
+        <span style="font-size:13px;color:#8A7E74;">${fmtDays(casUsed)}</span>
+        <span style="font-size:11px;color:#B0A89E;"> day${casUsed!==1?'s':''}</span>
       </td>
       <td style="padding:10px 12px;text-align:center;">
-        ${casLeft === 0 ? '<span style="font-size:11px;background:#fff5f5;color:#e53e3e;padding:2px 8px;border-radius:10px;font-weight:600;">Exhausted</span>' :
-          casLeft === 1 ? '<span style="font-size:11px;background:#fffaf0;color:#d69e2e;padding:2px 8px;border-radius:10px;">Low</span>' :
-          '<span style="font-size:11px;background:#f0fff4;color:#38a169;padding:2px 8px;border-radius:10px;">OK</span>'}
+        ${casLeft === 0 ? '<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:600;">Exhausted</span>' :
+          casLeft === 1 ? '<span style="font-size:11px;background:#FAF3EB;color:#C4874A;padding:2px 8px;border-radius:10px;">Low</span>' :
+          '<span style="font-size:11px;background:#EDF2E6;color:#6E8F52;padding:2px 8px;border-radius:10px;">OK</span>'}
       </td>
     </tr>`;
   }).join('');
 
   el.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:10px;border:1px solid #e2e8f0;overflow:hidden;font-size:13px;">
+    <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:10px;border:1px solid #E0D8CE;overflow:hidden;font-size:13px;">
       <thead>
-        <tr style="background:#f7fafc;">
-          <th style="padding:10px 12px;text-align:left;font-size:11px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Member</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#3182ce;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🏥 Medical Left</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#38a169;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🌴 Casual Left</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#718096;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Status</th>
+        <tr style="background:#EDE9E3;">
+          <th style="padding:10px 12px;text-align:left;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Member</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#A96E35;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🏥 Medical Left</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#6E8F52;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🌴 Casual Left</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Status</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -3113,7 +3640,7 @@ window.cancelLeave = function(leaveId) {
 
 function renderApprovals(){
   const el=document.getElementById('approvalsList');
-  if(!currentUser.isAdmin){ el.innerHTML='<p style="color:#718096;padding:16px;">Only admins can view approvals.</p>'; return; }
+  if(!currentUser.isAdmin){ el.innerHTML='<p style="color:#8A7E74;padding:16px;">Only admins can view approvals.</p>'; return; }
   
   const pl=leaveRequests.filter(l=>l.status==='pending');
   const pc=changeRequests.filter(r=>r.status==='pending');
@@ -3121,13 +3648,13 @@ function renderApprovals(){
   console.log(`📋 Rendering approvals: ${pl.length} pending leaves, ${pc.length} pending changes`);
   console.log('Leave requests:', leaveRequests);
   
-  if(!pl.length&&!pc.length){ el.innerHTML='<p style="color:#718096;padding:16px;">✅ No pending approvals!</p>'; return; }
+  if(!pl.length&&!pc.length){ el.innerHTML='<p style="color:#8A7E74;padding:16px;">✅ No pending approvals!</p>'; return; }
   el.innerHTML='';
   pl.forEach(lv=>{
     const c=document.createElement('div'); c.className='approval-card';
     const dateRange = lv.isHalf ? `${fmtD(lv.startDate)} (Half Day)` : `${fmtD(lv.startDate)} → ${fmtD(lv.endDate)}`;
     const halfIcon = lv.isHalf ? ' 🕐' : '';
-    c.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">🌴 Leave · ${lv.userName}${halfIcon}</div><div style="font-size:11px;color:#718096;">${lv.type} · ${dateRange} · ${lv.days}d</div></div><span class="badge badge-pending">Pending</span></div><div style="font-size:12px;margin-bottom:10px;">${lv.reason}</div><div style="display:flex;gap:8px;"><button class="btn btn-success btn-sm">✓ Approve</button><button class="btn btn-danger btn-sm">✗ Reject</button></div>`;
+    c.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">🌴 Leave · ${lv.userName}${halfIcon}</div><div style="font-size:11px;color:#8A7E74;">${lv.type} · ${dateRange} · ${lv.days}d</div></div><span class="badge badge-pending">Pending</span></div><div style="font-size:12px;margin-bottom:10px;">${lv.reason}</div><div style="display:flex;gap:8px;"><button class="btn btn-success btn-sm">✓ Approve</button><button class="btn btn-danger btn-sm">✗ Reject</button></div>`;
     c.querySelector('.btn-success').onclick= async ()=>{
       // V14.2.6: Direct granular save — don't rely on batch autoSave for status changes
       lv.status='approved';
@@ -3203,7 +3730,7 @@ function renderManage(){
   const ul=document.getElementById('usersList'); ul.innerHTML='';
   users.forEach((u,i)=>{
     const item=document.createElement('div'); item.className='list-item';
-    item.innerHTML=`<div><div style="font-weight:600;">${u.name}${u.isAdmin?` <span class="admin-badge">ADMIN</span>`:''}</div><div style="font-size:11px;color:#718096;">${u.email}</div></div>`;
+    item.innerHTML=`<div><div style="font-weight:600;">${u.name}${u.isAdmin?` <span class="admin-badge">ADMIN</span>`:''}</div><div style="font-size:11px;color:#8A7E74;">${u.email}</div></div>`;
     const btn=document.createElement('button'); btn.className='btn btn-danger btn-sm'; btn.textContent='Delete';
     btn.onclick = async () => {
       if (u.id === currentUser.id) { alert("Can't delete yourself"); return; }
@@ -3396,16 +3923,16 @@ function renderChangeLog() {
   if (!el) return;
   
   if (changeLog.length === 0) {
-    el.innerHTML = '<p style="color:#718096;padding:12px;">No changes logged yet.</p>';
+    el.innerHTML = '<p style="color:#8A7E74;padding:12px;">No changes logged yet.</p>';
     return;
   }
   
   const recent = changeLog.slice(-10).reverse();
   el.innerHTML = recent.map(c => 
-    `<div style="border-bottom:1px solid #e2e8f0;padding:8px 4px;">
-      <div style="font-weight:600;color:#2d3748;">${c.action}</div>
-      <div style="font-size:10px;color:#718096;">${new Date(c.timestamp).toLocaleString()} · ${c.user}</div>
-      ${c.details ? `<div style="font-size:11px;color:#4a5568;margin-top:2px;">${c.details}</div>` : ''}
+    `<div style="border-bottom:1px solid #E0D8CE;padding:8px 4px;">
+      <div style="font-weight:600;color:#3D332A;">${c.action}</div>
+      <div style="font-size:10px;color:#8A7E74;">${new Date(c.timestamp).toLocaleString()} · ${c.user}</div>
+      ${c.details ? `<div style="font-size:11px;color:#5C4F42;margin-top:2px;">${c.details}</div>` : ''}
     </div>`
   ).join('');
 }
@@ -3574,7 +4101,7 @@ function openTaskSelectModal(plans) {
         <div class="tw-task-name">${plan.project}</div>
         <div class="tw-task-sub">${plan.phase||'—'} · ${plan.typology||'—'}</div>
       </div>
-      ${plan.type==='emergency'?'<span style="font-size:10px;background:#fff5f5;color:#c53030;padding:2px 7px;border-radius:4px;font-weight:600;">urgent</span>':''}
+      ${plan.type==='emergency'?'<span style="font-size:10px;background:#FBF0EE;color:#9A3830;padding:2px 7px;border-radius:4px;font-weight:600;">urgent</span>':''}
     `;
     card.onclick = () => { closeModal('taskSelectModal'); startTimerWithPlan(plan); };
     list.appendChild(card);
@@ -3623,7 +4150,7 @@ function renderWidgetTaskList(activePlanId) {
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
     </div>
     <div class="tw-task-text">
-      <div class="tw-task-name" style="color:#718096;">Lunch break</div>
+      <div class="tw-task-name" style="color:#8A7E74;">Lunch break</div>
       <div class="tw-task-sub">non-productive</div>
     </div>`;
   lunch.onclick = () => switchTaskTo({id:'lunch',project:'Lunch Break',phase:'',typology:'',projectId:null,type:'lunch'});
@@ -4046,12 +4573,12 @@ async function restoreTimerState() {
     projBadge.style.display = 'block';
     if (timerLinkedPlan) {
       projBadge.textContent       = `📁 ${timerLinkedPlan.project}`;
-      projBadge.style.background  = '#ebf4ff';
-      projBadge.style.color       = '#2b6cb0';
+      projBadge.style.background  = '#F0E6D6';
+      projBadge.style.color       = '#A96E35';
     } else {
       projBadge.textContent       = '⚠️ Unplanned';
-      projBadge.style.background  = '#fff5f5';
-      projBadge.style.color       = '#e53e3e';
+      projBadge.style.background  = '#FBF0EE';
+      projBadge.style.color       = '#C0554A';
     }
 
     document.getElementById('timerNavLabel').textContent = '⏱ Running...';
@@ -4321,7 +4848,7 @@ function showEodSummary() {
   const warning = document.getElementById('eodSummaryWarning');
 
   if (todayLogs.length === 0) {
-    content.innerHTML = `<div style="text-align:center;padding:20px;color:#718096;font-size:13px;">No time logged today.</div>`;
+    content.innerHTML = `<div style="text-align:center;padding:20px;color:#8A7E74;font-size:13px;">No time logged today.</div>`;
     warning.style.display = 'block';
     warning.innerHTML = `⚠️ <strong>Nothing logged today.</strong> Please log your work before leaving, or speak to your manager.`;
   } else {
@@ -4332,15 +4859,15 @@ function showEodSummary() {
       byProject[l.projectName] += l.durationMins || 0;
     });
     content.innerHTML = `
-      <div style="margin-bottom:12px;background:#ebf4ff;border-radius:8px;padding:10px 14px;">
-        <div style="font-size:18px;font-weight:800;color:#2b6cb0;">${minsToHM(totalMins)}</div>
-        <div style="font-size:11px;color:#718096;">${todayLogs.length} entries logged today</div>
+      <div style="margin-bottom:12px;background:#F0E6D6;border-radius:8px;padding:10px 14px;">
+        <div style="font-size:18px;font-weight:800;color:#A96E35;">${minsToHM(totalMins)}</div>
+        <div style="font-size:11px;color:#8A7E74;">${todayLogs.length} entries logged today</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;">
         ${Object.entries(byProject).map(([proj, mins]) => `
-          <div style="display:flex;justify-content:space-between;padding:7px 10px;background:#f7fafc;border-radius:6px;font-size:13px;">
+          <div style="display:flex;justify-content:space-between;padding:7px 10px;background:#EDE9E3;border-radius:6px;font-size:13px;">
             <span style="font-weight:600;">📁 ${proj}</span>
-            <span style="color:#2b6cb0;font-weight:700;">${minsToHM(mins)}</span>
+            <span style="color:#A96E35;font-weight:700;">${minsToHM(mins)}</span>
           </div>`).join('')}
       </div>`;
 
@@ -4369,13 +4896,13 @@ function updateConnectionStatus(online) {
   const warningEl = document.getElementById('offlineWarning');
   
   if (online) {
-    statusEl.style.background = '#38a169';
+    statusEl.style.background = '#6E8F52';
     dotEl.textContent = '🟢';
     textEl.textContent = 'ONLINE';
     warningEl.style.display = 'none';
     enableAllButtons();
   } else {
-    statusEl.style.background = '#e53e3e';
+    statusEl.style.background = '#C0554A';
     dotEl.textContent = '🔴';
     textEl.textContent = 'OFFLINE';
     warningEl.style.display = 'block';
@@ -4596,7 +5123,7 @@ window.addEventListener('storage', (e) => {
       window.close();
       if (!window.closed) {
         // If window.close() didn't work (some browsers block it)
-        document.body.innerHTML = '<div style="padding:40px;text-align:center;font-family:sans-serif;"><h1 style="color:#e53e3e;">⚠️ Tab Closed for Safety</h1><p>Please close this tab manually and use only ONE tab.</p></div>';
+        document.body.innerHTML = '<div style="padding:40px;text-align:center;font-family:sans-serif;"><h1 style="color:#C0554A;">⚠️ Tab Closed for Safety</h1><p>Please close this tab manually and use only ONE tab.</p></div>';
       }
     }
   }
@@ -4692,13 +5219,13 @@ function updatePipButton() {
   if (!btn) return;
   const pipOpen = (pipWindow && !pipWindow.closed) || (pipVideoEl && document.pictureInPictureElement === pipVideoEl);
   if (pipOpen) {
-    btn.style.borderColor = '#68d391';
-    btn.style.color = '#68d391';
+    btn.style.borderColor = '#A0C080';
+    btn.style.color = '#A0C080';
     btn.style.background = 'rgba(104,211,145,0.08)';
     btn.title = 'Close floating window';
   } else {
-    btn.style.borderColor = '#4a5568';
-    btn.style.color = '#a0aec0';
+    btn.style.borderColor = '#5C4F42';
+    btn.style.color = '#B0A89E';
     btn.style.background = 'none';
     btn.title = 'Open floating timer window (works over any app)';
   }
@@ -4736,12 +5263,12 @@ async function openPiP() {
       // Write styled content into PiP window
       pipWindow.document.head.innerHTML = `<style>
         * { margin:0; padding:0; box-sizing:border-box; font-family: -apple-system, sans-serif; }
-        body { background:#1a202c; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; gap:6px; user-select:none; }
-        #pt { font-size:48px; font-weight:900; color:#68d391; letter-spacing:4px; font-variant-numeric:tabular-nums; line-height:1; }
-        #ps { font-size:10px; font-weight:700; color:#68d391; letter-spacing:0.08em; text-transform:uppercase; }
-        #pp { font-size:11px; color:#90cdf4; background:rgba(66,153,225,0.15); padding:3px 10px; border-radius:5px; max-width:200px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        #pi { font-size:9px; color:#4a5568; margin-top:2px; }
-        .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:#68d391; margin-right:4px; animation: blink 1.5s ease-in-out infinite; }
+        body { background:#2A201A; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; gap:6px; user-select:none; }
+        #pt { font-size:48px; font-weight:900; color:#A0C080; letter-spacing:4px; font-variant-numeric:tabular-nums; line-height:1; }
+        #ps { font-size:10px; font-weight:700; color:#A0C080; letter-spacing:0.08em; text-transform:uppercase; }
+        #pp { font-size:11px; color:#DBC9A8; background:rgba(66,153,225,0.15); padding:3px 10px; border-radius:5px; max-width:200px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        #pi { font-size:9px; color:#5C4F42; margin-top:2px; }
+        .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:#A0C080; margin-right:4px; animation: blink 1.5s ease-in-out infinite; }
         @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.2;} }
       </style>`;
       pipWindow.document.body.innerHTML = `
@@ -4762,14 +5289,14 @@ async function openPiP() {
         if (timerRunning && timerStartedAt) {
           const secs = getElapsed(timerStartedAt, timerPausedMs);
           timeEl.textContent = secsToHMS(secs);
-          timeEl.style.color = '#68d391';
-          if (statusEl) { statusEl.innerHTML = '<span class="dot"></span>RECORDING'; statusEl.style.color = '#68d391'; }
+          timeEl.style.color = '#A0C080';
+          if (statusEl) { statusEl.innerHTML = '<span class="dot"></span>RECORDING'; statusEl.style.color = '#A0C080'; }
           if (projEl) projEl.textContent = timerLinkedPlan?.project ? `${timerLinkedPlan.project}${timerLinkedPlan.phase ? ' · ' + timerLinkedPlan.phase.split(' ')[0] : ''}` : 'Unplanned';
         } else {
           timeEl.textContent = 'Not tracking';
-          timeEl.style.color = '#fc8181';
+          timeEl.style.color = '#E09088';
           timeEl.style.fontSize = '26px';
-          if (statusEl) { statusEl.innerHTML = '● NO TASK RUNNING'; statusEl.style.color = '#fc8181'; }
+          if (statusEl) { statusEl.innerHTML = '● NO TASK RUNNING'; statusEl.style.color = '#E09088'; }
           if (projEl) projEl.textContent = 'Click SQUARE tab to start a task';
         }
       }, 1000);
@@ -4827,11 +5354,11 @@ async function openPiP() {
       const c = pipCtx;
       const w = pipCanvas.width, h = pipCanvas.height;
 
-      c.fillStyle = '#1a202c';
+      c.fillStyle = '#2A201A';
       c.fillRect(0, 0, w, h);
 
       // Border
-      c.strokeStyle = timerRunning ? '#38a169' : '#e53e3e';
+      c.strokeStyle = timerRunning ? '#6E8F52' : '#C0554A';
       c.lineWidth = 6;
       c.strokeRect(3, 3, w-6, h-6);
 
@@ -4840,37 +5367,37 @@ async function openPiP() {
         const hms = secsToHMS(secs);
 
         // Status dot + label
-        c.fillStyle = '#68d391';
+        c.fillStyle = '#A0C080';
         c.beginPath(); c.arc(30, 50, 7, 0, Math.PI*2); c.fill();
         c.font = 'bold 22px -apple-system,sans-serif';
-        c.fillStyle = '#68d391';
+        c.fillStyle = '#A0C080';
         c.fillText('RECORDING', 46, 58);
 
         // Time
         c.font = 'bold 96px -apple-system,sans-serif';
-        c.fillStyle = '#68d391';
+        c.fillStyle = '#A0C080';
         c.textAlign = 'center';
         c.fillText(hms, w/2, 180);
 
         // Project
         c.font = 'bold 22px -apple-system,sans-serif';
-        c.fillStyle = '#90cdf4';
+        c.fillStyle = '#DBC9A8';
         const proj = timerLinkedPlan?.project || 'Unplanned';
         c.fillText(proj, w/2, 230);
 
         // Footer
         c.font = '18px -apple-system,sans-serif';
-        c.fillStyle = '#4a5568';
+        c.fillStyle = '#5C4F42';
         c.fillText('SQUARE · drag to reposition', w/2, 290);
       } else {
         c.font = 'bold 36px -apple-system,sans-serif';
-        c.fillStyle = '#fc8181';
+        c.fillStyle = '#E09088';
         c.textAlign = 'center';
         c.fillText('Not tracking', w/2, h/2 - 10);
         c.font = 'bold 18px -apple-system,sans-serif';
         c.fillText('● NO TASK RUNNING', w/2, h/2 + 28);
         c.font = '20px -apple-system,sans-serif';
-        c.fillStyle = '#718096';
+        c.fillStyle = '#8A7E74';
         c.fillText('Click SQUARE tab to start a task', w/2, h/2 + 68);
       }
     }
