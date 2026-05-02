@@ -667,7 +667,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #A96E35;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#F0E6D6;border:1px solid #DBC9A8;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#8A5828;">
-            📌 <strong>V14.2.34 Production:</strong> 2026 Official Holidays pre-loaded (15 dates). 2nd and 4th Saturdays automatically shown as closed in all calendars. Holiday/closed day names visible in weekly planner and dashboard calendar cells. Leave application warns if selected dates include holidays or 2nd/4th Saturdays. All V14.2.33 fixes retained.
+            📌 <strong>V14.2.36 Production:</strong> Auto attendance deduction — on admin login, scans all past working days since last check. Any OMS-active staff with zero productive logs and no approved leave gets 1 casual day auto-deducted. Allows negative balance. Excluded: Debaleena, Rajkumar, Gayaram. All V14.2.35 fixes retained.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1679,6 +1679,44 @@ function isHoliday(d){ const ds=fmt(d); return holidays.some(h=>h.date===ds); }
 function getHolidayName(d){ const ds=fmt(d); const h=holidays.find(h=>h.date===ds); return h?h.name:null; }
 function is24SatLabel(d){ const dt=new Date(d); if(dt.getDay()!==6) return null; const wk=Math.ceil(dt.getDate()/7); return wk===2?'2nd Saturday':wk===4?'4th Saturday':null; }
 function getDayLabel(d){ return getHolidayName(d) || is24SatLabel(d) || null; }
+function isClosedDay(d){ const dt=new Date(d); return dt.getDay()===0 || is24Sat(dt) || isHoliday(dt); }
+function nearestWorkingDayBefore(d){
+  // Find nearest working day strictly before d
+  const dt=new Date(d); dt.setDate(dt.getDate()-1);
+  while(isClosedDay(dt)){ dt.setDate(dt.getDate()-1); }
+  return dt;
+}
+function nearestWorkingDayAfter(d){
+  // Find nearest working day strictly after d
+  const dt=new Date(d); dt.setDate(dt.getDate()+1);
+  while(isClosedDay(dt)){ dt.setDate(dt.getDate()+1); }
+  return dt;
+}
+function isBridgeDay(d){
+  // Returns holiday/sat name if d is the nearest working day before or after a closed day
+  const dt=new Date(d);
+  const ds=fmt(dt);
+  if(isClosedDay(dt)) return null; // d itself is closed, not a bridge day
+  // Check: is the nearest closed day before d adjacent?
+  const prev=new Date(dt); prev.setDate(prev.getDate()-1);
+  // Walk back to find first closed day
+  let back=new Date(dt); back.setDate(back.getDate()-1);
+  while(!isClosedDay(back) && back.getFullYear()===dt.getFullYear()){ back.setDate(back.getDate()-1); }
+  if(isClosedDay(back)){
+    // Is d the nearest working day after that closed day?
+    const nwd=nearestWorkingDayAfter(back);
+    if(fmt(nwd)===ds){ return getDayLabel(back)||'Closed day'; }
+  }
+  // Check: is the nearest closed day after d adjacent?
+  let fwd=new Date(dt); fwd.setDate(fwd.getDate()+1);
+  while(!isClosedDay(fwd) && fwd.getFullYear()===dt.getFullYear()){ fwd.setDate(fwd.getDate()+1); }
+  if(isClosedDay(fwd)){
+    // Is d the nearest working day before that closed day?
+    const nwd=nearestWorkingDayBefore(fwd);
+    if(fmt(nwd)===ds){ return getDayLabel(fwd)||'Closed day'; }
+  }
+  return null;
+}
 function isHolidayOrWeekend(d){ return isWeekend(d) || isHoliday(d); }
 function workDays(s,e){ let c=0,cur=new Date(s),end=new Date(e); while(cur<=end){if(!isSunday(cur)&&!is24Sat(cur)&&!isHoliday(cur))c++; cur=addDays(cur,1);} return c; }
 function minsToHM(m){ return `${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`; }
@@ -1710,6 +1748,160 @@ function projectLoggedMins(projectId){ return timeLogs.filter(l=>l.projectId===p
 // ═══════════════════════════════════════════════════════
 // INIT — Load data then set up login
 // ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// AUTO ATTENDANCE DEDUCTION — V14.2.36
+// Runs on admin login. Scans all past working days since last
+// check. If an OMS-active staff member has zero productive mins
+// and no approved leave, deducts 1 casual day automatically.
+// Excluded: Admin, Debaleena, Rajkumar, Gayaram (non-OMS users)
+// ═══════════════════════════════════════════════════════════════
+const ATTENDANCE_EXCLUDED = ['debaleena','rajkumar','rajesh kumar','gayaram'];
+const ATTENDANCE_DEDUCT_KEY = 'lastAttendanceCheck'; // stored in companyData
+
+async function runAttendanceAutoDeduction() {
+  if (!currentUser?.isAdmin) return;
+
+  // Get last check date from Firebase (stored in companyData)
+  let lastCheck = null;
+  try {
+    const snap = await db.collection('companyData').doc('squareDB').get();
+    lastCheck = snap.data()?.lastAttendanceCheck || null;
+  } catch(e) { console.warn('Could not read lastAttendanceCheck', e); return; }
+
+  // Determine date range: day after last check → yesterday
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  const startFrom = lastCheck
+    ? (() => { const d = new Date(lastCheck); d.setDate(d.getDate() + 1); return d; })()
+    : (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d; })(); // max 30 days back on first run
+
+  // Build list of working days in range (not Sun, not 2nd/4th Sat, not holiday)
+  const workDaysToCheck = [];
+  const cur = new Date(startFrom);
+  while (cur <= yesterday) {
+    if (!isClosedDay(cur)) workDaysToCheck.push(fmt(new Date(cur)));
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  if (workDaysToCheck.length === 0) {
+    console.log('✅ Attendance check: no new working days to check');
+    return;
+  }
+
+  console.log(`📋 Attendance check: scanning ${workDaysToCheck.length} working days from ${workDaysToCheck[0]} to ${workDaysToCheck[workDaysToCheck.length-1]}`);
+
+  // Staff to check (exclude admin + non-OMS users)
+  const staffToCheck = users.filter(u =>
+    !u.isAdmin &&
+    !ATTENDANCE_EXCLUDED.includes(u.name.toLowerCase().trim())
+  );
+
+  const deductions = []; // { user, date, reason }
+  const userUpdates = {}; // userId -> new casLeft value
+
+  staffToCheck.forEach(user => {
+    userUpdates[user.id] = user.casLeft ?? 5;
+  });
+
+  for (const ds of workDaysToCheck) {
+    for (const user of staffToCheck) {
+      // Check 1: already has approved leave this day?
+      const hasLeave = leaveRequests.some(l =>
+        l.userId === user.id &&
+        l.status === 'approved' &&
+        ds >= l.startDate && ds <= l.endDate
+      );
+      if (hasLeave) continue;
+
+      // Check 2: already has an auto-deduction leave for this day?
+      const alreadyDeducted = leaveRequests.some(l =>
+        l.userId === user.id &&
+        l.startDate === ds &&
+        l.endDate === ds &&
+        l.reason === 'Auto: absent without leave'
+      );
+      if (alreadyDeducted) continue;
+
+      // Check 3: logged >= 30 productive minutes this day?
+      const prodMins = timeLogs
+        .filter(l => l.userId === user.id && l.date === ds && l.productive)
+        .reduce((s, l) => s + l.durationMins, 0);
+      if (prodMins >= 30) continue;
+
+      // → Mark as absent: create auto casual leave entry
+      deductions.push({ user, date: ds });
+      userUpdates[user.id] = (userUpdates[user.id] ?? 5) - 1; // allow negative
+    }
+  }
+
+  if (deductions.length === 0) {
+    console.log('✅ Attendance check: no absences found');
+  } else {
+    console.log(`⚠️ Attendance check: ${deductions.length} auto-deductions to apply`);
+  }
+
+  // Apply deductions to Firebase
+  for (const { user, date } of deductions) {
+    const autoLeave = {
+      id: genId(),
+      userId: user.id,
+      userName: user.name,
+      type: 'casual',
+      startDate: date,
+      endDate: date,
+      days: 1,
+      isHalf: false,
+      reason: 'Auto: absent without leave',
+      status: 'approved',
+      autoDeducted: true,
+      date: fmt(new Date()),
+      approvedBy: 'System',
+      approvedAt: new Date().toISOString()
+    };
+    try {
+      await db.collection('leaveRequests').doc(autoLeave.id).set(autoLeave);
+      leaveRequests.push(autoLeave);
+      console.log(`  Auto-deducted: ${user.name} on ${date}`);
+    } catch(e) { console.error('Failed to save auto-leave for', user.name, date, e); }
+  }
+
+  // Update user balances
+  for (const user of staffToCheck) {
+    const newBalance = userUpdates[user.id];
+    if (newBalance !== (user.casLeft ?? 5)) {
+      user.casLeft = newBalance; // allow negative
+      try {
+        await saveUser(user);
+        console.log(`  Balance updated: ${user.name} casLeft = ${newBalance}`);
+      } catch(e) { console.error('Failed to update balance for', user.name, e); }
+    }
+  }
+
+  // Save lastAttendanceCheck = yesterday
+  try {
+    await db.collection('companyData').doc('squareDB').update({
+      lastAttendanceCheck: fmt(yesterday)
+    });
+    console.log(`✅ Attendance check complete. lastAttendanceCheck updated to ${fmt(yesterday)}`);
+  } catch(e) { console.error('Failed to update lastAttendanceCheck', e); }
+
+  // Show summary toast if any deductions were made
+  if (deductions.length > 0) {
+    const summary = {};
+    deductions.forEach(({user, date}) => {
+      if (!summary[user.name]) summary[user.name] = [];
+      summary[user.name].push(date);
+    });
+    const lines = Object.entries(summary).map(([name, dates]) =>
+      `${name}: ${dates.length} day(s) auto-deducted`
+    ).join('\n');
+    showToast(`📋 Attendance check complete:\n${lines}`, 6000);
+    // Refresh dashboard and leave views
+    renderDashboard();
+    updateApprovalBadge();
+  }
+}
+
+
 loadData().then(async () => {
   console.log('Data ready. Checking for saved session...');
   // Auto-login from session
@@ -1748,6 +1940,9 @@ loadData().then(async () => {
 
         // V14.2.10: Start real-time leave requests listener
         startLeaveRequestsListener();
+
+        // V14.2.36: Run attendance auto-deduction (admin only)
+        if (user.isAdmin) setTimeout(() => runAttendanceAutoDeduction(), 3000);
         
         // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
         await restoreTimerState();
@@ -1813,6 +2008,9 @@ async function doLogin(){
 
     // V14.2.10: Start real-time leave requests listener
     startLeaveRequestsListener();
+
+    // V14.2.36: Run attendance auto-deduction (admin only)
+    if (user.isAdmin) setTimeout(() => runAttendanceAutoDeduction(), 3000);
     
     // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
     await restoreTimerState();
@@ -2081,11 +2279,16 @@ function renderHoursTracker() {
       .reduce((s, l) => s + l.durationMins, 0);
   }
   function workingDaysInMonth(m) {
+    // Real working days: exclude Sundays, 2nd/4th Saturdays, and official holidays
     const last = new Date(m.year, m.month + 1, 0).getDate();
     let d = 0;
     for (let i = 1; i <= last; i++) {
-      const dow = new Date(m.year, m.month, i).getDay();
-      if (dow !== 0 && dow !== 6) d++;
+      const day = new Date(m.year, m.month, i);
+      const dow = day.getDay();
+      if (dow === 0) continue;                    // Sunday
+      if (is24Sat(day)) continue;                 // 2nd/4th Saturday
+      if (isHoliday(day)) continue;               // Official holiday
+      d++;
     }
     return d;
   }
@@ -2098,23 +2301,36 @@ function renderHoursTracker() {
       const e = l.endDate   < last  ? l.endDate   : last;
       if (s <= e) {
         let d = new Date(s), end = new Date(e);
-        while (d <= end) { const dow = d.getDay(); if (dow !== 0 && dow !== 6) days++; d.setDate(d.getDate() + 1); }
+        while (d <= end) {
+          // Only count actual working days as leave days
+          if (d.getDay() !== 0 && !is24Sat(d) && !isHoliday(d)) days++;
+          d.setDate(d.getDate() + 1);
+        }
       }
     });
     return days;
   }
   function proRatedTarget(userId, m) {
+    // Target is always htTarget (170h) — only reduced proportionally for approved leave
     const wd = workingDaysInMonth(m);
     const lv = approvedLeaveDaysInMonth(userId, m);
-    return Math.round((htTarget / wd) * Math.max(1, wd - lv));
+    if (lv === 0 || wd === 0) return htTarget;
+    // Reduce proportionally: each leave day reduces target by (htTarget / wd)
+    const reduction = Math.round((htTarget / wd) * lv);
+    return Math.max(0, htTarget - reduction);
   }
   function elapsedWD(m) {
+    // Real elapsed working days: exclude Sundays, 2nd/4th Saturdays, holidays
     const isCurrent = m.year === now.getFullYear() && m.month === now.getMonth();
     if (!isCurrent) return workingDaysInMonth(m);
     let d = 0;
     for (let i = 1; i <= now.getDate(); i++) {
-      const dow = new Date(m.year, m.month, i).getDay();
-      if (dow !== 0 && dow !== 6) d++;
+      const day = new Date(m.year, m.month, i);
+      const dow = day.getDay();
+      if (dow === 0) continue;
+      if (is24Sat(day)) continue;
+      if (isHoliday(day)) continue;
+      d++;
     }
     return d;
   }
@@ -2256,12 +2472,17 @@ function renderHoursTracker() {
     const activeMins   = d.months.filter(md=>!isFutureMonth(md.m)).reduce((s,md)=>s+md.mins,0);
     const activeTarget = d.months.filter(md=>!isFutureMonth(md.m)).reduce((s,md)=>s+md.target,0);
     const activeMonthCount = d.months.filter(md=>!isFutureMonth(md.m)).length;
-    // Progress % = logged vs target for elapsed months only
-    const pct = activeTarget > 0 ? Math.min(100, (activeMins/60 / activeTarget) * 100) : 0;
+    // Progress % = most recent month with data, or current month if it has data
+    // Prefer: current month if it has logged hours, else last past month with hours, else current month
+    const currentM = d.months.find(md=>isCurrentMonth(md.m));
+    const lastWithData = [...d.months].reverse().find(md=>!isFutureMonth(md.m) && md.mins > 0);
+    const currentOrLatestM = (currentM && currentM.mins > 0) ? currentM : (lastWithData || currentM || d.months[0]);
+    const pctMins   = currentOrLatestM ? currentOrLatestM.mins : 0;
+    const pctTarget = htTarget; // always 170h — never pro-rated in display
+    const pct = pctTarget > 0 ? Math.min(100, (pctMins/60 / pctTarget) * 100) : 0;
     const remainH = Math.max(0, activeTarget - activeMins/60);
 
     // Days left in current month of quarter
-    const currentM = d.months.find(md => isCurrentMonth(md.m));
     const wdLeft = currentM ? workingDaysInMonth(currentM.m) - elapsedWD(currentM.m) : 0;
     // Remaining needed across all remaining working days in quarter
     // = remaining to hit active target + full future month targets
@@ -2284,8 +2505,8 @@ function renderHoursTracker() {
         <div class="ht-progress-fill ${d.overallSt.key}" style="width:${pct.toFixed(1)}%"></div>
       </div>
       <div class="ht-row">
-        <span><strong>${(activeMins/60).toFixed(1)}h</strong> productive logged</span>
-        <span>vs <strong>${activeTarget}h</strong> target · ${pct.toFixed(0)}%</span>
+        <span><strong>${(pctMins/60).toFixed(1)}h</strong> ${currentOrLatestM ? currentOrLatestM.m.label.split(' ')[0] : ''} · <span style="color:#8A7E74;font-size:11px;">${(activeMins/60).toFixed(1)}h qtr total</span></span>
+        <span>vs <strong>${pctTarget}h</strong> monthly target · ${pct.toFixed(0)}%</span>
       </div>
       <div class="ht-stats-mini">
         <div class="ht-mini">
@@ -2334,12 +2555,13 @@ function renderHoursTracker() {
       </tr></thead>
       <tbody>`;
   userData.forEach(d => {
-    const gap = (d.totalMins/60) - d.totalTarget;
+    const gap = (d.totalMins/60) - (htTarget * 3);
+    const displayTarget = htTarget * 3;
     html += `<tr>
       <td style="font-weight:700;">${d.user.name}</td>
       ${d.months.map(md => `<td style="font-weight:600;color:${isFutureMonth(md.m)?'#B0A89E':'#A96E35'}">${isFutureMonth(md.m) ? '—' : hf(md.mins)}</td>`).join('')}
       <td style="font-weight:800;color:#A96E35;">${hf(d.totalMins)}</td>
-      <td>${d.totalTarget}h</td>
+      <td>${displayTarget}h</td>
       <td style="font-weight:700;color:${gap>=0?'#6E8F52':'#C0554A'}">${gap>=0?'+':''}${gap.toFixed(1)}h</td>
       <td><span class="ht-badge ${d.overallSt.key}" style="margin:0;font-size:10px;">${d.overallSt.label}</span></td>
     </tr>`;
@@ -3424,6 +3646,22 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
     }
   }
 
+  // CL BRIDGE RULE: block casual leave adjacent to holidays/2nd4th Saturdays
+  if(type==='casual' && !isHalf){
+    const bridgeViolations=[];
+    let cur=new Date(start);
+    const endD=new Date(end);
+    while(cur<=endD){
+      const bridgeFor=isBridgeDay(cur);
+      if(bridgeFor) bridgeViolations.push(`${fmtD(fmt(cur))} — adjacent to: ${bridgeFor}`);
+      cur.setDate(cur.getDate()+1);
+    }
+    if(bridgeViolations.length){
+      alert('Casual Leave cannot be applied on days adjacent to a holiday or closed day:\n\n'+bridgeViolations.join('\n')+'\n\nThese dates are blocked under the bridge day policy. If needed, this will be treated as a holiday and reviewed at appraisal.');
+      return;
+    }
+  }
+
   let days = isHalf ? 0.5 : workDays(start, end);
   const user=users.find(u=>u.id===currentUser.id);
   if(type==='medical'&&days>user.medLeft){ alert(`Only ${user.medLeft} medical days left`); return; }
@@ -3504,7 +3742,7 @@ function renderTeamLeave() {
     const date = new Date(year, month, day);
     const dateStr = fmt(date);
     const isToday = dateStr === fmt(new Date());
-    const isWeekendDay = date.getDay() === 0 || date.getDay() === 6;
+    const isWeekendDay = date.getDay() === 0 || date.getDay() === 6 || is24Sat(date) || isHoliday(date);
     
     // Find who's on leave this day
     const onLeaveToday = approvedLeaves.filter(l => {
@@ -3531,8 +3769,10 @@ function renderTeamLeave() {
       }).join('');
     }
     
+    const teamDayLabel = getDayLabel(date);
     calHTML += `<div style="background:${bgColor};border:2px solid ${borderColor};border-radius:8px;padding:8px;min-height:80px;${isWeekendDay ? 'opacity:0.6;' : ''}">
       <div style="font-weight:700;font-size:14px;color:#2A201A;margin-bottom:4px;">${day}</div>
+      ${teamDayLabel && isWeekendDay ? `<div style="font-size:9px;font-weight:700;color:#C4874A;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${teamDayLabel}">${teamDayLabel}</div>` : ''}
       ${leaveInfo}
     </div>`;
   }
