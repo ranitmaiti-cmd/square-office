@@ -667,7 +667,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #A96E35;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#F0E6D6;border:1px solid #DBC9A8;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#8A5828;">
-            📌 <strong>V14.2.33 Production:</strong> Bug fix: Manage page now opens correctly (removed conflicting inline display:none). Planner fixed-height rows — all member rows same height, columns align. Nav icons replaced with clean monochrome symbols. Hours Tracker status labels cleaned, bar thresholds recalibrated. All V14.2.32 palette retained.
+            📌 <strong>V14.2.34 Production:</strong> 2026 Official Holidays pre-loaded (15 dates). 2nd and 4th Saturdays automatically shown as closed in all calendars. Holiday/closed day names visible in weekly planner and dashboard calendar cells. Leave application warns if selected dates include holidays or 2nd/4th Saturdays. All V14.2.33 fixes retained.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1676,6 +1676,9 @@ function isSaturday(d){ return new Date(d).getDay()===6; }
 function is24Sat(d){ const dt=new Date(d); if(dt.getDay()!==6) return false; return [2,4].includes(Math.ceil(dt.getDate()/7)); }
 function isWeekend(d){ return isSunday(d) || isSaturday(d); }
 function isHoliday(d){ const ds=fmt(d); return holidays.some(h=>h.date===ds); }
+function getHolidayName(d){ const ds=fmt(d); const h=holidays.find(h=>h.date===ds); return h?h.name:null; }
+function is24SatLabel(d){ const dt=new Date(d); if(dt.getDay()!==6) return null; const wk=Math.ceil(dt.getDate()/7); return wk===2?'2nd Saturday':wk===4?'4th Saturday':null; }
+function getDayLabel(d){ return getHolidayName(d) || is24SatLabel(d) || null; }
 function isHolidayOrWeekend(d){ return isWeekend(d) || isHoliday(d); }
 function workDays(s,e){ let c=0,cur=new Date(s),end=new Date(e); while(cur<=end){if(!isSunday(cur)&&!is24Sat(cur)&&!isHoliday(cur))c++; cur=addDays(cur,1);} return c; }
 function minsToHM(m){ return `${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`; }
@@ -1973,7 +1976,11 @@ function renderDashboard(){
     days.forEach(day=>{
       const ds=fmt(day),cell=document.createElement('div');
       const isWeekendDay = isWeekend(day);
-      cell.className='cal-cell'+(fmt(day)===fmt(new Date())?' today':'')+(isWeekendDay?' holiday':'');
+      const sat24 = is24Sat(day);
+      cell.className='cal-cell'+(fmt(day)===fmt(new Date())?' today':'')+(isWeekendDay||isHoliday(day)||sat24?' holiday':'');
+      // Show holiday / 2nd+4th Sat label
+      const dayLabel = getDayLabel(day);
+      if(dayLabel){ const lb=document.createElement('div'); lb.style.cssText='font-size:9px;font-weight:700;color:#C4874A;line-height:1.2;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'; lb.textContent=dayLabel; lb.title=dayLabel; cell.appendChild(lb); }
       // Highlight current user's cells
       if(user.id === currentUser?.id){
         cell.style.borderLeft = '3px solid #A96E35';
@@ -2779,8 +2786,8 @@ function renderPlanner(){
   const dn=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   const head=document.createElement('div'); head.className='planner-head';
   head.innerHTML='<div class="planner-head-cell">Member</div>'+dn.map((d,i)=>{
-    const dt=days[i],hol=isHoliday(dt),tod=fmt(dt)===fmt(new Date());
-    return `<div class="planner-head-cell" style="${hol?'background:#FBF0EE;color:#C0554A;':''}${tod?'background:#F0E6D6;color:#A96E35;':''}">${d} <small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
+    const dt=days[i],hol=isHoliday(dt)||is24Sat(dt),tod=fmt(dt)===fmt(new Date());
+    return `<div class="planner-head-cell" style="${hol?'background:#F5ECD8;color:#C4874A;':''}${tod?'background:#F0E6D6;color:#A96E35;font-weight:800;':''}">${d} <small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
   }).join(''); grid.appendChild(head);
   users.forEach(user=>{
     const row=document.createElement('div'); row.className='planner-row';
@@ -2793,16 +2800,20 @@ function renderPlanner(){
     days.forEach(day=>{
       const ds=fmt(day), entries=planEntries.filter(p=>p.userId===user.id&&p.date===ds);
       const cell=document.createElement('div');
-      cell.className='planner-cell'+(entries.length?' has-items':'')+(isHoliday(day)?' holiday':'');
+      const isClosed = isHoliday(day) || is24Sat(day);
+      cell.className='planner-cell'+(entries.length?' has-items':'')+(isClosed?' holiday':'');
+      // Show closed day label
+      const closedLabel = getDayLabel(day);
+      if(closedLabel){ const lb=document.createElement('div'); lb.style.cssText='font-size:9px;font-weight:700;color:#C4874A;background:#F5ECD8;border-radius:3px;padding:1px 4px;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'; lb.textContent=closedLabel; lb.title=closedLabel; cell.appendChild(lb); }
       // V14.2.24: Highlight own row cells
-      if (isMyRow && !isHoliday(day)) cell.style.borderColor='#DBC9A8';
+      if (isMyRow && !isClosed) cell.style.borderLeft='2px solid #DBC9A8';
       entries.forEach(pl=>{
         const c=document.createElement('div'); c.className=`plan-chip ${pl.done?'done':pl.type}`;
         c.textContent=`${pl.type==='emergency'?'🚨':''}${pl.project}${pl.phase?' · '+pl.phase.split(' ')[0]:''}`;
         c.title=pl.desc; c.onclick=(e)=>{ e.stopPropagation(); openPlanModal(user.id,ds,pl.id); }; cell.appendChild(c);
       });
       // V14.2.24: Only allow clicking own row for non-admin (prevents accidental wrong-row clicks)
-      if(!isHoliday(day) && (currentUser.isAdmin || isMyRow)) {
+      if(!isClosed && (currentUser.isAdmin || isMyRow)) {
         cell.addEventListener('click',()=>openPlanModal(user.id,ds,null));
       }
       row.appendChild(cell);
@@ -3396,7 +3407,23 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
   const type=document.getElementById('lType').value,start=document.getElementById('lStart').value,end=document.getElementById('lEnd').value,reason=document.getElementById('lReason').value.trim();
   const isHalf=document.getElementById('lHalf').checked;
   if(!type||!start||!reason){ alert('Fill all required fields'); return; }
-  
+
+  // Check if selected dates overlap with holidays or 2nd/4th Saturdays
+  if(!isHalf){
+    const warnings=[];
+    let cur=new Date(start);
+    const endD=new Date(end);
+    while(cur<=endD){
+      const label=getDayLabel(cur);
+      if(label) warnings.push(`${fmtD(fmt(cur))}: ${label}`);
+      cur.setDate(cur.getDate()+1);
+    }
+    if(warnings.length){
+      const msg='The following dates in your selection are holidays or closed days:\n\n' + warnings.join('\n') + '\n\nThese days will NOT be counted as leave. Continue?';
+      if(!confirm(msg)) return;
+    }
+  }
+
   let days = isHalf ? 0.5 : workDays(start, end);
   const user=users.find(u=>u.id===currentUser.id);
   if(type==='medical'&&days>user.medLeft){ alert(`Only ${user.medLeft} medical days left`); return; }
