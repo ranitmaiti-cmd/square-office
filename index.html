@@ -304,6 +304,69 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .ht-my-card{background:white;border-radius:14px;padding:20px;box-shadow:0 4px 16px rgba(0,0,0,0.1);border:2px solid #A96E35;margin-bottom:20px;}
 .ht-my-title{font-size:13px;font-weight:700;color:#8A7E74;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;}
 .ht-my-name{font-size:22px;font-weight:800;color:#A96E35;margin-bottom:14px;}
+
+/* ── APPRAISAL V14.2.38 ── */
+.ap-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+.ap-qtr-btn{background:white;border:2px solid #E0D8CE;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;color:#5C4F42;transition:all 0.2s;}
+.ap-qtr-btn:hover{border-color:#A96E35;color:#A96E35;}
+.ap-qtr-btn.active{background:#A96E35;color:white;border-color:#A96E35;}
+.ap-silent-badge{background:#F5ECD8;color:#7A4E18;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;}
+.ap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px;margin-bottom:24px;}
+.ap-card{background:white;border-radius:14px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.07);border-top:4px solid #E0D8CE;transition:transform 0.15s;}
+.ap-card:hover{transform:translateY(-2px);}
+.ap-card.excellent{border-top-color:#6E8F52;}
+.ap-card.good{border-top-color:#A96E35;}
+.ap-card.average{border-top-color:#C4874A;}
+.ap-card.poor{border-top-color:#C0554A;}
+.ap-card.me{background:#FAF3EB;}
+.ap-name{font-size:16px;font-weight:800;color:#3D332A;margin-bottom:2px;}
+.ap-score-big{font-size:36px;font-weight:900;line-height:1;}
+.ap-score-big.excellent{color:#6E8F52;}
+.ap-score-big.good{color:#A96E35;}
+.ap-score-big.average{color:#C4874A;}
+.ap-score-big.poor{color:#C0554A;}
+.ap-score-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;}
+.ap-params{margin-top:14px;}
+.ap-param-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.ap-param-name{font-size:11px;color:#8A7E74;font-weight:600;width:140px;flex-shrink:0;}
+.ap-param-bar-bg{flex:1;background:#E0D8CE;border-radius:4px;height:6px;}
+.ap-param-bar-fill{height:6px;border-radius:4px;transition:width 0.6s;}
+.ap-param-score{font-size:11px;font-weight:700;color:#3D332A;width:28px;text-align:right;flex-shrink:0;}
+.ap-flags{margin-top:12px;padding-top:10px;border-top:1px solid #E0D8CE;}
+.ap-flag{font-size:11px;color:#C0554A;margin-bottom:3px;}
+.ap-narrative{margin-top:12px;padding:10px 12px;background:#FAF8F5;border-radius:8px;font-size:12px;color:#5C4F42;line-height:1.5;border-left:3px solid #A96E35;}
+.ap-trend{display:flex;align-items:center;gap:4px;font-size:11px;color:#8A7E74;margin-top:4px;}
+.ap-percentile{font-size:11px;background:#EDE9E3;color:#5C4F42;padding:2px 8px;border-radius:10px;font-weight:600;}
+.ap-table-wrap{background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.07);margin-bottom:20px;}
+.ap-table{width:100%;border-collapse:collapse;font-size:12px;}
+.ap-table th{background:#F7F5F2;padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:#8A7E74;border-bottom:2px solid #E0D8CE;}
+.ap-table td{padding:10px 10px;border-bottom:1px solid #F0EBE3;vertical-align:middle;}
+.ap-table tr:last-child td{border-bottom:none;}
+.ap-table tr:hover td{background:#FAF8F5;}
+.ap-grade{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;}
+.ap-grade.excellent{background:#DCE8CC;color:#2E4A1E;}
+.ap-grade.good{background:#F0E6D6;color:#7A4E18;}
+.ap-grade.average{background:#F5ECD8;color:#8A5828;}
+.ap-grade.poor{background:#F5E0DC;color:#7A2E28;}
+.ap-silent-note{background:#FFF8EE;border:1px solid #DEB98A;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#7A4E18;}
+/* ── ADMIN SCORECARD ── */
+.ap-scorecard{background:#FAF3EB;border:1px solid #DEB98A;border-radius:10px;padding:12px 14px;margin-top:12px;}
+.ap-scorecard-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#A96E35;margin-bottom:10px;}
+.ap-score-input-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
+.ap-score-input-label{font-size:11px;color:#8A7E74;font-weight:600;width:80px;flex-shrink:0;}
+.ap-score-pills{display:flex;gap:3px;flex-wrap:wrap;}
+.ap-star{width:22px;height:22px;border-radius:4px;border:1.5px solid #E0D8CE;background:white;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;color:#B0A89E;font-weight:700;transition:all 0.12s;flex-shrink:0;}
+.ap-star:hover{border-color:#A96E35;color:#A96E35;}
+.ap-star.active{background:#A96E35;border-color:#A96E35;color:white;}
+.ap-score-val{font-size:13px;font-weight:800;color:#A96E35;min-width:32px;}
+.ap-note-input{width:100%;border:1px solid #E0D8CE;border-radius:6px;padding:6px 8px;font-size:11px;resize:none;height:44px;font-family:inherit;background:white;color:#3D332A;box-sizing:border-box;}
+.ap-note-input:focus{outline:none;border-color:#A96E35;}
+.ap-scorecard-footer{display:flex;align-items:center;gap:10px;margin-top:8px;}
+.ap-save-scorecard{background:#A96E35;color:white;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:background 0.2s;white-space:nowrap;}
+.ap-save-scorecard:hover{background:#8A5828;}
+.ap-save-scorecard.saved{background:#6E8F52;}
+.ap-save-status{font-size:10px;color:#B0A89E;line-height:1.3;}
+.ap-save-status.ok{color:#6E8F52;}
 </style>
 
 <!-- Firebase SDK v10 - WORKING VERSION -->
@@ -404,6 +467,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="nav-section">Admin</div>
       <div class="nav-item" data-page="timereport"><span class="nav-icon">▶</span>Time Report</div>
       <div class="nav-item" data-page="hourstracker"><span class="nav-icon">◎</span>Hours Tracker</div>
+      <div class="nav-item admin-only" data-page="appraisal" style="display:none;"><span class="nav-icon">◑</span>Appraisal</div>
       <div class="nav-item" data-page="leaves"><span class="nav-icon">◌</span>Leave</div>
       <div class="nav-item" data-page="teamleave"><span class="nav-icon">◫</span>Team Leave</div>
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
@@ -630,6 +694,12 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div id="hoursTrackerContent"></div>
       </div>
 
+      <!-- APPRAISAL -->
+      <div class="page admin-only" id="page-appraisal">
+        <h2 class="page-title">◑ Appraisal</h2>
+        <div id="appraisalContent"></div>
+      </div>
+
       <!-- MANAGE -->
       <div class="page admin-only" id="page-manage">
         <h2 class="page-title">⚙️ Manage</h2>
@@ -667,7 +737,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #A96E35;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#F0E6D6;border:1px solid #DBC9A8;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#8A5828;">
-            📌 <strong>V14.2.37 Production:</strong> Fix: project saves now granular first (prevents offline/reconnect data loss). Fix: leaveRequests listener debounced 1.5s — no more 50+ snapshot loop during auto-deductions. Fix: Invalid Date on project end date replaced with "Ongoing". All V14.2.36 features retained.ing days since last check. Any OMS-active staff with zero productive logs and no approved leave gets 1 casual day auto-deducted. Allows negative balance. Excluded: Debaleena, Rajkumar, Gayaram. All V14.2.35 fixes retained.
+            📌 <strong>V14.2.39 Production:</strong> Admin Scorecard added to Appraisal — quality score (1-10) + private note per person per quarter. Saved to Firebase, persists across sessions. When entered: counts 20% of total, auto-parameters rebalanced to 80%. Weights shown as pending until score entered. All V14.2.38 features retained.ing days since last check. Any OMS-active staff with zero productive logs and no approved leave gets 1 casual day auto-deducted. Allows negative balance. Excluded: Debaleena, Rajkumar, Gayaram. All V14.2.35 fixes retained.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -2119,6 +2189,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='approvals')  renderApprovals();
     if(page==='manage')       renderManage();
     if(page==='hourstracker') renderHoursTracker();
+    if(page==='appraisal')   renderAppraisal();
   });
 });
 
@@ -2677,6 +2748,455 @@ function renderHoursTracker() {
     document.getElementById('htTargetInp')?.addEventListener('change', e => {
       const v = parseInt(e.target.value);
       if (v >= 50 && v <= 300) { htTarget = v; renderHoursTracker(); }
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// APPRAISAL — V14.2.38
+// Auto-scored from system data. 7 parameters, weighted total.
+// Admin: full team. Staff: own only (no peer scores visible).
+// Q1 runs silently — admin sees, staff don't until Q2.
+// ═══════════════════════════════════════════════════════════════
+let apQtrOffset = 0; // 0=current quarter
+let apAdminScores = {}; // { "userId_QLabel": { score, note } }
+
+async function renderAppraisal() {
+  const container = document.getElementById('appraisalContent');
+  if (!container || !currentUser) return;
+  if (!currentUser.isAdmin) {
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:#8A7E74;">Appraisal results are reviewed by admin and shared at the end of each quarter.</div>';
+    return;
+  }
+
+  const isAdmin = currentUser.isAdmin;
+  const now = new Date();
+
+  // ── Quarter helper (reuse from HT) ──────────────────────
+  function getApQtr(offset) {
+    const m = now.getMonth();
+    const fyMonth = (m + 9) % 12;
+    const currentQIdx = Math.floor(fyMonth / 3);
+    const currentFYYear = m >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    let qIdx = currentQIdx + offset;
+    let fyYear = currentFYYear;
+    while (qIdx < 0)  { qIdx += 4; fyYear--; }
+    while (qIdx >= 4) { qIdx -= 4; fyYear++; }
+    const startMonths = [3,6,9,0];
+    const calYear = qIdx === 3 ? fyYear+1 : fyYear;
+    const months = [];
+    for (let i=0;i<3;i++) {
+      const cm=(startMonths[qIdx]+i)%12;
+      const cy=(startMonths[qIdx]+i>=12)?calYear+1:calYear;
+      months.push({year:cy,month:cm,label:new Date(cy,cm,1).toLocaleDateString('en-IN',{month:'short',year:'numeric'})});
+    }
+    const qLabels=['Q1 (Apr–Jun)','Q2 (Jul–Sep)','Q3 (Oct–Dec)','Q4 (Jan–Mar)'];
+    return { q:qIdx+1, fyYear, months, label:qLabels[qIdx]+' FY'+fyYear+'-'+String(fyYear+1).slice(2) };
+  }
+
+  const qtr = getApQtr(apQtrOffset);
+  const isCurrentQtr = apQtrOffset === 0;
+
+  const isSilent = false; // Admin-only view — always show
+
+  function fmt2(d){ return `${d.year}-${String(d.month+1).padStart(2,'0')}`; }
+  function isPastMonth(m){ return m.year<now.getFullYear()||(m.year===now.getFullYear()&&m.month<now.getMonth()); }
+  function isCurrentMonth(m){ return m.year===now.getFullYear()&&m.month===now.getMonth(); }
+  function isFutureMonth(m){ return !isPastMonth(m)&&!isCurrentMonth(m); }
+
+  // ── Working days in range ────────────────────────────────
+  function workingDaysInRange(startDate, endDate) {
+    let d = new Date(startDate), days = 0;
+    while (d <= endDate) {
+      if (!isClosedDay(d)) days++;
+      d.setDate(d.getDate()+1);
+    }
+    return days;
+  }
+
+  // ── Score helpers ────────────────────────────────────────
+  function clamp10(v){ return Math.min(10, Math.max(0, Math.round(v*10)/10)); }
+  function scoreColor(s){ return s>=8?'excellent':s>=6?'good':s>=4?'average':'poor'; }
+  function scoreLabel(s){ return s>=8?'Excellent':s>=6?'Good':s>=4?'Average':'Needs Improvement'; }
+  function barColor(s){ return s>=8?'#6E8F52':s>=6?'#A96E35':s>=4?'#C4874A':'#C0554A'; }
+
+  // ── Compute scores for one user ──────────────────────────
+  function computeScores(user) {
+    const qStart = new Date(qtr.months[0].year, qtr.months[0].month, 1);
+    const lastActiveM = [...qtr.months].reverse().find(m => !isFutureMonth(m));
+    const qEnd = lastActiveM
+      ? new Date(lastActiveM.year, lastActiveM.month+1, 0)
+      : new Date(qtr.months[2].year, qtr.months[2].month+1, 0);
+    const totalWD = workingDaysInRange(qStart, qEnd);
+
+    // 1. ATTENDANCE (20%)
+    const autoAbsent = leaveRequests.filter(l =>
+      l.userId === user.id && l.autoDeducted && l.startDate >= fmt2(qtr.months[0])+'-01'
+    ).length;
+    const approvedLeave = leaveRequests.filter(l =>
+      l.userId === user.id && l.status==='approved' && !l.autoDeducted &&
+      l.startDate >= fmt2(qtr.months[0])+'-01' && l.startDate <= fmt2(qtr.months[2])+'-31'
+    ).reduce((s,l)=>s+l.days,0);
+    const absentDays = autoAbsent + approvedLeave;
+    const presentDays = Math.max(0, totalWD - absentDays);
+    const attendanceScore = clamp10((presentDays / Math.max(1,totalWD)) * 10);
+
+    // 2. OMS LOGGING DISCIPLINE (20%)
+    // Days with ≥30 productive mins logged vs days present
+    const daysLogged = new Set();
+    timeLogs.filter(l => l.userId===user.id && l.productive &&
+      l.date >= fmt2(qtr.months[0])+'-01' && l.date <= fmt2(lastActiveM||qtr.months[0])+'-31'
+    ).forEach(l => { if(l.durationMins>=30) daysLogged.add(l.date); });
+    // Also count days with total ≥30 even across multiple entries
+    const dayTotals = {};
+    timeLogs.filter(l => l.userId===user.id && l.productive &&
+      l.date >= fmt2(qtr.months[0])+'-01'
+    ).forEach(l => { dayTotals[l.date]=(dayTotals[l.date]||0)+l.durationMins; });
+    const daysLoggedOk = Object.entries(dayTotals).filter(([,m])=>m>=30).length;
+    const omsScore = clamp10((daysLoggedOk / Math.max(1,presentDays)) * 10);
+
+    // 3. PRODUCTIVE HOURS VS TARGET (20%)
+    const activeMonths = qtr.months.filter(m => !isFutureMonth(m));
+    const totalProdMins = timeLogs.filter(l =>
+      l.userId===user.id && l.productive &&
+      activeMonths.some(m => l.date.startsWith(fmt2(m)))
+    ).reduce((s,l)=>s+l.durationMins,0);
+    const monthTarget = 170 * activeMonths.length;
+    const hoursScore = clamp10((totalProdMins/60 / Math.max(1,monthTarget)) * 10);
+
+    // 4. WEEKLY PLANNING DISCIPLINE (15%)
+    // Weeks in quarter range that had at least 1 plan entry
+    const qtrStart = new Date(qtr.months[0].year, qtr.months[0].month, 1);
+    const qtrEndCheck = new Date(qEnd);
+    let weekStarts = [];
+    let wd = new Date(qtrStart);
+    wd.setDate(wd.getDate() - (wd.getDay()===0?6:wd.getDay()-1)); // monday
+    while (wd <= qtrEndCheck) {
+      weekStarts.push(new Date(wd));
+      wd.setDate(wd.getDate()+7);
+    }
+    const weeksWithPlan = weekStarts.filter(ws => {
+      const we = new Date(ws); we.setDate(we.getDate()+6);
+      return planEntries.some(p => p.userId===user.id && new Date(p.date)>=ws && new Date(p.date)<=we);
+    }).length;
+    const planRate = weekStarts.length > 0 ? weeksWithPlan/weekStarts.length : 0;
+
+    // Plan completion: planned tasks that have time logged
+    const myPlans = planEntries.filter(p =>
+      p.userId===user.id &&
+      p.date >= fmt2(qtr.months[0])+'-01' &&
+      p.date <= fmt2(qtr.months[2])+'-31' &&
+      p.type !== 'lunch'
+    );
+    const completedPlans = myPlans.filter(p => {
+      return timeLogs.some(l => l.userId===user.id && l.projectId===p.projectId &&
+        l.phase===p.phase && l.date===p.date && l.productive);
+    }).length;
+    const completionRate = myPlans.length>0 ? completedPlans/myPlans.length : 0.5;
+    const planScore = clamp10((planRate*0.5 + completionRate*0.5) * 10);
+
+    // 5. PROJECT BUDGET DISCIPLINE (10%)
+    // For each project+phase this person logged time on, were they within budget?
+    const myPhases = {};
+    timeLogs.filter(l => l.userId===user.id && l.productive &&
+      activeMonths.some(m => l.date.startsWith(fmt2(m)))
+    ).forEach(l => {
+      if(l.projectId && l.phase) {
+        const key = l.projectId+'|'+l.phase;
+        myPhases[key]=(myPhases[key]||0)+l.durationMins;
+      }
+    });
+    let withinBudget=0, totalPhases=0;
+    Object.entries(myPhases).forEach(([key, mins]) => {
+      const [projId, phaseName] = key.split('|');
+      const proj = projectsData.find(p => p.id===projId);
+      if (!proj || !proj.phases[phaseName]) return;
+      const budget = proj.phases[phaseName]; // hours
+      const totalPhaseLogged = phaseLoggedMins(projId, phaseName)/60;
+      totalPhases++;
+      if (totalPhaseLogged <= budget*1.1) withinBudget++; // 10% tolerance
+    });
+    const budgetScore = totalPhases>0 ? clamp10((withinBudget/totalPhases)*10) : 7; // neutral if no budget data
+
+    // 6. LEAVE APPLICATION BEHAVIOUR (8%)
+    const totalAbsences = autoAbsent + approvedLeave;
+    const properlyApplied = approvedLeave;
+    const leaveScore = totalAbsences>0
+      ? clamp10((properlyApplied/totalAbsences)*10)
+      : 10; // perfect if never absent
+
+    // 7. WORK BREADTH (7%)
+    const myProjects = new Set(timeLogs.filter(l=>l.userId===user.id&&l.productive&&activeMonths.some(m=>l.date.startsWith(fmt2(m)))).map(l=>l.projectId).filter(Boolean));
+    const myPhasesSet = new Set(timeLogs.filter(l=>l.userId===user.id&&l.productive&&l.phase&&activeMonths.some(m=>l.date.startsWith(fmt2(m)))).map(l=>l.phase));
+    const breadthScore = clamp10(Math.min(10, (myProjects.size * 1.5 + myPhasesSet.size * 0.5)));
+
+    // ── Admin scorecard ─────────────────────────────────────
+    const adminKey = user.id + '_' + qtr.label.replace(/\s/g,'_');
+    const adminEntry = apAdminScores[adminKey] || { score: null, note: '' };
+    const adminScore = adminEntry.score !== null ? adminEntry.score : null;
+
+    // ── Weighted total ──────────────────────────────────────
+    // If admin score entered: auto=80%, admin=20%
+    // If not entered: auto=100% normalised
+    let total;
+    if (adminScore !== null) {
+      total = clamp10(
+        attendanceScore * 0.15 +
+        omsScore        * 0.15 +
+        hoursScore      * 0.18 +
+        planScore       * 0.12 +
+        budgetScore     * 0.08 +
+        leaveScore      * 0.07 +
+        breadthScore    * 0.05 +
+        adminScore      * 0.20
+      );
+    } else {
+      total = clamp10(
+        attendanceScore * 0.20 +
+        omsScore        * 0.20 +
+        hoursScore      * 0.20 +
+        planScore       * 0.15 +
+        budgetScore     * 0.10 +
+        leaveScore      * 0.08 +
+        breadthScore    * 0.07
+      );
+    }
+
+    // ── Red flags ───────────────────────────────────────────
+    const flags = [];
+    if (autoAbsent > 3) flags.push(`${autoAbsent} unplanned absences (auto-deducted)`);
+    if (omsScore < 5) flags.push(`Present ${presentDays}d but logged on only ${daysLoggedOk}d`);
+    if (hoursScore < 5) flags.push(`Productive hours significantly below 170h target`);
+    if (planRate < 0.4) flags.push(`Weekly planning absent for ${Math.round((1-planRate)*weekStarts.length)} of ${weekStarts.length} weeks`);
+    if (completionRate < 0.4 && myPlans.length > 3) flags.push(`Low plan completion — ${Math.round(completionRate*100)}% of planned tasks logged`);
+
+    // ── Narrative ───────────────────────────────────────────
+    const gradeWord = scoreLabel(total);
+    const hoursLogged = (totalProdMins/60).toFixed(0);
+    let narrative = `${user.name} scored ${total.toFixed(1)}/10 — ${gradeWord}. `;
+    narrative += `Logged ${hoursLogged}h productive (target: ${monthTarget}h). `;
+    if (attendanceScore >= 8) narrative += `Attendance was strong. `;
+    else if (autoAbsent > 0) narrative += `Had ${autoAbsent} unplanned absence${autoAbsent>1?'s':''}. `;
+    if (omsScore >= 8) narrative += `OMS logging was consistent. `;
+    else narrative += `OMS logging needs improvement. `;
+    if (weeksWithPlan >= weekStarts.length * 0.7) narrative += `Good weekly planning discipline. `;
+    else narrative += `Weekly planning was irregular. `;
+    if (myProjects.size >= 3) narrative += `Worked across ${myProjects.size} projects showing good breadth.`;
+
+    return {
+      total, attendanceScore, omsScore, hoursScore, planScore,
+      budgetScore, leaveScore, breadthScore, adminScore, adminEntry,
+      flags, narrative, presentDays, totalWD, daysLoggedOk,
+      hoursLogged, monthTarget, autoAbsent, weeksWithPlan,
+      totalWeeks: weekStarts.length, completionRate, myProjects: myProjects.size
+    };
+  }
+
+  // ── Load admin scores from Firebase ─────────────────────
+  const apScoreDocId = 'appraisalScores_' + qtr.label.replace(/[^a-zA-Z0-9]/g,'_');
+  try {
+    const apSnap = await db.collection('appraisalData').doc(apScoreDocId).get();
+    if (apSnap.exists) apAdminScores = { ...apAdminScores, ...apSnap.data() };
+  } catch(e) { /* silent */ }
+
+  // ── Build UI ─────────────────────────────────────────────
+  const staffUsers = users.filter(u => !u.isAdmin);
+  const viewUsers = isAdmin ? staffUsers : staffUsers.filter(u => u.id === currentUser.id);
+  const allScores = staffUsers.map(u => ({ user:u, s: computeScores(u) }));
+
+  let html = `
+  <div class="ap-header">
+    <button class="ap-qtr-btn" id="apPrev">◀ Prev</button>
+    <strong style="font-size:16px;color:#3D332A;">${qtr.label}</strong>
+    <button class="ap-qtr-btn" id="apNext" ${isCurrentQtr?'disabled style="opacity:0.35;cursor:not-allowed;"':''}>Next ▶</button>
+    ${isCurrentQtr?'<span class="ap-silent-badge">Q1 — Admin Preview</span>':''}
+  </div>`;
+
+  if (isSilent) {
+    html += `<div class="ap-silent-note">
+      ◑ Your appraisal for <strong>${qtr.label}</strong> is being calculated. Scores will be visible from Q2 onwards.
+      Keep logging consistently — everything is being tracked.
+    </div>`;
+    container.innerHTML = html;
+    attachApListeners();
+    return;
+  }
+
+  // Cards
+  html += `<div class="ap-grid">`;
+  viewUsers.forEach(user => {
+    const d = allScores.find(x => x.user.id === user.id);
+    if (!d) return;
+    const s = d.s;
+    const grade = scoreColor(s.total);
+    const isMe = user.id === currentUser.id;
+
+    // Percentile (admin only visible)
+    const rank = allScores.filter(x => x.s.total < s.total).length + 1;
+    const pctile = Math.round((1 - (rank-1)/staffUsers.length) * 100);
+
+    const params = [
+      { name:'Attendance',        score:s.attendanceScore,  weight:20 },
+      { name:'OMS Discipline',    score:s.omsScore,         weight:20 },
+      { name:'Hours vs Target',   score:s.hoursScore,       weight:20 },
+      { name:'Weekly Planning',   score:s.planScore,        weight:15 },
+      { name:'Budget Discipline', score:s.budgetScore,      weight:10 },
+      { name:'Leave Behaviour',   score:s.leaveScore,       weight:8  },
+      { name:'Work Breadth',      score:s.breadthScore,     weight:7  },
+      { name:'Admin Scorecard',   score:s.adminScore!==null?s.adminScore:null, weight:20, pending:s.adminScore===null },
+    ];
+
+    html += `
+    <div class="ap-card ${grade}${isMe&&!isAdmin?' me':''}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div class="ap-name">${user.name}</div>
+          ${isAdmin?`<span class="ap-percentile">Top ${pctile}%</span>`:''}
+        </div>
+        <div style="text-align:right;">
+          <div class="ap-score-big ${grade}">${s.total.toFixed(1)}</div>
+          <div class="ap-score-label" style="color:${barColor(s.total)}">${scoreLabel(s.total)}</div>
+        </div>
+      </div>
+      <div class="ap-params">`;
+    params.forEach(p => {
+      if (p.score === null) {
+        html += `
+          <div class="ap-param-row">
+            <div class="ap-param-name">${p.name} <span style="color:#B0A89E;font-weight:400;">(${p.weight}%)</span></div>
+            <div class="ap-param-bar-bg" style="flex:1;"></div>
+            <div class="ap-param-score" style="color:#B0A89E;font-size:10px;">pending</div>
+          </div>`;
+        return;
+      }
+      html += `
+        <div class="ap-param-row">
+          <div class="ap-param-name">${p.name} <span style="color:#B0A89E;font-weight:400;">(${p.weight}%)</span></div>
+          <div class="ap-param-bar-bg">
+            <div class="ap-param-bar-fill" style="width:${p.score*10}%;background:${barColor(p.score)};"></div>
+          </div>
+          <div class="ap-param-score">${p.score.toFixed(1)}</div>
+        </div>`;
+    });
+    html += `</div>`;
+    if (s.flags.length > 0) {
+      html += `<div class="ap-flags">`;
+      s.flags.forEach(f => { html += `<div class="ap-flag">⚠ ${f}</div>`; });
+      html += `</div>`;
+    }
+    html += `<div class="ap-narrative">${s.narrative}</div>`;
+
+    // Admin scorecard input
+    const adminKey2 = user.id + '_' + qtr.label.replace(/\s/g,'_');
+    const hasAdminScore = s.adminScore !== null;
+    html += `
+    <div class="ap-scorecard">
+      <div class="ap-scorecard-title">◈ Admin Scorecard · 20% weight</div>
+      <div class="ap-score-input-row">
+        <div class="ap-score-input-label">Score</div>
+        <div class="ap-score-pills" id="stars_${user.id}">
+          ${[1,2,3,4,5,6,7,8,9,10].map(n => `<div class="ap-star${hasAdminScore && s.adminEntry.score>=n?' active':''}" data-user="${user.id}" data-val="${n}">${n}</div>`).join('')}
+        </div>
+        <div class="ap-score-val" id="starval_${user.id}">${hasAdminScore ? s.adminEntry.score+'/10' : ''}</div>
+      </div>
+      <textarea class="ap-note-input" id="note_${user.id}" placeholder="Private note — reasoning, quality observations, specific incidents...">${hasAdminScore ? s.adminEntry.note : ''}</textarea>
+      <div class="ap-scorecard-footer">
+        <button class="ap-save-scorecard${hasAdminScore?' saved':''}" id="savesc_${user.id}" data-user="${user.id}" data-key="${adminKey2}">
+          ${hasAdminScore ? '✓ Saved' : 'Save'}
+        </button>
+        <span class="ap-save-status${hasAdminScore?' ok':''}">
+          ${hasAdminScore ? 'Saved · affects final score' : 'Not saved · total uses auto only'}
+        </span>
+      </div>
+    </div>`;
+
+    html += `</div>`;
+  });
+  html += `</div>`;
+
+  // Admin team table
+  if (isAdmin) {
+    const sorted = [...allScores].sort((a,b) => b.s.total - a.s.total);
+    html += `
+    <div class="ap-table-wrap">
+      <div style="font-size:14px;font-weight:700;color:#3D332A;margin-bottom:14px;">Team Ranking — ${qtr.label}</div>
+      <table class="ap-table">
+        <thead><tr>
+          <th>#</th><th>Member</th><th>Total</th>
+          <th>Attendance</th><th>OMS</th><th>Hours</th>
+          <th>Planning</th><th>Budget</th><th>Leave</th><th>Breadth</th>
+          <th>Grade</th>
+        </tr></thead>
+        <tbody>`;
+    sorted.forEach((d,i) => {
+      const s = d.s, grade = scoreColor(s.total);
+      html += `<tr>
+        <td style="font-weight:700;color:#8A7E74;">${i+1}</td>
+        <td style="font-weight:700;">${d.user.name}</td>
+        <td style="font-size:16px;font-weight:900;color:${barColor(s.total)}">${s.total.toFixed(1)}</td>
+        <td>${s.attendanceScore.toFixed(1)}</td>
+        <td>${s.omsScore.toFixed(1)}</td>
+        <td>${s.hoursScore.toFixed(1)}</td>
+        <td>${s.planScore.toFixed(1)}</td>
+        <td>${s.budgetScore.toFixed(1)}</td>
+        <td>${s.leaveScore.toFixed(1)}</td>
+        <td>${s.breadthScore.toFixed(1)}</td>
+        <td><span class="ap-grade ${grade}">${scoreLabel(s.total)}</span></td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+
+  container.innerHTML = html;
+  attachApListeners();
+
+  function attachApListeners() {
+    document.getElementById('apPrev')?.addEventListener('click', () => { apQtrOffset--; renderAppraisal(); });
+    document.getElementById('apNext')?.addEventListener('click', () => { if(!isCurrentQtr){apQtrOffset++;renderAppraisal();} });
+
+    // Star rating clicks
+    document.querySelectorAll('.ap-star').forEach(star => {
+      star.addEventListener('click', function() {
+        const userId = this.dataset.user;
+        const val = parseInt(this.dataset.val);
+        // Update visual
+        document.querySelectorAll(`.ap-star[data-user="${userId}"]`).forEach(s => {
+          s.classList.toggle('active', parseInt(s.dataset.val) <= val);
+        });
+        document.getElementById('starval_'+userId).textContent = val+'/10';
+        document.getElementById('savesc_'+userId).dataset.score = val;
+      });
+    });
+
+    // Save scorecard buttons
+    document.querySelectorAll('.ap-save-scorecard').forEach(btn => {
+      btn.addEventListener('click', async function() {
+        const userId = this.dataset.user;
+        const key = this.dataset.key;
+        const scoreVal = parseInt(this.dataset.score || document.querySelectorAll(`.ap-star[data-user="${userId}"].active`).length);
+        const note = document.getElementById('note_'+userId).value.trim();
+        if (!scoreVal || scoreVal < 1) { alert('Please select a score (1-10) before saving.'); return; }
+
+        const entry = { score: scoreVal, note, savedAt: new Date().toISOString(), savedBy: currentUser.name };
+        apAdminScores[key] = entry;
+
+        // Save to Firebase
+        try {
+          const docId = 'appraisalScores_' + qtr.label.replace(/[^a-zA-Z0-9]/g,'_');
+          await db.collection('appraisalData').doc(docId).set(
+            { [key]: entry },
+            { merge: true }
+          );
+          this.textContent = '✓ Saved';
+          this.classList.add('saved');
+          const statusEl = this.nextElementSibling;
+          if(statusEl){ statusEl.textContent = 'Saved · affects final score'; statusEl.classList.add('ok'); }
+          console.log('✅ Admin scorecard saved for', userId);
+        } catch(e) {
+          console.error('Failed to save scorecard', e);
+          alert('Save failed — check connection and try again.');
+        }
+      });
     });
   }
 }
@@ -3587,7 +4107,26 @@ function buildTrDetail(logs){
 function exportPDF(){
   const title=document.getElementById('trTitle').textContent, subtitle=document.getElementById('trSubtitle').textContent;
   const pw=window.open('','_blank');
-  pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SQUARE Report</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,sans-serif;color:#2A201A;padding:28px;font-size:12px;}.hdr{border-bottom:3px solid #A96E35;padding-bottom:12px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;}.logo{font-size:24px;font-weight:800;color:#A96E35;letter-spacing:4px;}.rt{font-size:17px;font-weight:700;margin-top:3px;}.rs{font-size:11px;color:#8A7E74;margin-top:2px;}.gen{font-size:10px;color:#B0A89E;text-align:right;}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}.sc{background:#EDE9E3;border-radius:6px;padding:10px;text-align:center;border-top:3px solid #A96E35;}.sc:nth-child(2){border-top-color:#6E8F52;}.sc:nth-child(3){border-top-color:#C0554A;}.sc:nth-child(4){border-top-color:#C4874A;}.sn{font-size:18px;font-weight:800;}.sl{font-size:10px;color:#8A7E74;margin-top:1px;}.sec{margin-bottom:22px;}.st{font-size:13px;font-weight:700;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #E0D8CE;}table{width:100%;border-collapse:collapse;font-size:11px;}th{background:#EDE9E3;padding:6px 10px;text-align:left;font-weight:700;border-bottom:2px solid #E0D8CE;}td{padding:6px 10px;border-bottom:1px solid #F7F5F2;}.sub td{padding:2px 10px 2px 20px;border:none;font-size:10px;}tr:last-child td{border-bottom:none;}.bar-wrap{background:#E0D8CE;border-radius:3px;height:5px;}.bar-fill{height:5px;border-radius:3px;background:#A96E35;}.ftr{margin-top:22px;padding-top:10px;border-top:1px solid #E0D8CE;font-size:10px;color:#B0A89E;text-align:center;}@page{margin:1.5cm;}</style></head><body><div class="hdr"><div><div class="logo">SQUARE</div><div class="rt">Time Report – ${title}</div><div class="rs">${subtitle}</div></div><div class="gen">Generated ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</div></div><div class="stats">`);
+  pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SQUARE Report</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,sans-serif;color:#2A201A;padding:28px;font-size:12px;}.hdr{border-bottom:3px solid #A96E35;padding-bottom:12px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;}.logo{font-size:24px;font-weight:800;color:#A96E35;letter-spacing:4px;}.rt{font-size:17px;font-weight:700;margin-top:3px;}.rs{font-size:11px;color:#8A7E74;margin-top:2px;}.gen{font-size:10px;color:#B0A89E;text-align:right;}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}.sc{background:#EDE9E3;border-radius:6px;padding:10px;text-align:center;border-top:3px solid #A96E35;}.sc:nth-child(2){border-top-color:#6E8F52;}.sc:nth-child(3){border-top-color:#C0554A;}.sc:nth-child(4){border-top-color:#C4874A;}.sn{font-size:18px;font-weight:800;}.sl{font-size:10px;color:#8A7E74;margin-top:1px;}.sec{margin-bottom:22px;}.st{font-size:13px;font-weight:700;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #E0D8CE;}table{width:100%;border-collapse:collapse;font-size:11px;}th{background:#EDE9E3;padding:6px 10px;text-align:left;font-weight:700;border-bottom:2px solid #E0D8CE;}td{padding:6px 10px;border-bottom:1px solid #F7F5F2;}.sub td{padding:2px 10px 2px 20px;border:none;font-size:10px;}tr:last-child td{border-bottom:none;}.bar-wrap{background:#E0D8CE;border-radius:3px;height:5px;}.bar-fill{height:5px;border-radius:3px;background:#A96E35;}.ftr{margin-top:22px;padding-top:10px;border-top:1px solid #E0D8CE;font-size:10px;color:#B0A89E;text-align:center;}@page{margin:1.5cm;}
+/* ── ADMIN SCORECARD ── */
+.ap-scorecard{background:#FAF3EB;border:1px solid #DEB98A;border-radius:10px;padding:12px 14px;margin-top:12px;}
+.ap-scorecard-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#A96E35;margin-bottom:10px;}
+.ap-score-input-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
+.ap-score-input-label{font-size:11px;color:#8A7E74;font-weight:600;width:80px;flex-shrink:0;}
+.ap-score-pills{display:flex;gap:3px;flex-wrap:wrap;}
+.ap-star{width:22px;height:22px;border-radius:4px;border:1.5px solid #E0D8CE;background:white;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;color:#B0A89E;font-weight:700;transition:all 0.12s;flex-shrink:0;}
+.ap-star:hover{border-color:#A96E35;color:#A96E35;}
+.ap-star.active{background:#A96E35;border-color:#A96E35;color:white;}
+.ap-score-val{font-size:13px;font-weight:800;color:#A96E35;min-width:32px;}
+.ap-note-input{width:100%;border:1px solid #E0D8CE;border-radius:6px;padding:6px 8px;font-size:11px;resize:none;height:44px;font-family:inherit;background:white;color:#3D332A;box-sizing:border-box;}
+.ap-note-input:focus{outline:none;border-color:#A96E35;}
+.ap-scorecard-footer{display:flex;align-items:center;gap:10px;margin-top:8px;}
+.ap-save-scorecard{background:#A96E35;color:white;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:background 0.2s;white-space:nowrap;}
+.ap-save-scorecard:hover{background:#8A5828;}
+.ap-save-scorecard.saved{background:#6E8F52;}
+.ap-save-status{font-size:10px;color:#B0A89E;line-height:1.3;}
+.ap-save-status.ok{color:#6E8F52;}
+</style></head><body><div class="hdr"><div><div class="logo">SQUARE</div><div class="rt">Time Report – ${title}</div><div class="rs">${subtitle}</div></div><div class="gen">Generated ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</div></div><div class="stats">`);
   const sn=document.querySelectorAll('#trStats .stat-num'),sl=document.querySelectorAll('#trStats .stat-lbl');
   for(let i=0;i<4;i++) pw.document.write(`<div class="sc"><div class="sn">${sn[i]?.textContent||'-'}</div><div class="sl">${sl[i]?.textContent||''}</div></div>`);
   pw.document.write('</div>');
@@ -5549,7 +6088,26 @@ async function openPiP() {
         #pi { font-size:9px; color:#5C4F42; margin-top:2px; }
         .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:#A0C080; margin-right:4px; animation: blink 1.5s ease-in-out infinite; }
         @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.2;} }
-      </style>`;
+      
+/* ── ADMIN SCORECARD ── */
+.ap-scorecard{background:#FAF3EB;border:1px solid #DEB98A;border-radius:10px;padding:12px 14px;margin-top:12px;}
+.ap-scorecard-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#A96E35;margin-bottom:10px;}
+.ap-score-input-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
+.ap-score-input-label{font-size:11px;color:#8A7E74;font-weight:600;width:80px;flex-shrink:0;}
+.ap-score-pills{display:flex;gap:3px;flex-wrap:wrap;}
+.ap-star{width:22px;height:22px;border-radius:4px;border:1.5px solid #E0D8CE;background:white;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;color:#B0A89E;font-weight:700;transition:all 0.12s;flex-shrink:0;}
+.ap-star:hover{border-color:#A96E35;color:#A96E35;}
+.ap-star.active{background:#A96E35;border-color:#A96E35;color:white;}
+.ap-score-val{font-size:13px;font-weight:800;color:#A96E35;min-width:32px;}
+.ap-note-input{width:100%;border:1px solid #E0D8CE;border-radius:6px;padding:6px 8px;font-size:11px;resize:none;height:44px;font-family:inherit;background:white;color:#3D332A;box-sizing:border-box;}
+.ap-note-input:focus{outline:none;border-color:#A96E35;}
+.ap-scorecard-footer{display:flex;align-items:center;gap:10px;margin-top:8px;}
+.ap-save-scorecard{background:#A96E35;color:white;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:background 0.2s;white-space:nowrap;}
+.ap-save-scorecard:hover{background:#8A5828;}
+.ap-save-scorecard.saved{background:#6E8F52;}
+.ap-save-status{font-size:10px;color:#B0A89E;line-height:1.3;}
+.ap-save-status.ok{color:#6E8F52;}
+</style>`;
       pipWindow.document.body.innerHTML = `
         <div id="ps"><span class="dot"></span>RECORDING</div>
         <div id="pt">00:00:00</div>
