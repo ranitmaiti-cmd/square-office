@@ -737,7 +737,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #A96E35;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#F0E6D6;border:1px solid #DBC9A8;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#8A5828;">
-            📌 <strong>V14.2.39 Production:</strong> Admin Scorecard added to Appraisal — quality score (1-10) + private note per person per quarter. Saved to Firebase, persists across sessions. When entered: counts 20% of total, auto-parameters rebalanced to 80%. Weights shown as pending until score entered. All V14.2.38 features retained.ing days since last check. Any OMS-active staff with zero productive logs and no approved leave gets 1 casual day auto-deducted. Allows negative balance. Excluded: Debaleena, Rajkumar, Gayaram. All V14.2.35 fixes retained.
+            📌 <strong>V14.2.40 Production:</strong> All new leave rules (1.5 CL penalty, same-day block, sandwich rule, CL block at -5) effective from 6 May 2026. Pre-policy absences deduct 1.0 CL. Dashboard alerts for 3+ auto-deductions. 3-month warning auto-generated. Salary field in Manage. Salary deduction calc in Appraisal. All V14.2.39 features retained.ing days since last check. Any OMS-active staff with zero productive logs and no approved leave gets 1 casual day auto-deducted. Allows negative balance. Excluded: Debaleena, Rajkumar, Gayaram. All V14.2.35 fixes retained.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -1829,6 +1829,7 @@ function projectLoggedMins(projectId){ return timeLogs.filter(l=>l.projectId===p
 // Excluded: Admin, Debaleena, Rajkumar, Gayaram (non-OMS users)
 // ═══════════════════════════════════════════════════════════════
 const ATTENDANCE_EXCLUDED = ['debaleena','rajkumar','rajesh kumar','gayaram'];
+const POLICY_EFFECTIVE_DATE = '2026-05-06'; // 1.5 CL, sandwich rule, same-day block — all from this date
 const ATTENDANCE_DEDUCT_KEY = 'lastAttendanceCheck'; // stored in companyData
 
 async function runAttendanceAutoDeduction() {
@@ -1902,7 +1903,8 @@ async function runAttendanceAutoDeduction() {
 
       // → Mark as absent: create auto casual leave entry
       deductions.push({ user, date: ds });
-      userUpdates[user.id] = (userUpdates[user.id] ?? 5) - 1; // allow negative
+      const deductAmt = ds >= POLICY_EFFECTIVE_DATE ? 1.5 : 1.0; // 1.5 from May 6th
+      userUpdates[user.id] = Math.round(((userUpdates[user.id] ?? 5) - deductAmt) * 10) / 10;
     }
   }
 
@@ -1921,7 +1923,7 @@ async function runAttendanceAutoDeduction() {
       type: 'casual',
       startDate: date,
       endDate: date,
-      days: 1,
+      days: deductAmt,
       isHalf: false,
       reason: 'Auto: absent without leave',
       status: 'approved',
@@ -1946,6 +1948,42 @@ async function runAttendanceAutoDeduction() {
         await saveUser(user);
         console.log(`  Balance updated: ${user.name} casLeft = ${newBalance}`);
       } catch(e) { console.error('Failed to update balance for', user.name, e); }
+    }
+  }
+
+  // V14.2.40: Check for 3 consecutive months of auto-deductions
+  if (deductions.length > 0 || true) { // always check pattern
+    const staffToWarn = users.filter(u => !u.isAdmin && !ATTENDANCE_EXCLUDED.includes(u.name.toLowerCase().trim()));
+    for (const user of staffToWarn) {
+      // Get last 3 months
+      const months = [];
+      for (let i = 1; i <= 3; i++) {
+        const d = new Date(); d.setMonth(d.getMonth() - i);
+        months.push(fmt(d).slice(0, 7));
+      }
+      const consecutiveMonths = months.filter(m =>
+        leaveRequests.some(l => l.userId === user.id && l.autoDeducted && l.startDate?.startsWith(m))
+      ).length;
+      if (consecutiveMonths >= 3) {
+        // Check if warning already issued this quarter
+        const warnKey = `warn_${user.id}_${fmt(new Date()).slice(0,7)}`;
+        const existingWarn = leaveRequests.find(l => l.userId === user.id && l.reason === 'System Warning: 3 consecutive months of unplanned absences' && l.startDate?.startsWith(fmt(new Date()).slice(0,4)));
+        if (!existingWarn) {
+          const warnRecord = {
+            id: genId(), userId: user.id, userName: user.name,
+            type: 'warning', startDate: fmt(yesterday), endDate: fmt(yesterday),
+            days: 0, isHalf: false, status: 'approved', autoDeducted: false,
+            reason: 'System Warning: 3 consecutive months of unplanned absences',
+            approvedBy: 'System', approvedAt: new Date().toISOString(),
+            isSystemWarning: true
+          };
+          try {
+            await db.collection('leaveRequests').doc(warnRecord.id).set(warnRecord);
+            leaveRequests.push(warnRecord);
+            console.log(`⚠️ System warning issued for ${user.name} — 3 consecutive months of auto-deductions`);
+          } catch(e) { console.error('Warning record failed:', e); }
+        }
+      }
     }
   }
 
@@ -2200,6 +2238,22 @@ document.getElementById('prevWeek').addEventListener('click',()=>{ currentWeek=a
 document.getElementById('nextWeek').addEventListener('click',()=>{ currentWeek=addDays(currentWeek,7);  renderDashboard(); });
 
 function renderDashboard(){
+  // V14.2.40: Show attendance alerts banner if any
+  if (currentUser?.isAdmin && window._attendanceAlerts?.length > 0) {
+    const existing = document.getElementById('attendanceAlertBanner');
+    if (!existing) {
+      const banner = document.createElement('div');
+      banner.id = 'attendanceAlertBanner';
+      banner.style.cssText = 'background:#FFF8EE;border:1px solid #DEB98A;border-radius:10px;padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
+      banner.innerHTML = `<span style="font-weight:700;color:#7A4E18;font-size:13px;">⚠ Attendance Alerts</span>` +
+        window._attendanceAlerts.map(a =>
+          `<span style="background:#F5ECD8;color:#7A4E18;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${a.name}: ${a.count} auto-deductions this month</span>`
+        ).join('') +
+        `<button onclick="window._attendanceAlerts=[];document.getElementById('attendanceAlertBanner')?.remove();" style="margin-left:auto;background:none;border:none;color:#B0A89E;cursor:pointer;font-size:16px;">×</button>`;
+      const pageEl = document.getElementById('page-dashboard');
+      if (pageEl) pageEl.insertBefore(banner, pageEl.firstChild.nextSibling);
+    }
+  }
   const now=new Date(), thisMonth=now.getMonth(), thisYear=now.getFullYear();
   // V14.2.8 FIX: Use string comparison to avoid timezone date shift bug
   const thisMonthStr = `${thisYear}-${String(thisMonth+1).padStart(2,'0')}`;
@@ -2584,7 +2638,7 @@ function renderHoursTracker() {
       </div>
       <div class="ht-stats-mini">
         <div class="ht-mini">
-          <div class="ht-mini-val" style="color:${totalRemainingH > 0 ? '#C0554A' : '#6E8F52'}">${totalRemainingH > 0 ? totalRemainingH.toFixed(1)+'h' : '✅'}</div>
+          <div class="ht-mini-val" style="color:${totalRemainingH > 0 ? '#C0554A' : '#6E8F52'}">${totalRemainingH > 0 ? totalRemainingH.toFixed(1)+'h' : '◉'}</div>
           <div class="ht-mini-lbl">Still needed (qtr)</div>
         </div>
         <div class="ht-mini">
@@ -2734,7 +2788,30 @@ function renderHoursTracker() {
         <td>${salaryCell}</td>
       </tr>`;
     });
-    html += `</tbody></table></div>`;
+    html += `</tbody></table>`;
+    if (qtrComplete) {
+      html += `<div style="margin-top:10px;padding:10px 14px;background:#F5E0DC;border-radius:8px;font-size:12px;color:#7A2E28;">
+        <strong>Salary deduction amounts</strong> (requires salary data in Manage → Monthly Salary field):
+        ${allScores.filter(d=>d.user.id!==currentUser.id||isAdmin).map(d=>{
+          const sal = d.user.monthlySalary;
+          const loggedH = d.s.hoursLogged;
+          const fullTarget = htTarget * 3;
+          const pct = Math.min(1, parseFloat(loggedH) / fullTarget);
+          const months12paid = sal ? sal * 2 : null;
+          const month3gross = sal || null;
+          const month3pay = sal ? Math.min(month3gross, Math.max(0, (sal*3*pct) - (sal*2))) : null;
+          const deduction = sal ? (sal - month3pay).toFixed(0) : null;
+          // Also CL excess deduction
+          const casLeftVal = d.user.casLeft ?? 5;
+          const excessCL = casLeftVal < -5 ? Math.abs(casLeftVal + 5) : 0;
+          const clDeduction = sal && excessCL > 0 ? ((sal/26)*excessCL).toFixed(0) : 0;
+          return sal
+            ? `<span style="margin-right:12px;"><strong>${d.user.name}:</strong> ${deduction>0?'−₹'+parseInt(deduction).toLocaleString('en-IN'):' Full salary'}${clDeduction>0?' + CL excess −₹'+parseInt(clDeduction).toLocaleString('en-IN'):''}</span>`
+            : `<span style="margin-right:12px;color:#B0A89E;">${d.user.name}: add salary in Manage</span>`;
+        }).join('')}
+      </div>`;
+    }
+    html += `</div>`;
   }
 
 
@@ -4174,6 +4251,13 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
   const isHalf=document.getElementById('lHalf').checked;
   if(!type||!start||!reason){ alert('Fill all required fields'); return; }
 
+  // V14.2.40: Block same-day or past-date CL applications (from policy effective date)
+  const today = fmt(new Date());
+  if(type==='casual' && start <= today && start >= POLICY_EFFECTIVE_DATE){
+    alert('Casual Leave must be applied in advance.\n\nSame-day and retrospective applications are not accepted.\nIf you were absent today or earlier without applying, it will be auto-deducted as 1.5 CL.');
+    return;
+  }
+
   // Check if selected dates overlap with holidays or 2nd/4th Saturdays
   if(!isHalf){
     const warnings=[];
@@ -4190,8 +4274,8 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
     }
   }
 
-  // CL BRIDGE RULE: block casual leave adjacent to holidays/2nd4th Saturdays
-  if(type==='casual' && !isHalf){
+  // CL BRIDGE RULE: block casual leave adjacent to holidays/2nd4th Saturdays (from policy effective date)
+  if(type==='casual' && !isHalf && start >= POLICY_EFFECTIVE_DATE){
     const bridgeViolations=[];
     let cur=new Date(start);
     const endD=new Date(end);
@@ -4209,7 +4293,11 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
   let days = isHalf ? 0.5 : workDays(start, end);
   const user=users.find(u=>u.id===currentUser.id);
   if(type==='medical'&&days>user.medLeft){ alert(`Only ${user.medLeft} medical days left`); return; }
-  if(type==='casual'&&days>user.casLeft){ alert(`Only ${user.casLeft} casual days left`); return; }
+  if(type==='casual' && user.casLeft <= -5 && start >= POLICY_EFFECTIVE_DATE){
+    alert('Your Casual Leave balance is -5 or below.\n\nFurther CL applications are blocked. Please contact admin to discuss your attendance record before applying more leave.');
+    return;
+  }
+  if(type==='casual'&&days>user.casLeft&&user.casLeft>-5){ /* allow negative but warn */ }
   
   const newLeave = {id:genId(),userId:currentUser.id,userName:currentUser.name,type,startDate:start,endDate:end,days,isHalf,reason,status:'pending',date:fmt(new Date())};
   // V14.2.11: Don't push to in-memory array — onSnapshot will add it when Firebase confirms
@@ -4373,14 +4461,33 @@ function renderTeamLeaveBank() {
   // Helper to display days nicely — 0.5 shows as ½
   const fmtDays = d => d === 0.5 ? '½' : d % 1 === 0.5 ? `${Math.floor(d)}½` : String(d);
 
+  // This month filter for "used this month"
+  const thisMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const usedMedMonth = {}, usedCasMonth = {};
+  leaveRequests.filter(l => l.status === 'approved' && l.startDate?.startsWith(thisMonth)).forEach(l => {
+    if (!usedMedMonth[l.userId]) { usedMedMonth[l.userId] = 0; usedCasMonth[l.userId] = 0; }
+    if (l.type === 'medical') usedMedMonth[l.userId] += l.days;
+    else if (l.type === 'casual') usedCasMonth[l.userId] += l.days;
+  });
+
   const rows = teamMembers.map(u => {
-    const medUsed = usedMed[u.id] || (12 - (u.medLeft ?? 12));
-    const casUsed = usedCas[u.id] || (5 - (u.casLeft ?? 5));
-    const medLeft = u.medLeft ?? 12;
+    const medUsed = usedMedMonth[u.id] || 0;
     const casLeft = u.casLeft ?? 5;
+    const casUsedMonth = usedCasMonth[u.id] || 0;
+    const medLeft = u.medLeft ?? 12;
 
     const medBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${medLeft<=2?'#C0554A':medLeft<=5?'#C4874A':'#A96E35'};border-radius:4px;height:6px;width:${Math.round((medUsed/12)*80)}px;"></div></div>`;
-    const casBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:60px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${casLeft===0?'#C0554A':casLeft<=1?'#C4874A':'#6E8F52'};border-radius:4px;height:6px;width:${Math.round((casUsed/5)*60)}px;"></div></div>`;
+    const casBarColor = casLeft < 0 ? '#C0554A' : casLeft === 0 ? '#C0554A' : casLeft <= 1 ? '#C4874A' : '#6E8F52';
+    const casBarWidth = casLeft < 0 ? 60 : Math.min(60, Math.round(((5-casLeft)/5)*60));
+    const casBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:60px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${casBarColor};border-radius:4px;height:6px;width:${casBarWidth}px;"></div></div>`;
+
+    const statusBadge = casLeft < 0
+      ? `<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:700;">Negative</span>`
+      : casLeft === 0
+      ? `<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:600;">Exhausted</span>`
+      : casLeft <= 1
+      ? `<span style="font-size:11px;background:#FAF3EB;color:#C4874A;padding:2px 8px;border-radius:10px;">Low</span>`
+      : `<span style="font-size:11px;background:#EEF3E8;color:#5A7A3A;padding:2px 8px;border-radius:10px;">OK</span>`;
 
     return `<tr style="border-bottom:1px solid #F7F5F2;">
       <td style="padding:10px 12px;font-weight:600;font-size:13px;">${u.name}</td>
@@ -4390,23 +4497,30 @@ function renderTeamLeaveBank() {
         ${medBar}
       </td>
       <td style="padding:10px 12px;text-align:center;">
-        <span style="font-size:13px;color:#8A7E74;">${fmtDays(medUsed)}</span>
-        <span style="font-size:11px;color:#B0A89E;"> day${medUsed!==1?'s':''}</span>
+        <span style="font-size:13px;color:#8A7E74;">${medUsed > 0 ? fmtDays(medUsed) : '—'}</span>
+        ${medUsed > 0 ? `<span style="font-size:11px;color:#B0A89E;"> day${medUsed!==1?'s':''}</span>` : ''}
       </td>
       <td style="padding:10px 12px;text-align:center;">
-        <span style="font-size:13px;font-weight:700;color:#6E8F52;">${fmtDays(casLeft)}</span>
+        <span style="font-size:13px;font-weight:700;color:${casLeft<0?'#C0554A':casLeft===0?'#C0554A':casLeft<=1?'#C4874A':'#6E8F52'};">${fmtDays(casLeft)}</span>
         <span style="font-size:11px;color:#B0A89E;"> / 5</span>
         ${casBar}
       </td>
       <td style="padding:10px 12px;text-align:center;">
-        <span style="font-size:13px;color:#8A7E74;">${fmtDays(casUsed)}</span>
-        <span style="font-size:11px;color:#B0A89E;"> day${casUsed!==1?'s':''}</span>
+        <span style="font-size:13px;color:#8A7E74;">${casUsedMonth > 0 ? fmtDays(casUsedMonth) : '—'}</span>
+        ${casUsedMonth > 0 ? `<span style="font-size:11px;color:#B0A89E;"> day${casUsedMonth!==1?'s':''}</span>` : ''}
       </td>
-      <td style="padding:10px 12px;text-align:center;">
-        ${casLeft === 0 ? '<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:600;">Exhausted</span>' :
-          casLeft === 1 ? '<span style="font-size:11px;background:#FAF3EB;color:#C4874A;padding:2px 8px;border-radius:10px;">Low</span>' :
-          '<span style="font-size:11px;background:#EDF2E6;color:#6E8F52;padding:2px 8px;border-radius:10px;">OK</span>'}
-      </td>
+      <td style="padding:10px 12px;text-align:center;">${statusBadge}</td>
+      <td style="padding:10px 12px;text-align:left;min-width:200px;max-width:280px;">${(()=>{
+        const ul = leaveRequests.filter(l=>l.userId===u.id&&l.type==='casual'&&l.status==='approved').sort((a,b)=>b.startDate.localeCompare(a.startDate)).slice(0,10);
+        if(!ul.length) return '<span style="color:#C8C0B8;font-size:11px;">No CL taken</span>';
+        return ul.map(l=>{
+          const d=new Date(l.startDate+'T00:00:00');
+          const ds=d.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+          const auto=l.autoDeducted;
+          const days=l.days===0.5?'½d':l.days+'d';
+          return `<span style="display:inline-block;margin:1px 2px;padding:2px 5px;border-radius:4px;font-size:10px;font-weight:600;background:${auto?'#FBF0EE':'#EEF3E8'};color:${auto?'#C0554A':'#5A7A3A'};" title="${auto?'Auto-deducted':'Applied leave'}">${auto?'⚠':'✓'} ${ds} (${days})</span>`;
+        }).join('');
+      })()}</td>
     </tr>`;
   }).join('');
 
@@ -4416,10 +4530,11 @@ function renderTeamLeaveBank() {
         <tr style="background:#EDE9E3;">
           <th style="padding:10px 12px;text-align:left;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Member</th>
           <th style="padding:10px 12px;text-align:center;font-size:11px;color:#A96E35;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🏥 Medical Left</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used (${new Date().toLocaleDateString('en-IN',{month:'short'})})</th>
           <th style="padding:10px 12px;text-align:center;font-size:11px;color:#6E8F52;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🌴 Casual Left</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Used (${new Date().toLocaleDateString('en-IN',{month:'short'})})</th>
           <th style="padding:10px 12px;text-align:center;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Status</th>
+          <th style="padding:10px 12px;text-align:left;font-size:11px;color:#8A7E74;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">CL History</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -4541,7 +4656,13 @@ function renderManage(){
   const ul=document.getElementById('usersList'); ul.innerHTML='';
   users.forEach((u,i)=>{
     const item=document.createElement('div'); item.className='list-item';
-    item.innerHTML=`<div><div style="font-weight:600;">${u.name}${u.isAdmin?` <span class="admin-badge">ADMIN</span>`:''}</div><div style="font-size:11px;color:#8A7E74;">${u.email}</div></div>`;
+    item.innerHTML=`<div style="flex:1;"><div style="font-weight:600;">${u.name}${u.isAdmin?` <span class="admin-badge">ADMIN</span>`:''}</div><div style="font-size:11px;color:#8A7E74;">${u.email}</div></div>
+      <div style="display:flex;align-items:center;gap:6px;margin-right:10px;">
+        <span style="font-size:10px;color:#8A7E74;font-weight:600;">₹</span>
+        <input type="number" placeholder="Monthly salary" value="${u.monthlySalary||''}" 
+          style="width:110px;border:1px solid #E0D8CE;border-radius:5px;padding:3px 6px;font-size:11px;color:#3D332A;"
+          onchange="(async()=>{const idx=users.findIndex(x=>x.id==='${u.id}');if(idx>-1){users[idx].monthlySalary=parseInt(this.value)||0;await saveUser(users[idx]);showToast('Salary updated',1500);}})()" />
+      </div>`;
     const btn=document.createElement('button'); btn.className='btn btn-danger btn-sm'; btn.textContent='Delete';
     btn.onclick = async () => {
       if (u.id === currentUser.id) { alert("Can't delete yourself"); return; }
