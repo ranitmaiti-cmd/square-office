@@ -1747,11 +1747,11 @@ function getMonday(d){ const dt=new Date(d),day=dt.getDay(); dt.setDate(dt.getDa
 function addDays(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
 function isSunday(d){ return new Date(d).getDay()===0; }
 function isSaturday(d){ return new Date(d).getDay()===6; }
-function is24Sat(d){ const dt=new Date(d); if(dt.getDay()!==6) return false; return [2,4].includes(Math.ceil(dt.getDate()/7)); }
+function is24Sat(d){ const dt=new Date(d); if(dt.getDay()!==6) return false; return [2,4].includes(Math.floor((dt.getDate()-1)/7)+1); }
 function isWeekend(d){ return isSunday(d) || isSaturday(d); }
 function isHoliday(d){ const ds=fmt(d); return holidays.some(h=>h.date===ds); }
 function getHolidayName(d){ const ds=fmt(d); const h=holidays.find(h=>h.date===ds); return h?h.name:null; }
-function is24SatLabel(d){ const dt=new Date(d); if(dt.getDay()!==6) return null; const wk=Math.ceil(dt.getDate()/7); return wk===2?'2nd Saturday':wk===4?'4th Saturday':null; }
+function is24SatLabel(d){ const dt=new Date(d); if(dt.getDay()!==6) return null; const wk=Math.floor((dt.getDate()-1)/7)+1; return wk===2?'2nd Saturday':wk===4?'4th Saturday':null; }
 function getDayLabel(d){ return getHolidayName(d) || is24SatLabel(d) || null; }
 function isClosedDay(d){ const dt=new Date(d); return dt.getDay()===0 || is24Sat(dt) || isHoliday(dt); }
 function nearestWorkingDayBefore(d){
@@ -2006,7 +2006,7 @@ async function runAttendanceAutoDeduction() {
     const lines = Object.entries(summary).map(([name, dates]) =>
       `${name}: ${dates.length} day(s) auto-deducted`
     ).join('\n');
-    showToast(`📋 Attendance check complete:\n${lines}`, 6000);
+    try { showToast(`📋 Attendance check complete:\n${lines}`, 6000); } catch(e) {}
     // Refresh dashboard and leave views
     renderDashboard();
     updateApprovalBadge();
