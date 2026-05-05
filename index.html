@@ -1489,7 +1489,8 @@ async function saveData() {
     // See: saveLeaveRequest(), approve handler, reject handler, submitLeaveBtn
     console.log('✅ Leave requests handled granularly — skipping batch save');
     
-    // Save main data WITHOUT large arrays (keeps document tiny)
+    // V14.2.40c FIX: Save main data using update() not set() so casLeft/medLeft
+    // are NOT overwritten by auto-save. Leave balances only written by deduction logic.
     const dataToSave = {
       users, clients, typologies, changeRequests, holidays,
       timestamp: saveTimestamp,
@@ -1501,8 +1502,8 @@ async function saveData() {
       leaveRequestCount: leaveRequests.length
     };
     
-    // Save main document
-    await db.collection("companyData").doc("squareDB").set(dataToSave);
+    // Save main document — use update() to preserve casLeft/medLeft not in dataToSave
+    await db.collection("companyData").doc("squareDB").update(dataToSave);
     console.log('✅ Main document saved');
     
     console.log('🎉 ALL DATA SAVED SUCCESSFULLY:', {
@@ -1902,9 +1903,9 @@ async function runAttendanceAutoDeduction() {
       if (prodMins >= 30) continue;
 
       // → Mark as absent: create auto casual leave entry
-      deductions.push({ user, date: ds });
-      const deductAmt = ds >= POLICY_EFFECTIVE_DATE ? 1.5 : 1.0; // 1.5 from May 6th
+      const deductAmt = ds >= POLICY_EFFECTIVE_DATE ? 1.5 : 1.0;
       userUpdates[user.id] = Math.round(((userUpdates[user.id] ?? 5) - deductAmt) * 10) / 10;
+      deductions.push({ user, date: ds, deductAmt });
     }
   }
 
@@ -1915,7 +1916,7 @@ async function runAttendanceAutoDeduction() {
   }
 
   // Apply deductions to Firebase
-  for (const { user, date } of deductions) {
+  for (const { user, date, deductAmt } of deductions) {
     const autoLeave = {
       id: genId(),
       userId: user.id,
