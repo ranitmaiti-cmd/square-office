@@ -1887,12 +1887,11 @@ async function runAttendanceAutoDeduction() {
       );
       if (hasLeave) continue;
 
-      // Check 2: already has an auto-deduction leave for this day?
+      // Check 2: already has any leave record for this day (auto or biometric)?
       const alreadyDeducted = leaveRequests.some(l =>
         l.userId === user.id &&
         l.startDate === ds &&
-        l.endDate === ds &&
-        l.reason === 'Auto: absent without leave'
+        l.status === 'approved'
       );
       if (alreadyDeducted) continue;
 
