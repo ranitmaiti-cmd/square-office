@@ -1871,10 +1871,10 @@ async function runAttendanceAutoDeduction() {
   );
 
   const deductions = []; // { user, date, reason }
-  const userUpdates = {}; // userId -> new casLeft value
+  const userUpdates = {}; // userId -> new medLeft value
 
   staffToCheck.forEach(user => {
-    userUpdates[user.id] = user.casLeft ?? 5;
+    userUpdates[user.id] = user.medLeft ?? 12;
   });
 
   for (const ds of workDaysToCheck) {
@@ -1901,9 +1901,9 @@ async function runAttendanceAutoDeduction() {
         .reduce((s, l) => s + l.durationMins, 0);
       if (prodMins >= 30) continue;
 
-      // → Mark as absent: create auto casual leave entry
-      const deductAmt = ds >= POLICY_EFFECTIVE_DATE ? 1.5 : 1.0;
-      userUpdates[user.id] = Math.round(((userUpdates[user.id] ?? 5) - deductAmt) * 10) / 10;
+      // → Mark as absent: auto medical leave deduction
+      const deductAmt = 1.0; // absences always deduct 1 ML day
+      userUpdates[user.id] = Math.round(((userUpdates[user.id] ?? 12) - deductAmt) * 10) / 10;
       deductions.push({ user, date: ds, deductAmt });
     }
   }
@@ -1920,12 +1920,13 @@ async function runAttendanceAutoDeduction() {
       id: genId(),
       userId: user.id,
       userName: user.name,
-      type: 'casual',
+      type: 'medical',
+      leaveType: 'ML',
       startDate: date,
       endDate: date,
       days: deductAmt,
       isHalf: false,
-      reason: 'Auto: absent without leave',
+      reason: 'Absent (biometric)',
       status: 'approved',
       autoDeducted: true,
       date: fmt(new Date()),
@@ -1942,11 +1943,11 @@ async function runAttendanceAutoDeduction() {
   // Update user balances
   for (const user of staffToCheck) {
     const newBalance = userUpdates[user.id];
-    if (newBalance !== (user.casLeft ?? 5)) {
-      user.casLeft = newBalance; // allow negative
+    if (newBalance !== (user.medLeft ?? 12)) {
+      user.medLeft = newBalance;
       try {
         await saveUser(user);
-        console.log(`  Balance updated: ${user.name} casLeft = ${newBalance}`);
+        console.log(`  Balance updated: ${user.name} medLeft = ${newBalance}`);
       } catch(e) { console.error('Failed to update balance for', user.name, e); }
     }
   }
@@ -4476,16 +4477,17 @@ function renderTeamLeaveBank() {
     const casUsedMonth = usedCasMonth[u.id] || 0;
     const medLeft = u.medLeft ?? 12;
 
-    const medBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${medLeft<=2?'#C0554A':medLeft<=5?'#C4874A':'#A96E35'};border-radius:4px;height:6px;width:${Math.round((medUsed/12)*80)}px;"></div></div>`;
+    const medUsedTotal = 12 - medLeft;
+    const medBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${medLeft<=2?'#C0554A':medLeft<=5?'#C4874A':'#A96E35'};border-radius:4px;height:6px;width:${Math.min(80,Math.round((medUsedTotal/12)*80))}px;"></div></div>`;
     const casBarColor = casLeft < 0 ? '#C0554A' : casLeft === 0 ? '#C0554A' : casLeft <= 1 ? '#C4874A' : '#6E8F52';
     const casBarWidth = casLeft < 0 ? 60 : Math.min(60, Math.round(((5-casLeft)/5)*60));
     const casBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:60px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${casBarColor};border-radius:4px;height:6px;width:${casBarWidth}px;"></div></div>`;
 
-    const statusBadge = casLeft < 0
+    const statusBadge = medLeft < 0
       ? `<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:700;">Negative</span>`
-      : casLeft === 0
+      : medLeft === 0
       ? `<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:600;">Exhausted</span>`
-      : casLeft <= 1
+      : medLeft <= 3
       ? `<span style="font-size:11px;background:#FAF3EB;color:#C4874A;padding:2px 8px;border-radius:10px;">Low</span>`
       : `<span style="font-size:11px;background:#EEF3E8;color:#5A7A3A;padding:2px 8px;border-radius:10px;">OK</span>`;
 
