@@ -1261,6 +1261,8 @@ async function saveProject(project) {
 }
 
 async function saveUser(user) {
+  // V14.2.44: Cap medLeft at 24 (max 2 years carry forward)
+  if(user.medLeft !== undefined && user.medLeft > 24) user.medLeft = 24;
   if (!useGranularSaves) return saveData();
   try {
     await db.collection("users").doc(user.id).set({
@@ -1791,8 +1793,30 @@ function isBridgeDay(d){
   }
   return null;
 }
+function workDaysRaw(s,e){ // Raw count without sandwich extension
+  let c=0,cur=new Date(s),end=new Date(e);
+  while(cur<=end){ if(!isHoliday(cur)) c++; cur.setDate(cur.getDate()+1); }
+  return c;
+}
 function isHolidayOrWeekend(d){ return isWeekend(d) || isHoliday(d); }
-function workDays(s,e){ let c=0,cur=new Date(s),end=new Date(e); while(cur<=end){if(!isSunday(cur)&&!is24Sat(cur)&&!isHoliday(cur))c++; cur=addDays(cur,1);} return c; }
+function workDays(s,e){
+  // Sandwich rule: extend end date forward through consecutive closed days (Sun, 2nd/4th Sat)
+  // Holidays within range are excluded from count but don't stop sandwich
+  let endD = new Date(e);
+  // Walk forward from end: if next day is closed (Sun or 2nd/4th Sat, not holiday), include it
+  let probe = new Date(endD); probe.setDate(probe.getDate()+1);
+  while(probe.getDay()===0 || is24Sat(probe)){
+    endD = new Date(probe);
+    probe.setDate(probe.getDate()+1);
+  }
+  // Count all calendar days in expanded range, excluding holidays
+  let c=0, cur=new Date(s);
+  while(cur<=endD){
+    if(!isHoliday(cur)) c++;
+    cur.setDate(cur.getDate()+1);
+  }
+  return c;
+}
 function minsToHM(m){ return `${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`; }
 function hrsToHM(h){ return minsToHM(Math.round(h*60)); }
 function hhmm(t){ const[h,m]=t.split(':').map(Number); return h*60+m; }
@@ -1870,7 +1894,8 @@ async function runAttendanceAutoDeduction() {
     !ATTENDANCE_EXCLUDED.includes(u.name.toLowerCase().trim())
   );
 
-  const deductions = []; // { user, date, reason }
+  const deductions = []; // { user, date, deductAmt, deductFrom }
+  let clUpdates = {}; // userId -> new casLeft when ML exhausted
   const userUpdates = {}; // userId -> new medLeft value
 
   staffToCheck.forEach(user => {
@@ -1901,10 +1926,19 @@ async function runAttendanceAutoDeduction() {
         .reduce((s, l) => s + l.durationMins, 0);
       if (prodMins >= 30) continue;
 
-      // → Mark as absent: auto medical leave deduction
-      const deductAmt = 1.0; // absences always deduct 1 ML day
-      userUpdates[user.id] = Math.round(((userUpdates[user.id] ?? 12) - deductAmt) * 10) / 10;
-      deductions.push({ user, date: ds, deductAmt });
+      // → Mark as absent: ML first, fallback to CL if ML exhausted
+      const deductAmt = 1.0;
+      const curML = userUpdates[user.id] ?? user.medLeft ?? 12;
+      if(curML > 0){
+        userUpdates[user.id] = Math.round((curML - deductAmt) * 10) / 10;
+        deductions.push({ user, date: ds, deductAmt, deductFrom: 'medical' });
+      } else {
+        // ML exhausted — deduct from CL
+        if(!clUpdates) clUpdates = {};
+        if(clUpdates[user.id] === undefined) clUpdates[user.id] = user.casLeft ?? 5;
+        clUpdates[user.id] = Math.round((clUpdates[user.id] - deductAmt) * 10) / 10;
+        deductions.push({ user, date: ds, deductAmt, deductFrom: 'casual' });
+      }
     }
   }
 
@@ -1915,13 +1949,13 @@ async function runAttendanceAutoDeduction() {
   }
 
   // Apply deductions to Firebase
-  for (const { user, date, deductAmt } of deductions) {
+  for (const { user, date, deductAmt, deductFrom } of deductions) {
     const autoLeave = {
       id: genId(),
       userId: user.id,
       userName: user.name,
-      type: 'medical',
-      leaveType: 'ML',
+      type: deductFrom,
+      leaveType: deductFrom==='medical'?'ML':'CL',
       startDate: date,
       endDate: date,
       days: deductAmt,
@@ -1940,14 +1974,23 @@ async function runAttendanceAutoDeduction() {
     } catch(e) { console.error('Failed to save auto-leave for', user.name, date, e); }
   }
 
-  // Update user balances
+  // Update user balances (ML and CL separately)
   for (const user of staffToCheck) {
-    const newBalance = userUpdates[user.id];
-    if (newBalance !== (user.medLeft ?? 12)) {
-      user.medLeft = newBalance;
+    let changed = false;
+    const newML = userUpdates[user.id];
+    if (newML !== undefined && newML !== (user.medLeft ?? 12)) {
+      user.medLeft = newML;
+      changed = true;
+    }
+    const newCL = clUpdates[user.id];
+    if (newCL !== undefined && newCL !== (user.casLeft ?? 5)) {
+      user.casLeft = newCL;
+      changed = true;
+    }
+    if(changed){
       try {
         await saveUser(user);
-        console.log(`  Balance updated: ${user.name} medLeft = ${newBalance}`);
+        console.log(`  Balance updated: ${user.name} ML=${user.medLeft} CL=${user.casLeft}`);
       } catch(e) { console.error('Failed to update balance for', user.name, e); }
     }
   }
@@ -4252,12 +4295,14 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
   const isHalf=document.getElementById('lHalf').checked;
   if(!type||!start||!reason){ alert('Fill all required fields'); return; }
 
-  // V14.2.40: Block same-day or past-date CL applications (from policy effective date)
+  // V14.2.44: Block same-day/past CL. ML allowed same-day (for record only), auto-approved.
   const today = fmt(new Date());
   if(type==='casual' && start <= today && start >= POLICY_EFFECTIVE_DATE){
-    alert('Casual Leave must be applied in advance.\n\nSame-day and retrospective applications are not accepted.\nIf you were absent today or earlier without applying, it will be auto-deducted as 1.5 CL.');
+    alert('Casual Leave must be applied in advance.\n\nSame-day and retrospective applications are not accepted.\nIf you were absent, it will be auto-deducted as ML.');
     return;
   }
+  // ML same-day: allowed, auto-approved immediately
+  const isMedSameDay = (type==='medical' && start === today);
 
   // Check if selected dates overlap with holidays or 2nd/4th Saturdays
   if(!isHalf){
@@ -4275,36 +4320,48 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
     }
   }
 
-  // CL BRIDGE RULE: block casual leave adjacent to holidays/2nd4th Saturdays (from policy effective date)
-  if(type==='casual' && !isHalf && start >= POLICY_EFFECTIVE_DATE){
-    const bridgeViolations=[];
-    let cur=new Date(start);
-    const endD=new Date(end);
-    while(cur<=endD){
-      const bridgeFor=isBridgeDay(cur);
-      if(bridgeFor) bridgeViolations.push(`${fmtD(fmt(cur))} — adjacent to: ${bridgeFor}`);
-      cur.setDate(cur.getDate()+1);
-    }
-    if(bridgeViolations.length){
-      alert('Casual Leave cannot be applied on days adjacent to a holiday or closed day:\n\n'+bridgeViolations.join('\n')+'\n\nThese dates are blocked under the bridge day policy. If needed, this will be treated as a holiday and reviewed at appraisal.');
-      return;
-    }
-  }
+  // V14.2.44: Sandwich rule replaces bridge block — days are counted via workDays()
 
   let days = isHalf ? 0.5 : workDays(start, end);
   const user=users.find(u=>u.id===currentUser.id);
-  if(type==='medical'&&days>user.medLeft){ alert(`Only ${user.medLeft} medical days left`); return; }
-  if(type==='casual' && user.casLeft <= -5 && start >= POLICY_EFFECTIVE_DATE){
-    alert('Your Casual Leave balance is -5 or below.\n\nFurther CL applications are blocked. Please contact admin to discuss your attendance record before applying more leave.');
-    return;
+
+  // V14.2.44: Show sandwich day count warning if days > raw calendar days
+  if(!isHalf && days > workDaysRaw(start,end)){
+    const extra = days - workDaysRaw(start,end);
+    if(!confirm(`Sandwich rule applies: ${extra} additional closed day(s) will be included.\nTotal days to be deducted: ${days}\n\nContinue?`)) return;
   }
-  if(type==='casual'&&days>user.casLeft&&user.casLeft>-5){ /* allow negative but warn */ }
-  
-  const newLeave = {id:genId(),userId:currentUser.id,userName:currentUser.name,type,startDate:start,endDate:end,days,isHalf,reason,status:'pending',date:fmt(new Date())};
-  // V14.2.11: Don't push to in-memory array — onSnapshot will add it when Firebase confirms
-  // Pushing first then saving caused race condition where stale array overwrote approved statuses
+
+  // V14.2.44: ML→CL fallback — if ML exhausted, remainder goes to CL
+  if(type==='medical' && days > user.medLeft){
+    const mlDays = Math.max(0, user.medLeft);
+    const clDays = days - mlDays;
+    if(!confirm(`Only ${user.medLeft} ML days left. Remaining ${clDays} day(s) will be deducted from CL.\nTotal: ${mlDays} ML + ${clDays} CL\n\nContinue?`)) return;
+  }
+
+  // ML same-day = auto-approved immediately for record
+  const leaveStatus = isMedSameDay ? 'approved' : 'pending';
+  const newLeave = {
+    id:genId(), userId:currentUser.id, userName:currentUser.name,
+    type, leaveType: type==='medical'?'ML':'CL',
+    startDate:start, endDate:end, days, isHalf, reason,
+    status: leaveStatus,
+    autoDeducted: false,
+    date:fmt(new Date()),
+    ...(isMedSameDay ? {approvedBy:'Self (same-day ML)', approvedAt:new Date().toISOString()} : {})
+  };
+
+  // V14.2.44: Update balance immediately for ML same-day
+  if(isMedSameDay){
+    const mlDeduct = Math.min(days, user.medLeft);
+    const clDeduct = days - mlDeduct;
+    user.medLeft = Math.round((user.medLeft - mlDeduct)*10)/10;
+    user.casLeft = Math.round((user.casLeft - clDeduct)*10)/10;
+    await saveUser(user);
+  }
+
   await saveLeaveRequest(newLeave);
   closeModal('leaveModal'); updateApprovalBadge(); renderLeaves();
+  if(isMedSameDay) alert('Medical Leave recorded for today. Feel better soon!');
 });
 function renderLeaves(){
   const user=users.find(u=>u.id===currentUser.id);
