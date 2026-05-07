@@ -1927,7 +1927,22 @@ async function runAttendanceAutoDeduction() {
       if (prodMins >= 30) continue;
 
       // → Mark as absent: ML first, fallback to CL if ML exhausted
-      const deductAmt = 1.0;
+      // V14.2.45: Forward sandwich — if absent day is followed by closed days, count them too
+      // But only count sandwich days not already covered by another absence/leave record
+      let deductAmt = 1.0;
+      // Check forward sandwich: walk forward from ds, count consecutive closed days
+      const absentDate = new Date(ds);
+      let probe = new Date(absentDate); probe.setDate(probe.getDate()+1);
+      while(probe.getDay()===0 || is24Sat(probe)){
+        const probeStr = fmt(probe);
+        // Only sandwich if no existing leave/deduction on that closed day
+        const probeHasLeave = leaveRequests.some(l =>
+          l.userId === user.id && l.status === 'approved' &&
+          probeStr >= l.startDate && probeStr <= l.endDate
+        );
+        if(!probeHasLeave) deductAmt += 1.0;
+        probe.setDate(probe.getDate()+1);
+      }
       const curML = userUpdates[user.id] ?? user.medLeft ?? 12;
       if(curML > 0){
         userUpdates[user.id] = Math.round((curML - deductAmt) * 10) / 10;
@@ -1950,6 +1965,10 @@ async function runAttendanceAutoDeduction() {
 
   // Apply deductions to Firebase
   for (const { user, date, deductAmt, deductFrom } of deductions) {
+    // Calculate sandwich end date
+    let sandwichEnd = new Date(date);
+    let sp = new Date(sandwichEnd); sp.setDate(sp.getDate()+1);
+    while(sp.getDay()===0 || is24Sat(sp)){ sandwichEnd=new Date(sp); sp.setDate(sp.getDate()+1); }
     const autoLeave = {
       id: genId(),
       userId: user.id,
@@ -1957,7 +1976,7 @@ async function runAttendanceAutoDeduction() {
       type: deductFrom,
       leaveType: deductFrom==='medical'?'ML':'CL',
       startDate: date,
-      endDate: date,
+      endDate: fmt(sandwichEnd),
       days: deductAmt,
       isHalf: false,
       reason: 'Absent (biometric)',
