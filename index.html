@@ -4737,8 +4737,16 @@ function renderApprovals(){
       // V14.2.6: Direct granular save — don't rely on batch autoSave for status changes
       lv.status='approved';
       const u=users.find(u=>u.id===lv.userId);
-      if(lv.type==='medical') u.medLeft=Math.max(0,u.medLeft-lv.days);
-      else u.casLeft=Math.max(0,u.casLeft-lv.days);
+      // V14.2.45: Applied ML deducts medLeft, applied CL deducts casLeft (allow negative)
+      if(lv.type==='medical'){
+        const mlDeduct = Math.min(lv.days, u.medLeft ?? 12);
+        const clDeduct = lv.days - mlDeduct;
+        u.medLeft = Math.round(((u.medLeft ?? 12) - mlDeduct) * 10) / 10;
+        if(clDeduct > 0) u.casLeft = Math.round(((u.casLeft ?? 5) - clDeduct) * 10) / 10;
+      } else {
+        // CL: allow negative (salary cut)
+        u.casLeft = Math.round(((u.casLeft ?? 5) - lv.days) * 10) / 10;
+      }
 
       try {
         // Write leave status directly to Firebase immediately
@@ -4767,8 +4775,8 @@ function renderApprovals(){
         console.error('❌ Failed to save approval:', e);
         alert('❌ Failed to save approval to cloud. Please try again.');
         lv.status = 'pending'; // Revert on failure
-        if(lv.type==='medical') u.medLeft=Math.min(12, u.medLeft+lv.days);
-        else u.casLeft=Math.min(5, u.casLeft+lv.days);
+        if(lv.type==='medical') u.medLeft = Math.round(((u.medLeft ?? 0) + lv.days) * 10) / 10;
+        else u.casLeft = Math.round(((u.casLeft ?? 0) + lv.days) * 10) / 10;
         return;
       }
       renderApprovals(); updateApprovalBadge(); renderDashboard(); renderTeamLeave(); renderTeamLeaveBank();
