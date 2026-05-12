@@ -534,6 +534,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
             <span id="planWeekLabel" style="font-weight:700;font-size:14px;"></span>
             <button class="btn btn-ghost btn-sm" id="planNext">Next →</button>
             <button class="btn btn-primary btn-sm" id="addMyTaskBtn" style="display:none;">+ Add My Task Today</button>
+            <button class="btn btn-sm" id="scheduleMeetingBtn" style="background:#6B7FD4;color:#fff;border:none;margin-left:6px;">📅 Schedule Meeting</button>
           </div>
         </div>
         <div style="background:#FAF3EB;border:1px solid #F0CFA0;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#8A5828;">
@@ -837,6 +838,41 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <button class="btn btn-primary" id="savePlanBtn">Save</button>
       <button class="btn btn-ghost" onclick="closeModal('planModal')">Cancel</button>
       <button class="btn btn-danger btn-sm" id="deletePlanBtn" style="margin-left:auto;display:none;">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Meeting Modal -->
+<div class="modal-backdrop" id="meetingModal">
+  <div class="modal-box" style="max-width:500px;">
+    <div class="modal-head"><h3 id="meetingModalTitle">📅 Schedule Meeting</h3><button class="close-btn" onclick="closeModal('meetingModal')">×</button></div>
+    <div class="form-group"><label class="form-label">Project *</label><select class="form-control" id="meetingProject"></select></div>
+    <div class="form-group"><label class="form-label">Phase *</label>
+      <select class="form-control" id="meetingPhase">
+        <option value="Project Management">Project Management</option>
+        <option value="Internal Review">Internal Review</option>
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">Agenda / Title *</label><input type="text" class="form-control" id="meetingTitle" placeholder="e.g. Design Review, Client Presentation..."></div>
+    <div class="form-group"><label class="form-label">Date *</label><input type="date" class="form-control" id="meetingDate"></div>
+    <div style="display:flex;gap:8px;">
+      <div class="form-group" style="flex:1"><label class="form-label">Start Time *</label><input type="time" class="form-control" id="meetingStart" value="10:00"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Duration</label>
+        <select class="form-control" id="meetingDuration">
+          <option value="30">30 mins</option>
+          <option value="60" selected>1 hour</option>
+          <option value="90">1.5 hours</option>
+          <option value="120">2 hours</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Attendees *</label>
+      <div id="meetingAttendees" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:#FAF7F2;border-radius:8px;border:1px solid #E8DDD0;"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button class="btn btn-primary" id="saveMeetingBtn">Schedule</button>
+      <button class="btn btn-ghost" onclick="closeModal('meetingModal')">Cancel</button>
+      <button class="btn btn-danger btn-sm" id="deleteMeetingBtn" style="margin-left:auto;display:none;">Cancel Meeting</button>
     </div>
   </div>
 </div>
@@ -1548,7 +1584,16 @@ async function loadData() {
     const docSnap = await db.collection("companyData").doc("squareDB").get({source:'server'});
     if (docSnap.exists) {
       const data = docSnap.data();
-      users = data.users || users;
+      // V14.2.48: Safety guard — only load users if Firebase has real users (not demo)
+      // Demo users have ids u1-u5; real users have generated ids
+      const firebaseUsers = data.users || [];
+      const hasRealUsers = firebaseUsers.some(u => u.id && !['u1','u2','u3','u4','u5'].includes(u.id));
+      if(firebaseUsers.length > 0 && hasRealUsers) {
+        users = firebaseUsers;
+      } else if(firebaseUsers.length >= 10) {
+        users = firebaseUsers; // trust if 10+ users regardless of ids
+      }
+      // else: keep in-memory users (which will be empty array, not demo data)
       clients = data.clients || clients;
       typologies = data.typologies || typologies;
       
@@ -1621,9 +1666,12 @@ async function loadData() {
       lastKnownTimestamp = data.timestamp;
       console.log('🔒 Tracking timestamp:', lastKnownTimestamp);
     } else {
-      console.log('⚠️ No data in Firebase, creating initial');
+      // V14.2.48: squareDB doesn't exist — DO NOT write demo data
+      // This was causing the corruption: opening on a fresh browser wrote demo users
+      console.warn('⚠️ No squareDB found in Firebase — NOT writing demo data to prevent corruption');
+      console.warn('⚠️ If this is a fresh install, please use the admin setup process');
       dataLoaded = true;
-      await saveData(); 
+      // Don't call saveData() here — it would write demo users to Firebase
     }
     
     dataLoaded = true;
@@ -1631,6 +1679,8 @@ async function loadData() {
     // After loading, proceed to app initialization
     if (typeof renderManage === 'function') renderManage();
     if (typeof renderDashboard === 'function') renderDashboard();
+    // V14.2.48: Save daily backup on load
+    saveDailyFirebaseBackup();
   } catch(e) {
     console.error('❌ Load error:', e.message);
     dataLoaded = true; // Allow saves even if load fails
@@ -1994,6 +2044,8 @@ async function runAttendanceAutoDeduction() {
   }
 
   // Update user balances (ML and CL separately)
+  // V14.2.48: Write to BOTH users/{id} AND squareDB.users array to ensure dashboard consistency
+  let anyBalanceChanged = false;
   for (const user of staffToCheck) {
     let changed = false;
     const newML = userUpdates[user.id];
@@ -2007,11 +2059,19 @@ async function runAttendanceAutoDeduction() {
       changed = true;
     }
     if(changed){
+      anyBalanceChanged = true;
       try {
         await saveUser(user);
         console.log(`  Balance updated: ${user.name} ML=${user.medLeft} CL=${user.casLeft}`);
       } catch(e) { console.error('Failed to update balance for', user.name, e); }
     }
+  }
+  // Also persist updated users array to squareDB to keep dashboard in sync
+  if(anyBalanceChanged){
+    try {
+      await db.collection("companyData").doc("squareDB").update({users: users});
+      console.log('✅ squareDB.users synced after balance update');
+    } catch(e) { console.error('Failed to sync squareDB.users:', e); }
   }
 
   // V14.2.40: Check for 3 consecutive months of auto-deductions
@@ -2075,6 +2135,24 @@ async function runAttendanceAutoDeduction() {
   }
 }
 
+
+// V14.2.48: Firebase daily backup — runs once per day on admin login
+async function saveDailyFirebaseBackup() {
+  try {
+    const today = fmt(new Date());
+    const backupRef = db.collection("companyData").doc("dailyBackup_" + today);
+    const existing = await backupRef.get();
+    if(existing.exists) return; // already backed up today
+    await backupRef.set({
+      date: today,
+      users: users,
+      clients: clients,
+      timestamp: new Date().toISOString(),
+      userCount: users.length
+    });
+    console.log('✅ Daily Firebase backup saved for', today);
+  } catch(e) { console.error('Daily backup failed:', e); }
+}
 
 loadData().then(async () => {
   console.log('Data ready. Checking for saved session...');
@@ -3693,9 +3771,16 @@ function renderPlanner(){
       // V14.2.24: Highlight own row cells
       if (isMyRow && !isClosed) cell.style.borderLeft='2px solid #DBC9A8';
       entries.forEach(pl=>{
-        const c=document.createElement('div'); c.className=`plan-chip ${pl.done?'done':pl.type}`;
-        c.textContent=`${pl.type==='emergency'?'🚨':''}${pl.project}${pl.phase?' · '+pl.phase.split(' ')[0]:''}`;
-        c.title=pl.desc; c.onclick=(e)=>{ e.stopPropagation(); openPlanModal(user.id,ds,pl.id); }; cell.appendChild(c);
+        const isMeeting = pl.isMeeting;
+        const c=document.createElement('div');
+        c.className=`plan-chip ${isMeeting?'':''}${pl.done?'done':pl.type}`;
+        if(isMeeting) c.style.cssText='background:#E8EBF8;color:#4A5AB8;border-left:3px solid #6B7FD4;font-size:11px;padding:3px 6px;border-radius:4px;margin-bottom:2px;cursor:pointer;';
+        c.textContent=`${isMeeting?'📅 ':''}${isMeeting?pl.desc:pl.project}${!isMeeting&&pl.phase?' · '+pl.phase.split(' ')[0]:''}${isMeeting&&pl.meetingTime?' · '+pl.meetingTime:''}`;
+        c.title=isMeeting?`Meeting: ${pl.desc}
+${pl.project} · ${pl.phase}
+Attendees: ${(pl.meetingAttendees||[]).map(id=>{const u=users.find(u=>u.id===id);return u?u.name:'?';}).join(', ')}`:pl.desc;
+        c.onclick=(e)=>{ e.stopPropagation(); isMeeting?openMeetingModal(ds,pl.id):openPlanModal(user.id,ds,pl.id); };
+        cell.appendChild(c);
       });
       // V14.2.24: Only allow clicking own row for non-admin (prevents accidental wrong-row clicks)
       if(!isClosed && (currentUser.isAdmin || isMyRow)) {
@@ -3770,6 +3855,141 @@ document.getElementById('deletePlanBtn').addEventListener('click',()=>{
   if(!confirm('Remove this plan entry?')) return;
   planEntries=planEntries.filter(p=>p.id!==editPlanId);
   autoSave(); closeModal('planModal'); renderPlanner(); renderDashboard();
+});
+
+// ═══════════════════════════════════════════════════════
+// MEETINGS
+// ═══════════════════════════════════════════════════════
+let editMeetingId = null;
+
+document.getElementById('scheduleMeetingBtn').addEventListener('click', () => openMeetingModal(fmt(new Date()), null));
+
+function openMeetingModal(date, meetingId) {
+  editMeetingId = meetingId;
+  document.getElementById('meetingModalTitle').textContent = meetingId ? '📅 Edit Meeting' : '📅 Schedule Meeting';
+  document.getElementById('meetingDate').value = date;
+
+  // Populate project dropdown
+  const pSel = document.getElementById('meetingProject');
+  pSel.innerHTML = '<option value="">Select project...</option>' + projectsData.map(p => `<option value="${p.id}">${p.name} (${p.client})</option>`).join('');
+
+  // Populate attendees checkboxes
+  const attDiv = document.getElementById('meetingAttendees');
+  attDiv.innerHTML = users.filter(u => !u.isAdmin).map(u => `
+    <label style="display:flex;align-items:center;gap:4px;background:#fff;padding:4px 8px;border-radius:6px;border:1px solid #E8DDD0;cursor:pointer;font-size:12px;">
+      <input type="checkbox" class="meeting-att-cb" value="${u.id}" style="margin:0;"> ${u.name}
+    </label>`).join('');
+
+  if (meetingId) {
+    // Find meeting — stored as plan entries with isMeeting=true
+    const allMeetingEntries = planEntries.filter(p => p.meetingId === meetingId);
+    if (allMeetingEntries.length > 0) {
+      const m = allMeetingEntries[0];
+      pSel.value = m.projectId;
+      document.getElementById('meetingPhase').value = m.phase;
+      document.getElementById('meetingTitle').value = m.desc;
+      document.getElementById('meetingDate').value = m.date;
+      document.getElementById('meetingStart').value = m.meetingTime || '10:00';
+      document.getElementById('meetingDuration').value = m.meetingDuration || 60;
+      // Check attendees
+      const atts = m.meetingAttendees || [];
+      document.querySelectorAll('.meeting-att-cb').forEach(cb => {
+        if (atts.includes(cb.value)) cb.checked = true;
+      });
+    }
+    document.getElementById('deleteMeetingBtn').style.display = 'inline-block';
+  } else {
+    document.getElementById('meetingTitle').value = '';
+    document.getElementById('meetingStart').value = '10:00';
+    document.getElementById('meetingDuration').value = '60';
+    document.getElementById('deleteMeetingBtn').style.display = 'none';
+    // Pre-check current user
+    const myCheckbox = document.querySelector(`.meeting-att-cb[value="${currentUser.id}"]`);
+    if (myCheckbox) myCheckbox.checked = true;
+  }
+  openModal('meetingModal');
+}
+
+document.getElementById('saveMeetingBtn').addEventListener('click', async () => {
+  const projId = document.getElementById('meetingProject').value;
+  if (!projId) { alert('Select a project'); return; }
+  const title = document.getElementById('meetingTitle').value.trim();
+  if (!title) { alert('Enter a meeting title/agenda'); return; }
+  const date = document.getElementById('meetingDate').value;
+  if (!date) { alert('Select a date'); return; }
+  const startTime = document.getElementById('meetingStart').value;
+  const duration = parseInt(document.getElementById('meetingDuration').value);
+  const phase = document.getElementById('meetingPhase').value;
+  const proj = projectsData.find(p => p.id === projId);
+
+  const selectedAttendees = [...document.querySelectorAll('.meeting-att-cb:checked')].map(cb => cb.value);
+  if (selectedAttendees.length === 0) { alert('Select at least one attendee'); return; }
+
+  const meetingId = editMeetingId || genId();
+
+  // Remove old entries if editing
+  if (editMeetingId) {
+    planEntries = planEntries.filter(p => p.meetingId !== editMeetingId);
+  }
+
+  // Create one plan entry per attendee
+  selectedAttendees.forEach(userId => {
+    planEntries.push({
+      id: genId(),
+      userId,
+      date,
+      projectId: projId,
+      project: proj.name,
+      client: proj.client,
+      phase,
+      typology: '',
+      desc: title,
+      estHours: duration / 60,
+      type: 'planned',
+      done: false,
+      isMeeting: true,
+      meetingId,
+      meetingTime: startTime,
+      meetingDuration: duration,
+      meetingAttendees: selectedAttendees,
+      meetingCreatedBy: currentUser.id
+    });
+  });
+
+  // Notify attendees (exclude creator)
+  selectedAttendees.filter(id => id !== currentUser.id).forEach(id => {
+    const u = users.find(u => u.id === id);
+    if (u) addNotification(
+      '📅 Meeting Scheduled',
+      `${currentUser.name} scheduled "${title}" on ${fmtD(date)} at ${startTime} — ${proj.name}`,
+      'info'
+    );
+  });
+
+  autoSave();
+  closeModal('meetingModal');
+  renderPlanner();
+  renderDashboard();
+  showNotificationToast('📅 Meeting Scheduled', `${selectedAttendees.length} attendee(s) notified`, 'info');
+});
+
+document.getElementById('deleteMeetingBtn').addEventListener('click', () => {
+  if (!editMeetingId) return;
+  const entries = planEntries.filter(p => p.meetingId === editMeetingId);
+  if (entries.length === 0) return;
+  const m = entries[0];
+  // Only creator or admin can cancel
+  if (m.meetingCreatedBy !== currentUser.id && !currentUser.isAdmin) {
+    alert('Only the meeting creator or admin can cancel this meeting.');
+    return;
+  }
+  if (!confirm(`Cancel meeting "${m.desc}"? This will remove it from all attendees' planners.`)) return;
+  planEntries = planEntries.filter(p => p.meetingId !== editMeetingId);
+  autoSave();
+  closeModal('meetingModal');
+  renderPlanner();
+  renderDashboard();
+  showNotificationToast('🗑 Meeting Cancelled', m.desc, 'info');
 });
 
 // ═══════════════════════════════════════════════════════
