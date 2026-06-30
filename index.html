@@ -1380,6 +1380,51 @@ let editPlanUser = null;
 let editPlanDay  = null;
 
 let timerInterval=null, timerStartedAt=null, timerPausedMs=0, timerRunning=false, timerLinkedPlan=null;
+
+// ═══════════════════════════════════════════════════════
+// V14.3.0: CONTINUOUS SESSION PERSISTENCE (heartbeat)
+// The running session is now saved to timeLogs every 60s under a STABLE id,
+// so a closed tab / crash / sleep can no longer erase the day. The existing
+// switch / complete / EOD paths FINALISE this same id instead of pushing a
+// new log — so there are never duplicates.
+// ═══════════════════════════════════════════════════════
+let currentSessionLogId = null;     // stable id for the in-progress session
+let sessionHeartbeatInterval = null;
+
+// Insert-or-replace a log in the in-memory array by id, then persist it.
+function upsertTimeLog(log) {
+  const i = timeLogs.findIndex(l => l.id === log.id);
+  if (i >= 0) timeLogs[i] = log; else timeLogs.push(log);
+  hasUnsavedChanges = true;          // also picked up by the periodic batch save
+  try { saveTimeLog(log); } catch (e) { console.error('heartbeat save failed', e); }
+}
+
+// Write the current running session as a real (in-progress) timeLog.
+function heartbeatSession() {
+  if (!timerRunning || !timerStartedAt || !currentSessionLogId) return;
+  if (!timerLinkedPlan) return;      // unplanned sessions are logged via the modal on stop
+  const now  = Date.now();
+  const secs = Math.floor((now - timerStartedAt) / 1000);
+  const mins = Math.max(1, Math.floor(secs / 60));
+  upsertTimeLog({
+    id: currentSessionLogId,
+    userId: currentUser.id,
+    date: fmt(new Date(timerStartedAt)),
+    projectId: timerLinkedPlan.projectId,
+    projectName: timerLinkedPlan.project,
+    phase: timerLinkedPlan.phase,
+    typology: timerLinkedPlan.typology,
+    activity: '',
+    durationMins: mins,
+    startTime: new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false}),
+    endTime: new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false}),
+    desc: `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (in progress)`,
+    productive: timerLinkedPlan.type !== 'lunch',
+    inProgress: true,
+    ts: now
+  });
+}
+
 // V14.2.2: FIX #6 - Inactivity auto-pause
 let lastActivity = Date.now();
 let inactivityChecker = null;
@@ -1743,10 +1788,13 @@ function startInactivityMonitor() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       console.log('📱 Tab hidden — timer continues running');
+      heartbeatSession();   // V14.3.0: flush before the tab is backgrounded/closed
     } else {
       console.log('📱 Tab visible again');
     }
   });
+  // V14.3.0: best-effort save if the tab is closed/refreshed mid-session
+  window.addEventListener('beforeunload', () => { try { heartbeatSession(); } catch(e){} });
   console.log('✅ Inactivity monitor: tab-hidden auto-pause disabled (V14.2.28)');
 }
 
@@ -5474,13 +5522,16 @@ function switchTaskTo(newPlan) {
   const today       = fmt(new Date());
   const clockStart  = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const clockEnd    = new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  if (sessionSecs >= 30 && timerLinkedPlan) {
+  if (sessionSecs >= 30 && timerLinkedPlan && currentSessionLogId) {
     const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (switched to ${newPlan.project})`;
-    timeLogs.push({id:genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',ts:Date.now()});
+    // V14.3.0: finalise the heartbeat log under the SAME id — no duplicate, no loss
+    upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:false,ts:Date.now()});
     autoSave(); renderTimeLog(); renderProjectsBudget();
     showNotificationToast(`✓ ${minsToHM(mins)} saved`, `${timerLinkedPlan.project} → ${newPlan.project}`, 'info');
   }
   clearInterval(timerInterval);
+  if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
+  currentSessionLogId = null;
   startTimerWithPlan(newPlan);
 }
 
@@ -5493,6 +5544,11 @@ function startTimerWithPlan(plan) {
   timerPausedMs   = 0;
   timerRunning    = true;
   window.lastSessionStartedAt = Date.now();
+  // V14.3.0: new durable session — fresh stable id + start heartbeat
+  currentSessionLogId = genId();
+  if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
+  sessionHeartbeatInterval = setInterval(heartbeatSession, 60000);
+  heartbeatSession();   // immediate write so even a sub-minute crash survives
   localStorage.setItem('timerState', JSON.stringify({
     startedAt: timerStartedAt, lastSessionStartedAt: window.lastSessionStartedAt,
     pausedMs: timerPausedMs, running: true, linkedPlan: timerLinkedPlan
@@ -5616,7 +5672,8 @@ document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>
   
   // Save incremental log AND mark task done
   const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'}`;
-  timeLogs.push({id:genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,ts:Date.now()});
+  // V14.3.0: finalise heartbeat log under the same id (fallback to a new id if none)
+  upsertTimeLog({id:currentSessionLogId||genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,inProgress:false,ts:Date.now()});
   const plan=planEntries.find(p=>p.id===timerLinkedPlan.id);
   if(plan)plan.done=true;
   
@@ -6058,14 +6115,15 @@ function startEndOfDayMonitor() {
       timerRunning = false;
 
       if (linkedPlanSnapshot) {
-        timeLogs.push({
-          id: genId(), userId: currentUser.id, date: fmt(new Date()),
+        // V14.3.0: finalise the heartbeat log under the same id (no duplicate)
+        upsertTimeLog({
+          id: currentSessionLogId || genId(), userId: currentUser.id, date: fmt(new Date()),
           projectId: linkedPlanSnapshot.projectId, projectName,
           phase: linkedPlanSnapshot.phase, typology: linkedPlanSnapshot.typology,
           activity: '', durationMins: mins,
           startTime: clockStart, endTime: clockEnd,
           desc: `${linkedPlanSnapshot.typology || linkedPlanSnapshot.phase || 'Work on project'} (Auto-completed at end of day)`,
-          productive: true, ts: Date.now()
+          productive: true, inProgress: false, ts: Date.now()
         });
         const plan = planEntries.find(p => p.id === linkedPlanSnapshot?.id);
         if (plan) plan.done = true;
@@ -6098,6 +6156,9 @@ async function resetTimer() {
 
   timerRunning = false; timerStartedAt = null; timerPausedMs = 0; timerLinkedPlan = null;
   window.lastSessionStartedAt = null;
+  // V14.3.0: stop the heartbeat — session already finalised by the caller
+  if (sessionHeartbeatInterval) { clearInterval(sessionHeartbeatInterval); sessionHeartbeatInterval = null; }
+  currentSessionLogId = null;
   if (timerInterval) clearInterval(timerInterval);
   localStorage.removeItem('timerState');
   document.title = 'SQUARE - Office Management'; // V14.2.25: restore title on stop
