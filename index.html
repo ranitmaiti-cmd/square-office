@@ -1604,16 +1604,19 @@ async function loadData() {
     const docSnap = await db.collection("companyData").doc("squareDB").get({source:'server'});
     if (docSnap.exists) {
       const data = docSnap.data();
-      // V14.2.48: Safety guard — only load users if Firebase has real users (not demo)
-      // Demo users have ids u1-u5; real users have generated ids
-      const firebaseUsers = data.users || [];
-      const hasRealUsers = firebaseUsers.some(u => u.id && !['u1','u2','u3','u4','u5'].includes(u.id));
-      if(firebaseUsers.length > 0 && hasRealUsers) {
-        users = firebaseUsers;
-      } else if(firebaseUsers.length >= 10) {
-        users = firebaseUsers; // trust if 10+ users regardless of ids
+      // V14.3.2: Users now load from the users COLLECTION (single source of truth),
+      // not the squareDB.users array. That array was overwritten wholesale by every
+      // tab (last-write-wins), which clobbered newly added users. The collection is
+      // per-document, so concurrent tabs can no longer clobber each other, and
+      // deletes actually remove the document (no more ghost accounts).
+      const usersSnapshot = await db.collection("users").get({source:'server'});
+      const collUsers = [];
+      usersSnapshot.forEach(doc => { collUsers.push(doc.data()); });
+      if (collUsers.length > 0) {
+        users = collUsers;
+        console.log('✅ Loaded users from collection:', users.length);
       }
-      // else: keep in-memory users (which will be empty array, not demo data)
+      // else: keep in-memory users (empty array, not demo data)
       clients = data.clients || clients;
       typologies = data.typologies || typologies;
       
@@ -5065,6 +5068,10 @@ function renderManage(){
       try {
         // Remove from users array
         users.splice(i, 1);
+        // V14.3.2: actually delete the user's document from the collection.
+        // Previously only the in-memory array was spliced → the Firebase user doc
+        // remained forever, which is how departed staff piled up as ghost accounts.
+        await db.collection("users").doc(u.id).delete().catch(e => console.error('user doc delete failed', e));
         // Delete plan entries for this user from Firebase
         const planSnap = await db.collection("planEntries").where("userId", "==", u.id).get();
         const planBatch = db.batch();
@@ -5107,14 +5114,20 @@ function renderManage(){
   renderChangeLog();
   updateLastSaved();
 }
-document.getElementById('addUserBtn').addEventListener('click',()=>{
+document.getElementById('addUserBtn').addEventListener('click', async ()=>{
   const name=document.getElementById('newUserName').value.trim(),email=document.getElementById('newUserEmail').value.trim().toLowerCase(),pass=document.getElementById('newUserPass').value.trim();
   if(!name||!email||!pass){ alert('Fill all fields'); return; }
   if(users.find(u=>u.email===email)){ alert('Email exists'); return; }
-  users.push({id:genId(),name,email,password:pass,isAdmin:false,medLeft:12,casLeft:5});
+  const newUser = {id:genId(),name,email,password:pass,isAdmin:false,medLeft:12,casLeft:5};
+  users.push(newUser);
   document.getElementById('newUserName').value=''; document.getElementById('newUserEmail').value=''; document.getElementById('newUserPass').value='';
-  skipNextConflictCheck = true; // V12.1: Skip conflict for adding new user
-  autoSave(); renderManage();
+  // V14.3.2: persist JUST this user's document via saveUser() — no wholesale array
+  // save, so other open tabs can't clobber the newly added user.
+  try {
+    await saveUser(newUser);
+    showNotificationToast('✅ Member Added', `${name} added to the team.`, 'info');
+  } catch(e) { console.error('Failed to add user:', e); alert('Save failed — please try again'); }
+  renderManage();
 });
 document.getElementById('addClientBtn').addEventListener('click',()=>{
   const v=document.getElementById('newClient').value.trim();
