@@ -1441,6 +1441,30 @@ function showSaveIndicator() {
 // ═══════════════════════════════════════════════════════
 // DATA PERSISTENCE (FIREBASE FIRESTORE) - WORKING VERSION
 // ═══════════════════════════════════════════════════════
+// V14.3.4: Firestore batches cap at 500 operations. With 2013 timeLogs and
+// 1094 planEntries, saveData()'s single db.batch() per collection now exceeds
+// that limit — batch.commit() throws, and because it shared saveData()'s one
+// outer try/catch, that throw silently aborted every write queued after it
+// (clients/typologies/holidays never reached Firestore). Chunking each
+// collection at 450 ops/commit keeps every batch under the limit, and
+// catching each chunk individually means one failed chunk is logged on its
+// own and can no longer take the rest of the save down with it.
+async function commitInChunks(collectionName, items, buildDocData) {
+  const CHUNK_SIZE = 450;
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    const batch = db.batch();
+    chunk.forEach(item => {
+      batch.set(db.collection(collectionName).doc(item.id), buildDocData(item));
+    });
+    try {
+      await batch.commit();
+    } catch (e) {
+      console.error(`❌ ${collectionName} chunk failed (items ${i}-${i + chunk.length - 1} of ${items.length}):`, e);
+    }
+  }
+}
+
 async function saveData() {
   if (!dataLoaded) {
     console.error('⏸️ SAVE BLOCKED - Data not loaded yet!');
@@ -1546,40 +1570,25 @@ async function saveData() {
     });
     
     // Save projects
-    const projectBatch = db.batch();
-    projectsData.forEach(project => {
-      const projectRef = db.collection("projects").doc(project.id);
-      projectBatch.set(projectRef, {
-        ...project,
-        updatedAt: saveTimestamp,
-        updatedBy: currentUser?.name || 'Unknown'
-      });
-    });
-    await projectBatch.commit();
+    await commitInChunks('projects', projectsData, project => ({
+      ...project,
+      updatedAt: saveTimestamp,
+      updatedBy: currentUser?.name || 'Unknown'
+    }));
     console.log('✅ Projects saved:', projectsData.length);
-    
+
     // Save time logs
-    const timeLogBatch = db.batch();
-    timeLogs.forEach(log => {
-      const logRef = db.collection("timeLogs").doc(log.id);
-      timeLogBatch.set(logRef, {
-        ...log,
-        updatedAt: saveTimestamp
-      });
-    });
-    await timeLogBatch.commit();
+    await commitInChunks('timeLogs', timeLogs, log => ({
+      ...log,
+      updatedAt: saveTimestamp
+    }));
     console.log('✅ Time logs saved:', timeLogs.length);
-    
+
     // Save plan entries
-    const planBatch = db.batch();
-    planEntries.forEach(entry => {
-      const entryRef = db.collection("planEntries").doc(entry.id);
-      planBatch.set(entryRef, {
-        ...entry,
-        updatedAt: saveTimestamp
-      });
-    });
-    await planBatch.commit();
+    await commitInChunks('planEntries', planEntries, entry => ({
+      ...entry,
+      updatedAt: saveTimestamp
+    }));
     console.log('✅ Plan entries saved:', planEntries.length);
     
     // V14.2.6: leaveRequests are EXCLUDED from batch save entirely.
