@@ -1600,7 +1600,7 @@ async function saveData() {
     // V14.2.40c FIX: Save main data using update() not set() so casLeft/medLeft
     // are NOT overwritten by auto-save. Leave balances only written by deduction logic.
     const dataToSave = {
-      users, clients, typologies, changeRequests, holidays,
+      clients, typologies, changeRequests, holidays,
       timestamp: saveTimestamp,
       instanceId: instanceId,
       savedBy: currentUser?.name || 'Unknown',
@@ -2141,13 +2141,6 @@ async function runAttendanceAutoDeduction() {
         console.log(`  Balance updated: ${user.name} ML=${user.medLeft} CL=${user.casLeft}`);
       } catch(e) { console.error('Failed to update balance for', user.name, e); }
     }
-  }
-  // Also persist updated users array to squareDB to keep dashboard in sync
-  if(anyBalanceChanged){
-    try {
-      await db.collection("companyData").doc("squareDB").update({users: users});
-      console.log('✅ squareDB.users synced after balance update');
-    } catch(e) { console.error('Failed to sync squareDB.users:', e); }
   }
 
   // V14.2.40: Check for 3 consecutive months of auto-deductions
@@ -5046,15 +5039,8 @@ function renderApprovals(){
           approvedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });
-        // Save updated user leave balance — both granular and main doc
+        // Save updated user leave balance
         await saveUser(u);
-        // V14.2.24 FIX: Also update users array in main companyData doc
-        // saveUser() writes to users/{id} subcollection but loadData() reads
-        // from companyData/squareDB users array — keep both in sync
-        await db.collection("companyData").doc("squareDB").update({
-          users: users,
-          updatedAt: new Date().toISOString()
-        });
         // V14.2.9: Reload leave requests from server to sync in-memory array
         const fresh = await db.collection("leaveRequests").get({source:'server'});
         leaveRequests = [];
