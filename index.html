@@ -4457,30 +4457,58 @@ function initTimeReport(){
   document.getElementById('trPdfBtn2').addEventListener('click',exportPDF);
 }
 
-// A session interrupted by a reload can leave two Firestore docs behind
-// instead of one growing entry -- a ~1-minute "starter" (the immediate
-// heartbeat write) and a second doc that picks up from where the starter's
-// clock time ends and does the real, growing work. They never share an id
-// (the reload wipes currentSessionLogId), so they can't be deduped by id.
-// Pair them by contiguous clock time instead: same user + same project +
-// same day, and the starter's endTime lines up exactly with another entry's
-// startTime. Keep whichever entry continues (its own inProgress state
-// doesn't matter); drop the starter everywhere the report shows numbers.
+// A session interrupted by a reload/reconnect can leave two Firestore docs
+// behind instead of one growing entry. Two shapes seen in practice:
+//   1) A ~1-minute "starter" (the immediate heartbeat write) followed by a
+//      second doc that continues from where the starter's clock time ends
+//      and does the real, growing work -- different startTime, but the
+//      starter's endTime lines up exactly with the next entry's startTime.
+//   2) A stale in-progress snapshot and its finalized version of the SAME
+//      session, sharing the same startTime but a different (earlier)
+//      endTime/duration because the in-progress copy stopped syncing before
+//      the real session finished and got closed out.
+// Neither pair shares an id (the reload wipes currentSessionLogId), so they
+// can't be deduped by id. Pair them by clock-time signature instead and keep
+// only the authoritative entry: prefer the finalized (inProgress:false) one;
+// if every candidate is still in-progress, keep the longest-running one.
+function pickSessionWinner(group) {
+  const finalized = group.filter(l => !l.inProgress);
+  const pool = finalized.length ? finalized : group;
+  return pool.reduce((best, l) => (l.durationMins > best.durationMins ? l : best), pool[0]);
+}
 function dedupeSessionLogs(logs) {
-  const bySession = {};
+  const dropIds = new Set();
+
+  // Case 2: same user + same project + same day + identical startTime.
+  const byStart = {};
   logs.forEach(l => {
+    if (!l.startTime) return;
+    const key = l.userId + '|' + (l.projectName||l.activity||'-') + '|' + l.date + '|' + l.startTime;
+    (byStart[key] = byStart[key] || []).push(l);
+  });
+  Object.values(byStart).forEach(group => {
+    if (group.length < 2) return;
+    const winner = pickSessionWinner(group);
+    group.forEach(l => { if (l !== winner) dropIds.add(l.id); });
+  });
+
+  // Case 1: tiny starter whose endTime lines up exactly with another entry's
+  // startTime for the same user + project + day.
+  const remaining = logs.filter(l => !dropIds.has(l.id));
+  const bySession = {};
+  remaining.forEach(l => {
     const key = l.userId + '|' + l.projectId + '|' + l.date;
     (bySession[key] = bySession[key] || []).push(l);
   });
-  const starterIds = new Set();
   Object.values(bySession).forEach(group => {
     if (group.length < 2) return;
     group.forEach(a => {
       if (!a.startTime || !a.endTime || a.durationMins > 2) return; // only tiny "starter" candidates
-      if (group.some(b => b !== a && b.startTime === a.endTime)) starterIds.add(a.id);
+      if (group.some(b => b !== a && b.startTime === a.endTime)) dropIds.add(a.id);
     });
   });
-  return starterIds.size ? logs.filter(l => !starterIds.has(l.id)) : logs;
+
+  return dropIds.size ? logs.filter(l => !dropIds.has(l.id)) : logs;
 }
 function runTimeReport(){
   const currentUserId=document.getElementById('trUser').value, currentProjId=document.getElementById('trProject').value;
