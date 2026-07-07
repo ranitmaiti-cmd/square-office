@@ -4496,12 +4496,16 @@ function runTimeReport(){
 }
 function buildTrPerson(logs,total){
   const byU={};
-  logs.forEach(l=>{ if(!byU[l.userId])byU[l.userId]={mins:0,n:0,projects:{}}; byU[l.userId].mins+=l.durationMins; byU[l.userId].n++; if(!byU[l.userId].projects[l.projectName||l.activity||'-'])byU[l.userId].projects[l.projectName||l.activity||'-']=0; byU[l.userId].projects[l.projectName||l.activity||'-']+=l.durationMins; });
+  // Running (inProgress:true) entries are counted in mins below same as any other
+  // entry — the heartbeat already saved that time. hasLive just flags the row so
+  // it can be tagged "LIVE" in the UI; it must never be used to skip the entry.
+  logs.forEach(l=>{ if(!byU[l.userId])byU[l.userId]={mins:0,n:0,projects:{},hasLive:false}; byU[l.userId].mins+=l.durationMins; byU[l.userId].n++; if(l.inProgress)byU[l.userId].hasLive=true; if(!byU[l.userId].projects[l.projectName||l.activity||'-'])byU[l.userId].projects[l.projectName||l.activity||'-']=0; byU[l.userId].projects[l.projectName||l.activity||'-']+=l.durationMins; });
   const sorted=Object.entries(byU).sort((a,b)=>b[1].mins-a[1].mins); const maxM=sorted[0]?.[1].mins||1;
   let html=`<table class="rpt-table"><thead><tr><th>Member</th><th>Breakdown</th><th style="text-align:right">Time</th><th style="text-align:right">Share</th></tr></thead><tbody>`;
   sorted.forEach(([uid,d])=>{ const u=users.find(u=>u.id===uid); const pct=((d.mins/total)*100).toFixed(1); const bar=((d.mins/maxM)*100).toFixed(1);
+    const liveTag=d.hasLive?' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">● LIVE</span>':'';
     const rows=Object.entries(d.projects).sort((a,b)=>b[1]-a[1]).map(([p,m])=>`<tr class="sub"><td colspan="2">📁 ${p}</td><td style="text-align:right;color:#A96E35;font-weight:600;">${minsToHM(m)}</td><td style="text-align:right;color:#8A7E74;">${((m/total)*100).toFixed(1)}%</td></tr>`).join('');
-    html+=`<tr><td><b>${u?.name||'?'}</b><br><span style="font-size:10px;color:#B0A89E;">${d.n} entries</span></td><td><div class="bar-wrap"><div class="bar-fill" style="width:${bar}%"></div></div></td><td style="text-align:right;font-weight:800;font-size:14px;">${minsToHM(d.mins)}</td><td style="text-align:right;font-weight:700;color:#6B5A4E;">${pct}%</td></tr>${rows}<tr><td colspan="4" style="border:none;height:6px;"></td></tr>`;
+    html+=`<tr><td><b>${u?.name||'?'}</b>${liveTag}<br><span style="font-size:10px;color:#B0A89E;">${d.n} entries</span></td><td><div class="bar-wrap"><div class="bar-fill" style="width:${bar}%"></div></div></td><td style="text-align:right;font-weight:800;font-size:14px;">${minsToHM(d.mins)}</td><td style="text-align:right;font-weight:700;color:#6B5A4E;">${pct}%</td></tr>${rows}<tr><td colspan="4" style="border:none;height:6px;"></td></tr>`;
   });
   document.getElementById('trPersonTbl').innerHTML=html+'</tbody></table>';
 }
@@ -4527,8 +4531,13 @@ function buildTrDetail(logs){
   let html=`<table class="rpt-table"><thead><tr><th>Date</th><th>Member</th><th>Project / Activity</th><th>Phase</th><th>Typology</th><th>Clock Time</th><th>Description</th><th style="text-align:right">Time</th></tr></thead><tbody>`;
   sorted.forEach(l=>{ const u=users.find(u=>u.id===l.userId);
     const clockTime = l.startTime && l.endTime ? `${l.startTime} → ${l.endTime}` : '<span style="color:#D0C4B8;font-style:italic;">—</span>';
-    html+=`<tr><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#A96E35;font-weight:600;">${l.productive?'📁 '+l.projectName:'🔸 '+l.activity}</td><td style="font-size:11px;">${l.phase||'-'}</td><td style="font-size:11px;">${l.typology||'-'}</td><td style="font-size:11px;white-space:nowrap;">${clockTime}</td><td>${l.desc}</td><td style="text-align:right;font-weight:700;color:#A96E35;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
+    const liveTag = l.inProgress ? ' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">● LIVE</span>' : '';
+    const rowStyle = l.inProgress ? ' style="font-style:italic;background:#FAFBF7;"' : '';
+    html+=`<tr${rowStyle}><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#A96E35;font-weight:600;">${l.productive?'📁 '+l.projectName:'🔸 '+l.activity}${liveTag}</td><td style="font-size:11px;">${l.phase||'-'}</td><td style="font-size:11px;">${l.typology||'-'}</td><td style="font-size:11px;white-space:nowrap;">${clockTime}</td><td>${l.desc}</td><td style="text-align:right;font-weight:700;color:#A96E35;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
   });
+  // Grand total includes in-progress (running) entries same as finalized ones —
+  // the heartbeat already persisted that time, so dropping it here would make it
+  // look like the running session's minutes were never saved.
   const tot=logs.reduce((s,l)=>s+l.durationMins,0);
   html+=`<tr style="background:#EDE9E3;font-weight:700;"><td colspan="7" style="text-align:right;">Grand Total:</td><td style="text-align:right;color:#A96E35;font-size:15px;">${minsToHM(tot)}</td></tr>`;
   document.getElementById('trDetailTbl').innerHTML=html+'</tbody></table>';
