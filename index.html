@@ -3922,7 +3922,14 @@ document.getElementById('deletePlanBtn').addEventListener('click',()=>{
     return;
   }
   if(!confirm('Remove this plan entry?')) return;
-  planEntries=planEntries.filter(p=>p.id!==editPlanId);
+  const deletedPlanId = editPlanId;
+  planEntries=planEntries.filter(p=>p.id!==deletedPlanId);
+  // commitInChunks() in saveData() only upserts entries still in the local
+  // array, so it never removes a doc from Firestore — delete this one directly
+  // or it survives server-side and reappears on the next reload.
+  db.collection("planEntries").doc(deletedPlanId).delete()
+    .then(() => console.log('✅ Plan entry deleted:', deletedPlanId))
+    .catch(e => console.error('❌ Plan entry delete failed:', e));
   autoSave(); closeModal('planModal'); renderPlanner(); renderDashboard();
 });
 
