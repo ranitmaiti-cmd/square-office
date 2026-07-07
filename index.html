@@ -4457,6 +4457,31 @@ function initTimeReport(){
   document.getElementById('trPdfBtn2').addEventListener('click',exportPDF);
 }
 
+// A session interrupted by a reload can leave two Firestore docs behind
+// instead of one growing entry -- a ~1-minute "starter" (the immediate
+// heartbeat write) and a second doc that picks up from where the starter's
+// clock time ends and does the real, growing work. They never share an id
+// (the reload wipes currentSessionLogId), so they can't be deduped by id.
+// Pair them by contiguous clock time instead: same user + same project +
+// same day, and the starter's endTime lines up exactly with another entry's
+// startTime. Keep whichever entry continues (its own inProgress state
+// doesn't matter); drop the starter everywhere the report shows numbers.
+function dedupeSessionLogs(logs) {
+  const bySession = {};
+  logs.forEach(l => {
+    const key = l.userId + '|' + l.projectId + '|' + l.date;
+    (bySession[key] = bySession[key] || []).push(l);
+  });
+  const starterIds = new Set();
+  Object.values(bySession).forEach(group => {
+    if (group.length < 2) return;
+    group.forEach(a => {
+      if (!a.startTime || !a.endTime || a.durationMins > 2) return; // only tiny "starter" candidates
+      if (group.some(b => b !== a && b.startTime === a.endTime)) starterIds.add(a.id);
+    });
+  });
+  return starterIds.size ? logs.filter(l => !starterIds.has(l.id)) : logs;
+}
 function runTimeReport(){
   const currentUserId=document.getElementById('trUser').value, currentProjId=document.getElementById('trProject').value;
   document.getElementById('trUser').innerHTML='<option value="">All Members</option>'+users.map(u=>`<option value="${u.id}">${u.name}</option>`).join('');
@@ -4488,6 +4513,7 @@ function runTimeReport(){
   logs=logs.filter(l=>l.date>=fromDate&&l.date<=toDate);
   if(userId) logs=logs.filter(l=>l.userId===userId);
   if(projId) logs=logs.filter(l=>l.projectId===projId);
+  logs=dedupeSessionLogs(logs);
   document.getElementById('trOutput').style.display='block';
   const total=logs.reduce((s,l)=>s+l.durationMins,0);
   const prodMins=logs.filter(l=>l.productive).reduce((s,l)=>s+l.durationMins,0);
