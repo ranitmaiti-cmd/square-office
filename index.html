@@ -5638,9 +5638,14 @@ function startTimerWithPlan(plan) {
   timerPausedMs   = 0;
   timerRunning    = true;
   window.lastSessionStartedAt = Date.now();
+  // V14.3.7: generate the session id before persisting so a reload can resume
+  // the SAME heartbeat doc (see restoreTimerState) instead of losing track of
+  // it and orphaning it at whatever durationMins it had at last heartbeat.
+  currentSessionLogId = genId();
   localStorage.setItem('timerState', JSON.stringify({
     startedAt: timerStartedAt, lastSessionStartedAt: window.lastSessionStartedAt,
-    pausedMs: timerPausedMs, running: true, linkedPlan: timerLinkedPlan
+    pausedMs: timerPausedMs, running: true, linkedPlan: timerLinkedPlan,
+    sessionLogId: currentSessionLogId
   }));
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPreStart').style.display  = 'none';
@@ -5666,8 +5671,8 @@ function startTimerWithPlan(plan) {
   updateTimerVisualState(); // V14.2.25
   renderWidgetTaskList(plan.id);
   saveActiveTimerToFirebase();
-  // V14.3.3: new durable session — fresh id + start 60s heartbeat + immediate write
-  currentSessionLogId = genId();
+  // V14.3.3: new durable session — start 60s heartbeat + immediate write.
+  // (currentSessionLogId is already set above, before the localStorage write.)
   if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
   sessionHeartbeatInterval = setInterval(heartbeatSession, 60000);
   heartbeatSession();
@@ -5709,7 +5714,7 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
   if (timerInterval) clearInterval(timerInterval);
   timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
   window.lastSessionStartedAt=Date.now();
-  localStorage.setItem('timerState',JSON.stringify({startedAt:timerStartedAt,lastSessionStartedAt:window.lastSessionStartedAt,pausedMs:0,running:true,linkedPlan:timerLinkedPlan}));
+  localStorage.setItem('timerState',JSON.stringify({startedAt:timerStartedAt,lastSessionStartedAt:window.lastSessionStartedAt,pausedMs:0,running:true,linkedPlan:timerLinkedPlan,sessionLogId:currentSessionLogId}));
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPaused').style.display='none';
   document.getElementById('timerRunning').style.display='block';
@@ -6019,11 +6024,26 @@ async function restoreTimerState() {
     timerPausedMs  = 0;
     timerLinkedPlan = state.linkedPlan;
     timerRunning   = true;
-    // Update localStorage so next pause reads correct value
+
+    // V14.3.7: resume the SAME heartbeat doc instead of losing track of it.
+    // Without this, currentSessionLogId stayed null after any reload (it's a
+    // plain in-memory variable, never persisted) and heartbeatSession()'s own
+    // guard silently no-ops without it -- so the pre-reload doc just stopped
+    // updating, frozen inProgress:true forever, while the next switch/stop
+    // action fell back to a fresh id and orphaned it for good. Falls back to
+    // genId() only for sessions already in flight when this fix ships (their
+    // saved state predates the sessionLogId field).
+    currentSessionLogId = state.sessionLogId || genId();
+    if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
+    sessionHeartbeatInterval = setInterval(heartbeatSession, 60000);
+    heartbeatSession(); // immediate flush so the restored session is durable again
+
+    // Update localStorage so next pause/reload reads correct value
     localStorage.setItem('timerState', JSON.stringify({
       startedAt: timerStartedAt,
       lastSessionStartedAt: timerStartedAt,
-      pausedMs: 0, running: true, linkedPlan: timerLinkedPlan
+      pausedMs: 0, running: true, linkedPlan: timerLinkedPlan,
+      sessionLogId: currentSessionLogId
     }));
 
     document.getElementById('timerWidget').classList.add('running');
