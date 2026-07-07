@@ -1420,6 +1420,17 @@ function heartbeatSession() {
     inProgress: true,
     ts: now
   });
+  // V14.3.8: field-level heartbeat ping (.update(), not .set()) so reconnect and
+  // login-recovery have a server-trustworthy "still alive" timestamp, independent
+  // of the client clock. Targets the same timeLogs/{currentSessionLogId} doc the
+  // upsert above just wrote, but as its own narrow write -- it never replaces
+  // the whole record. On the very first tick of a brand-new session the .set()
+  // above and this .update() race to create vs. touch the same not-yet-existing
+  // doc; if this loses that race it fails silently and self-heals on the next
+  // tick 60s later, since the doc definitely exists by then.
+  db.collection('timeLogs').doc(currentSessionLogId).update({
+    lastHeartbeat: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(e => console.warn('heartbeat ping skipped (will retry next tick):', e.message));
 }
 // V14.2.2: FIX #6 - Inactivity auto-pause
 let lastActivity = Date.now();
@@ -1819,6 +1830,10 @@ function startInactivityMonitor() {
       heartbeatSession(); // V14.3.3: flush before the tab is backgrounded/closed
     } else {
       console.log('📱 Tab visible again');
+      // V14.3.8: checkpoint-finalize this tab's own in-progress session on
+      // resume, in case the interruption (sleep/background throttling) meant
+      // the heartbeat interval missed ticks -- reattaches under the same id.
+      try { finalizeCurrentSession('tab resumed'); } catch(e) { console.error('resume checkpoint failed', e); }
     }
   });
   // V14.3.3: best-effort flush if the tab is closed/refreshed mid-session
@@ -2259,12 +2274,15 @@ loadData().then(async () => {
         // V14.2.9: Clean up any stale timers from previous day
         await cleanupStaleTimers();
 
+        // V14.3.8: recover this user's own sessions orphaned on a previous day
+        await recoverStaleSessionsForUser();
+
         // V14.2.10: Start real-time leave requests listener
         startLeaveRequestsListener();
 
         // V14.2.36: Run attendance auto-deduction (admin only)
         if (user.isAdmin) setTimeout(() => runAttendanceAutoDeduction(), 3000);
-        
+
         // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
         await restoreTimerState();
 
@@ -2327,12 +2345,15 @@ async function doLogin(){
     // V14.2.9: Clean up any stale timers from previous day
     await cleanupStaleTimers();
 
+    // V14.3.8: recover this user's own sessions orphaned on a previous day
+    await recoverStaleSessionsForUser();
+
     // V14.2.10: Start real-time leave requests listener
     startLeaveRequestsListener();
 
     // V14.2.36: Run attendance auto-deduction (admin only)
     if (user.isAdmin) setTimeout(() => runAttendanceAutoDeduction(), 3000);
-    
+
     // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
     await restoreTimerState();
 
@@ -5629,6 +5650,40 @@ function switchTaskTo(newPlan) {
   startTimerWithPlan(newPlan);
 }
 
+// V14.3.8: shared finalize-and-reattach for interruptions that don't reload the
+// page (network drop/restore, tab backgrounded/foregrounded). Reuses the SAME
+// currentSessionLogId -- never generates a new one -- so the interrupted portion
+// and the continuation stay one Firestore doc, not two. Same finalize math as
+// switchTaskTo (direct subtraction from timerStartedAt, no cumulative summing),
+// then resets timerStartedAt fresh so the continuation is its own clean
+// measurement, not an accumulated total. Worst case if nothing fires again
+// after this (crash right after) is a checkpoint-accurate finalized entry --
+// not a permanently orphaned inProgress:true doc.
+function finalizeCurrentSession(reason) {
+  if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
+  const now         = Date.now();
+  const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
+  if (sessionSecs < 30) return; // too short to be worth a checkpoint write
+  const mins        = Math.max(1, Math.floor(sessionSecs / 60));
+  const today       = fmt(new Date(timerStartedAt));
+  const clockStart  = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const clockEnd    = new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (${reason})`;
+
+  upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:false,ts:Date.now()});
+
+  // Reopen a fresh checkpoint under the SAME id -- same plan, same session id,
+  // only the measurement origin resets. This is not a new session.
+  timerStartedAt = now;
+  window.lastSessionStartedAt = now;
+  localStorage.setItem('timerState', JSON.stringify({
+    startedAt: timerStartedAt, lastSessionStartedAt: window.lastSessionStartedAt,
+    pausedMs: 0, running: true, linkedPlan: timerLinkedPlan,
+    sessionLogId: currentSessionLogId
+  }));
+  console.log(`✅ Session checkpoint finalized (${reason}): ${minsToHM(mins)} for ${timerLinkedPlan.project} -- same id continues`);
+}
+
 // Core function: start the timer with a linked plan
 function startTimerWithPlan(plan) {
   // V14.2.26: Clear any existing interval first — prevents compound ticks
@@ -5950,6 +6005,59 @@ async function cleanupStaleTimers() {
     }
   } catch(e) {
     console.error('❌ Stale timer cleanup failed:', e);
+  }
+}
+
+// V14.3.8: recover this user's own sessions permanently orphaned by a
+// crash/close/reload-without-reopen on a PREVIOUS day. restoreTimerState()
+// only ever handles TODAY's still-open session (via a reload of the SAME
+// day); this catches anything left behind entirely once the user logs back
+// in on a later day. Scoped to userId == currentUser.id so it is structurally
+// unable to touch another user's docs, and to date < today so it can never
+// race with restoreTimerState()'s own same-day restore in this same login.
+async function recoverStaleSessionsForUser() {
+  if (!currentUser) return;
+  try {
+    const todayStr = fmt(new Date());
+    const snap = await db.collection('timeLogs')
+      .where('userId', '==', currentUser.id)
+      .where('inProgress', '==', true)
+      .where('date', '<', todayStr)
+      .get();
+    if (snap.empty) return;
+
+    let recoveredCount = 0;
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      // Prefer the server-timestamped heartbeat; fall back to whatever client
+      // timestamp the last successful write left behind. If neither exists,
+      // skip rather than guess an end time.
+      const lastSeenMs = data.lastHeartbeat?.toMillis ? data.lastHeartbeat.toMillis()
+        : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
+      if (!lastSeenMs) continue;
+
+      const startMs = (data.date && data.startTime)
+        ? new Date(`${data.date}T${data.startTime}:00`).getTime()
+        : lastSeenMs;
+      const durationMins = Math.max(1, Math.round((lastSeenMs - startMs) / 60000));
+      const endTime = new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+      await db.collection('timeLogs').doc(doc.id).update({
+        inProgress: false,
+        recovered: true,
+        durationMins,
+        endTime,
+        desc: `${data.desc || 'Work on project'} (recovered — session ended without explicit stop)`,
+        recoveredAt: new Date().toISOString()
+      });
+      recoveredCount++;
+    }
+    if (recoveredCount > 0) {
+      console.log(`✅ Recovered ${recoveredCount} orphaned session(s) from previous days`);
+      showNotificationToast('🔧 Sessions Recovered', `${recoveredCount} unfinished session(s) from earlier were closed out automatically.`, 'info');
+    }
+  } catch (e) {
+    console.error('❌ Stale session recovery failed:', e);
   }
 }
 
@@ -6449,6 +6557,9 @@ window.addEventListener('online', () => {
   updateConnectionStatus(true);
   // Process queue when coming back online
   processQueue();
+  // V14.3.8: checkpoint-finalize this tab's own in-progress session on
+  // reconnect, reattaching under the same id -- see finalizeCurrentSession().
+  try { finalizeCurrentSession('reconnected'); } catch(e) { console.error('reconnect checkpoint failed', e); }
 });
 
 window.addEventListener('offline', () => {
