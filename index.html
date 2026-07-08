@@ -2271,11 +2271,21 @@ loadData().then(async () => {
           }, 60 * 60 * 1000);
         }
 
+        // V14.3.10: periodic stale-heartbeat finalize -- catches a session that
+        // went stale mid-login without the user starting a new timer or
+        // reloading. Guarded against compound intervals the same way.
+        if (!window._staleHeartbeatInterval) {
+          window._staleHeartbeatInterval = setInterval(() => {
+            if (currentUser) finalizeStaleHeartbeatSessions();
+          }, 5 * 60 * 1000);
+        }
+
         // V14.2.9: Clean up any stale timers from previous day
         await cleanupStaleTimers();
 
-        // V14.3.8: recover this user's own sessions orphaned on a previous day
-        await recoverStaleSessionsForUser();
+        // V14.3.10: finalize this user's own stale-heartbeat sessions (same-day
+        // and previous-day both)
+        await finalizeStaleHeartbeatSessions();
 
         // V14.2.10: Start real-time leave requests listener
         startLeaveRequestsListener();
@@ -2342,11 +2352,20 @@ async function doLogin(){
       }, 60 * 60 * 1000);
     }
 
+    // V14.3.10: periodic stale-heartbeat finalize -- catches a session that
+    // went stale mid-login without the user starting a new timer or reloading.
+    if (!window._staleHeartbeatInterval) {
+      window._staleHeartbeatInterval = setInterval(() => {
+        if (currentUser) finalizeStaleHeartbeatSessions();
+      }, 5 * 60 * 1000);
+    }
+
     // V14.2.9: Clean up any stale timers from previous day
     await cleanupStaleTimers();
 
-    // V14.3.8: recover this user's own sessions orphaned on a previous day
-    await recoverStaleSessionsForUser();
+    // V14.3.10: finalize this user's own stale-heartbeat sessions (same-day
+    // and previous-day both)
+    await finalizeStaleHeartbeatSessions();
 
     // V14.2.10: Start real-time leave requests listener
     startLeaveRequestsListener();
@@ -5729,6 +5748,14 @@ function startTimerWithPlan(plan) {
   if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
   sessionHeartbeatInterval = setInterval(heartbeatSession, 60000);
   heartbeatSession();
+  // V14.3.10: starting a fresh session is a clear signal any OTHER inProgress
+  // session this user still has open (from a tab/device that never cleanly
+  // stopped) is abandoned, not concurrent -- this app only ever tracks one
+  // active session per user. Fire-and-forget so it never delays starting the
+  // new timer; currentSessionLogId is already set to the NEW session's id
+  // above, so the exclusion inside finalizeStaleHeartbeatSessions() protects
+  // it automatically.
+  finalizeStaleHeartbeatSessions();
 }
 
 // V14.2.24: openNewTaskPicker — replaces direct timerStartBtn logic
@@ -6006,26 +6033,35 @@ async function cleanupStaleTimers() {
   }
 }
 
-// V14.3.8: recover this user's own sessions permanently orphaned by a
-// crash/close/reload-without-reopen on a PREVIOUS day. restoreTimerState()
-// only ever handles TODAY's still-open session (via a reload of the SAME
-// day); this catches anything left behind entirely once the user logs back
-// in on a later day. Scoped to userId == currentUser.id so it is structurally
-// unable to touch another user's docs, and to date < today so it can never
-// race with restoreTimerState()'s own same-day restore in this same login.
-async function recoverStaleSessionsForUser() {
+// V14.3.10: finalize this user's own inProgress:true sessions whose heartbeat
+// has gone stale (no lastHeartbeat update in STALE_HEARTBEAT_MS). This is the
+// piece the 79c820f heartbeat-only fix was missing -- it wrote lastHeartbeat
+// every 60s but nothing ever acted on one that stopped updating. Supersedes
+// the old date<today-only recovery (V14.3.8): a previous-day entry is always
+// stale by this same definition, so one check now covers both same-day and
+// previous-day orphans instead of missing same-day ones entirely.
+// Safety: scoped to userId == currentUser.id by the query itself, so it is
+// structurally unable to touch another user's docs. Explicitly skips
+// currentSessionLogId so it can never finalize the session THIS tab is
+// actively tracking. A session with a heartbeat inside the threshold is left
+// completely untouched, whether it's this tab's or (in principle) another
+// device's for the same user.
+const STALE_HEARTBEAT_MS = 5 * 60 * 1000; // 5 minutes
+
+async function finalizeStaleHeartbeatSessions() {
   if (!currentUser) return;
   try {
-    const todayStr = fmt(new Date());
+    const now = Date.now();
     const snap = await db.collection('timeLogs')
       .where('userId', '==', currentUser.id)
       .where('inProgress', '==', true)
-      .where('date', '<', todayStr)
       .get();
     if (snap.empty) return;
 
     let recoveredCount = 0;
     for (const doc of snap.docs) {
+      if (doc.id === currentSessionLogId) continue; // this tab's own live session -- never touch
+
       const data = doc.data();
       // Prefer the server-timestamped heartbeat; fall back to whatever client
       // timestamp the last successful write left behind. If neither exists,
@@ -6033,6 +6069,7 @@ async function recoverStaleSessionsForUser() {
       const lastSeenMs = data.lastHeartbeat?.toMillis ? data.lastHeartbeat.toMillis()
         : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
       if (!lastSeenMs) continue;
+      if (now - lastSeenMs < STALE_HEARTBEAT_MS) continue; // fresh -- leave it alone
 
       const startMs = (data.date && data.startTime)
         ? new Date(`${data.date}T${data.startTime}:00`).getTime()
@@ -6045,17 +6082,27 @@ async function recoverStaleSessionsForUser() {
         recovered: true,
         durationMins,
         endTime,
-        desc: `${data.desc || 'Work on project'} (recovered — session ended without explicit stop)`,
+        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${Math.round((now-lastSeenMs)/60000)}m)`,
         recoveredAt: new Date().toISOString()
       });
+
+      // If localStorage still points restoreTimerState() at this now-closed
+      // doc (e.g. the tab was reopened after the staleness threshold passed),
+      // clear it -- otherwise the next restore would resume a session this
+      // check just finalized, flipping it back to inProgress:true.
+      try {
+        const saved = JSON.parse(localStorage.getItem('timerState') || 'null');
+        if (saved && saved.sessionLogId === doc.id) localStorage.removeItem('timerState');
+      } catch(e) {}
+
       recoveredCount++;
     }
     if (recoveredCount > 0) {
-      console.log(`✅ Recovered ${recoveredCount} orphaned session(s) from previous days`);
-      showNotificationToast('🔧 Sessions Recovered', `${recoveredCount} unfinished session(s) from earlier were closed out automatically.`, 'info');
+      console.log(`✅ Finalized ${recoveredCount} stale-heartbeat session(s)`);
+      showNotificationToast('🔧 Sessions Recovered', `${recoveredCount} abandoned session(s) were closed out automatically.`, 'info');
     }
   } catch (e) {
-    console.error('❌ Stale session recovery failed:', e);
+    console.error('❌ Stale-heartbeat finalization failed:', e);
   }
 }
 
