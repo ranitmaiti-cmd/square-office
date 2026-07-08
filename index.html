@@ -5650,15 +5650,22 @@ function switchTaskTo(newPlan) {
   startTimerWithPlan(newPlan);
 }
 
-// V14.3.8: shared finalize-and-reattach for interruptions that don't reload the
-// page (network drop/restore, tab backgrounded/foregrounded). Reuses the SAME
-// currentSessionLogId -- never generates a new one -- so the interrupted portion
-// and the continuation stay one Firestore doc, not two. Same finalize math as
-// switchTaskTo (direct subtraction from timerStartedAt, no cumulative summing),
-// then resets timerStartedAt fresh so the continuation is its own clean
-// measurement, not an accumulated total. Worst case if nothing fires again
-// after this (crash right after) is a checkpoint-accurate finalized entry --
-// not a permanently orphaned inProgress:true doc.
+// V14.3.9: safety checkpoint for interruptions that don't reload the page
+// (network drop/restore, tab backgrounded/foregrounded). Writes the SAME
+// currentSessionLogId doc -- never generates a new one -- with the TRUE
+// cumulative elapsed since timerStartedAt (direct subtraction, unchanged).
+// Deliberately does NOT touch timerStartedAt, currentSessionLogId,
+// window.lastSessionStartedAt, the heartbeat interval, or localStorage: the
+// JS context never died in these two trigger cases (only a reload does that,
+// and restoreTimerState() already owns recovering from a reload correctly) --
+// so nothing about the running session's identity or origin actually changed,
+// this is purely an out-of-band durability write. The widget display and the
+// eventual real stop/switch/EOD finalize both keep reading the same
+// unbroken timerStartedAt, so they stay in sync with this checkpoint
+// automatically. (V14.3.8 originally reset timerStartedAt here to mimic a
+// "fresh segment" -- that broke the widget's displayed elapsed and the
+// Stop-button's minimum-duration check, since both read timerStartedAt
+// directly and had no way to know a checkpoint had silently rewound it.)
 function finalizeCurrentSession(reason) {
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
   const now         = Date.now();
@@ -5668,20 +5675,11 @@ function finalizeCurrentSession(reason) {
   const today       = fmt(new Date(timerStartedAt));
   const clockStart  = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const clockEnd    = new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (${reason})`;
+  const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (checkpoint: ${reason})`;
 
   upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:false,ts:Date.now()});
 
-  // Reopen a fresh checkpoint under the SAME id -- same plan, same session id,
-  // only the measurement origin resets. This is not a new session.
-  timerStartedAt = now;
-  window.lastSessionStartedAt = now;
-  localStorage.setItem('timerState', JSON.stringify({
-    startedAt: timerStartedAt, lastSessionStartedAt: window.lastSessionStartedAt,
-    pausedMs: 0, running: true, linkedPlan: timerLinkedPlan,
-    sessionLogId: currentSessionLogId
-  }));
-  console.log(`✅ Session checkpoint finalized (${reason}): ${minsToHM(mins)} for ${timerLinkedPlan.project} -- same id continues`);
+  console.log(`✅ Session checkpoint written (${reason}): ${minsToHM(mins)} for ${timerLinkedPlan.project} -- still running, timerStartedAt unchanged`);
 }
 
 // Core function: start the timer with a linked plan
