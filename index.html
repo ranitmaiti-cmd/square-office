@@ -4550,12 +4550,17 @@ function dedupeSessionLogs(logs) {
 
   return dropIds.size ? logs.filter(l => !dropIds.has(l.id)) : logs;
 }
-function runTimeReport(){
+async function runTimeReport(){
   const currentUserId=document.getElementById('trUser').value, currentProjId=document.getElementById('trProject').value;
   document.getElementById('trUser').innerHTML='<option value="">All Members</option>'+users.map(u=>`<option value="${u.id}">${u.name}</option>`).join('');
   document.getElementById('trProject').innerHTML='<option value="">All Projects</option>'+projectsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
   if(currentUserId) document.getElementById('trUser').value=currentUserId;
   if(currentProjId) document.getElementById('trProject').value=currentProjId;
+
+  // V14.3.12: admin-wide stale-heartbeat sweep, awaited so the report this
+  // click generates already reflects any orphan it just closed out (the
+  // function itself is a no-op for non-admins).
+  await finalizeStaleHeartbeatSessionsAllUsers('report-load');
 
   // V14.2.3: Use preset date range instead of month/year dropdowns
   const { fromDate, toDate, label } = trGetDateRange(trActivePreset);
@@ -6125,6 +6130,88 @@ async function finalizeStaleHeartbeatSessions(trigger) {
     }
   } catch (e) {
     console.error('❌ Stale-heartbeat finalization failed:', e);
+  }
+}
+
+// V14.3.12: admin-wide stale-heartbeat sweep. finalizeStaleHeartbeatSessions()
+// above is scoped to userId == currentUser.id by design, so it only ever
+// fixes whoever is CURRENTLY logged in -- if the affected user hasn't logged
+// back in, hasn't kept a tab open 5+ minutes, and hasn't started a new timer,
+// none of those triggers fire for their orphan. An admin viewing the Time
+// Report is already looking across every user's data, so that's a natural,
+// low-risk point to sweep everyone's stale sessions rather than waiting on
+// each individual user to take an action. Same exact logic as the per-user
+// version (lastHeartbeat.seconds*1000 vs Date.now(), same 10-minute
+// threshold), with no userId filter. endTime is set from the last heartbeat
+// time, not from "now" -- finalizing during a report view must not invent
+// extra duration just because an admin happened to load the page later.
+// Admin-gated: only runs for currentUser.isAdmin, and still explicitly skips
+// currentSessionLogId so it can never touch the viewing admin's own live
+// session if they happen to be timing something themselves.
+async function finalizeStaleHeartbeatSessionsAllUsers(trigger) {
+  if (!currentUser?.isAdmin) return;
+  console.log(`[stale-heartbeat-admin] called (trigger=${trigger||'unknown'})`);
+  try {
+    const now = Date.now();
+    const snap = await db.collection('timeLogs').where('inProgress', '==', true).get();
+    console.log(`[stale-heartbeat-admin] query returned ${snap.size} inProgress:true doc(s) across all users`);
+    if (snap.empty) return;
+
+    let recoveredCount = 0;
+    for (const doc of snap.docs) {
+      if (doc.id === currentSessionLogId) {
+        console.log(`[stale-heartbeat-admin] ${doc.id}: skipping -- viewing admin's own live session`);
+        continue;
+      }
+
+      const data = doc.data();
+      const lastSeenMs = (data.lastHeartbeat && typeof data.lastHeartbeat.seconds === 'number')
+        ? data.lastHeartbeat.seconds * 1000
+        : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
+
+      if (!lastSeenMs) {
+        console.log(`[stale-heartbeat-admin] ${doc.id}: no lastHeartbeat/ts/updatedAt -- skipping`);
+        continue;
+      }
+      const ageMs = now - lastSeenMs;
+      if (ageMs < STALE_HEARTBEAT_MS) {
+        console.log(`[stale-heartbeat-admin] ${doc.id} (${data.userName||data.userId}): fresh (${Math.round(ageMs/1000)}s old) -- leaving alone`);
+        continue;
+      }
+      console.log(`[stale-heartbeat-admin] ${doc.id} (${data.userName||data.userId}): STALE (${Math.round(ageMs/60000)}m old) -- finalizing`);
+
+      const startMs = (data.date && data.startTime)
+        ? new Date(`${data.date}T${data.startTime}:00`).getTime()
+        : lastSeenMs;
+      const durationMins = Math.max(1, Math.round((lastSeenMs - startMs) / 60000));
+      // endTime comes from lastSeenMs (the last real heartbeat), never from
+      // "now" -- otherwise every stale session would inherit a phantom
+      // duration stretching to whenever an admin happened to open the report.
+      const endTime = new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+      const updates = {
+        inProgress: false,
+        recovered: true,
+        durationMins,
+        endTime,
+        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${Math.round(ageMs/60000)}m)`,
+        recoveredAt: new Date().toISOString()
+      };
+      await db.collection('timeLogs').doc(doc.id).update(updates);
+
+      // Patch the local timeLogs array too, so a report generated right after
+      // this sweep reflects the fix immediately instead of needing a reload.
+      const localIdx = timeLogs.findIndex(l => l.id === doc.id);
+      if (localIdx >= 0) timeLogs[localIdx] = { ...timeLogs[localIdx], ...updates };
+
+      recoveredCount++;
+    }
+    console.log(`[stale-heartbeat-admin] done -- finalized ${recoveredCount} session(s) across all users`);
+    if (recoveredCount > 0) {
+      showNotificationToast('🔧 Sessions Recovered', `${recoveredCount} abandoned session(s) across the team were closed out automatically.`, 'info');
+    }
+  } catch (e) {
+    console.error('❌ Admin-wide stale-heartbeat sweep failed:', e);
   }
 }
 
