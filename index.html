@@ -6068,8 +6068,25 @@ async function finalizeStaleHeartbeatSessions(trigger) {
       .where('userId', '==', currentUser.id)
       .where('inProgress', '==', true)
       .get();
-    console.log(`[stale-heartbeat] query returned ${snap.size} inProgress:true doc(s) for userId=${currentUser.id}`);
-    if (snap.empty) return;
+    console.log(`[stale-heartbeat] query returned ${snap.size} inProgress:true doc(s) for userId=${JSON.stringify(currentUser.id)} (type: ${typeof currentUser.id})`);
+    if (snap.empty) {
+      // V14.3.13: diagnostic -- the scoped query found nothing. Rather than
+      // assume why, run the unscoped equivalent and print every field's raw
+      // value + type for anything currently inProgress:true, so a userId
+      // type/value mismatch (or an inProgress field that isn't a real
+      // boolean) shows up directly instead of being guessed at again.
+      try {
+        const allInProgress = await db.collection('timeLogs').where('inProgress', '==', true).get();
+        console.log(`[stale-heartbeat] DIAGNOSTIC: unscoped inProgress==true query found ${allInProgress.size} doc(s) total`);
+        allInProgress.forEach(d => {
+          const dd = d.data();
+          console.log(`[stale-heartbeat] DIAGNOSTIC: doc ${d.id} -- userId=${JSON.stringify(dd.userId)} (type ${typeof dd.userId}) | matches currentUser.id (${JSON.stringify(currentUser.id)})? strict=${dd.userId === currentUser.id} loose=${dd.userId == currentUser.id} | inProgress=${JSON.stringify(dd.inProgress)} (type ${typeof dd.inProgress}) | lastHeartbeat present? ${!!dd.lastHeartbeat}`);
+        });
+      } catch (diagErr) {
+        console.error('[stale-heartbeat] DIAGNOSTIC query failed:', diagErr);
+      }
+      return;
+    }
 
     let recoveredCount = 0;
     for (const doc of snap.docs) {
@@ -6165,6 +6182,7 @@ async function finalizeStaleHeartbeatSessionsAllUsers(trigger) {
       }
 
       const data = doc.data();
+      console.log(`[stale-heartbeat-admin] doc ${doc.id} -- userId=${JSON.stringify(data.userId)} (type ${typeof data.userId}), inProgress=${JSON.stringify(data.inProgress)} (type ${typeof data.inProgress}), lastHeartbeat present? ${!!data.lastHeartbeat}`);
       const lastSeenMs = (data.lastHeartbeat && typeof data.lastHeartbeat.seconds === 'number')
         ? data.lastHeartbeat.seconds * 1000
         : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
