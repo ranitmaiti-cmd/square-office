@@ -2276,7 +2276,7 @@ loadData().then(async () => {
         // reloading. Guarded against compound intervals the same way.
         if (!window._staleHeartbeatInterval) {
           window._staleHeartbeatInterval = setInterval(() => {
-            if (currentUser) finalizeStaleHeartbeatSessions();
+            if (currentUser) finalizeStaleHeartbeatSessions('interval');
           }, 5 * 60 * 1000);
         }
 
@@ -2285,7 +2285,7 @@ loadData().then(async () => {
 
         // V14.3.10: finalize this user's own stale-heartbeat sessions (same-day
         // and previous-day both)
-        await finalizeStaleHeartbeatSessions();
+        await finalizeStaleHeartbeatSessions('login');
 
         // V14.2.10: Start real-time leave requests listener
         startLeaveRequestsListener();
@@ -2356,7 +2356,7 @@ async function doLogin(){
     // went stale mid-login without the user starting a new timer or reloading.
     if (!window._staleHeartbeatInterval) {
       window._staleHeartbeatInterval = setInterval(() => {
-        if (currentUser) finalizeStaleHeartbeatSessions();
+        if (currentUser) finalizeStaleHeartbeatSessions('interval');
       }, 5 * 60 * 1000);
     }
 
@@ -2365,7 +2365,7 @@ async function doLogin(){
 
     // V14.3.10: finalize this user's own stale-heartbeat sessions (same-day
     // and previous-day both)
-    await finalizeStaleHeartbeatSessions();
+    await finalizeStaleHeartbeatSessions('login');
 
     // V14.2.10: Start real-time leave requests listener
     startLeaveRequestsListener();
@@ -5755,7 +5755,7 @@ function startTimerWithPlan(plan) {
   // new timer; currentSessionLogId is already set to the NEW session's id
   // above, so the exclusion inside finalizeStaleHeartbeatSessions() protects
   // it automatically.
-  finalizeStaleHeartbeatSessions();
+  finalizeStaleHeartbeatSessions('new-session');
 }
 
 // V14.2.24: openNewTaskPicker — replaces direct timerStartBtn logic
@@ -6046,30 +6046,51 @@ async function cleanupStaleTimers() {
 // actively tracking. A session with a heartbeat inside the threshold is left
 // completely untouched, whether it's this tab's or (in principle) another
 // device's for the same user.
-const STALE_HEARTBEAT_MS = 5 * 60 * 1000; // 5 minutes
+const STALE_HEARTBEAT_MS = 10 * 60 * 1000; // 10 minutes -- matches the manually-verified threshold
 
-async function finalizeStaleHeartbeatSessions() {
-  if (!currentUser) return;
+// V14.3.11: debug logging + more robust timestamp extraction. Read the raw
+// .seconds numeric property directly (present on every Firestore Timestamp
+// regardless of SDK read path/caching) instead of gating on the .toMillis
+// method existing -- a manual console script using lastHeartbeat.seconds*1000
+// correctly found and fixed sessions this function was silently missing in
+// production, so this now matches that exact, verified-working logic.
+async function finalizeStaleHeartbeatSessions(trigger) {
+  console.log(`[stale-heartbeat] called (trigger=${trigger||'unknown'}, currentUser=${currentUser?.id||'none'}, currentSessionLogId=${currentSessionLogId||'none'})`);
+  if (!currentUser) { console.log('[stale-heartbeat] no currentUser -- skipping'); return; }
   try {
     const now = Date.now();
     const snap = await db.collection('timeLogs')
       .where('userId', '==', currentUser.id)
       .where('inProgress', '==', true)
       .get();
+    console.log(`[stale-heartbeat] query returned ${snap.size} inProgress:true doc(s) for userId=${currentUser.id}`);
     if (snap.empty) return;
 
     let recoveredCount = 0;
     for (const doc of snap.docs) {
-      if (doc.id === currentSessionLogId) continue; // this tab's own live session -- never touch
+      if (doc.id === currentSessionLogId) {
+        console.log(`[stale-heartbeat] ${doc.id}: skipping -- this tab's own live session`);
+        continue;
+      }
 
       const data = doc.data();
-      // Prefer the server-timestamped heartbeat; fall back to whatever client
-      // timestamp the last successful write left behind. If neither exists,
-      // skip rather than guess an end time.
-      const lastSeenMs = data.lastHeartbeat?.toMillis ? data.lastHeartbeat.toMillis()
+      // Read the raw numeric .seconds off the Timestamp directly -- this is
+      // what the manual script that worked used. Falls back to the client
+      // ts/updatedAt only for docs written before lastHeartbeat existed.
+      const lastSeenMs = (data.lastHeartbeat && typeof data.lastHeartbeat.seconds === 'number')
+        ? data.lastHeartbeat.seconds * 1000
         : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
-      if (!lastSeenMs) continue;
-      if (now - lastSeenMs < STALE_HEARTBEAT_MS) continue; // fresh -- leave it alone
+
+      if (!lastSeenMs) {
+        console.log(`[stale-heartbeat] ${doc.id}: no lastHeartbeat/ts/updatedAt at all -- skipping (can't determine staleness)`);
+        continue;
+      }
+      const ageMs = now - lastSeenMs;
+      if (ageMs < STALE_HEARTBEAT_MS) {
+        console.log(`[stale-heartbeat] ${doc.id}: fresh (${Math.round(ageMs/1000)}s old) -- leaving alone`);
+        continue;
+      }
+      console.log(`[stale-heartbeat] ${doc.id}: STALE (${Math.round(ageMs/60000)}m old) -- finalizing`);
 
       const startMs = (data.date && data.startTime)
         ? new Date(`${data.date}T${data.startTime}:00`).getTime()
@@ -6082,7 +6103,7 @@ async function finalizeStaleHeartbeatSessions() {
         recovered: true,
         durationMins,
         endTime,
-        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${Math.round((now-lastSeenMs)/60000)}m)`,
+        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${Math.round(ageMs/60000)}m)`,
         recoveredAt: new Date().toISOString()
       });
 
@@ -6097,6 +6118,7 @@ async function finalizeStaleHeartbeatSessions() {
 
       recoveredCount++;
     }
+    console.log(`[stale-heartbeat] done -- finalized ${recoveredCount} session(s)`);
     if (recoveredCount > 0) {
       console.log(`✅ Finalized ${recoveredCount} stale-heartbeat session(s)`);
       showNotificationToast('🔧 Sessions Recovered', `${recoveredCount} abandoned session(s) were closed out automatically.`, 'info');
