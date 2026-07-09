@@ -5690,8 +5690,45 @@ function switchTaskTo(newPlan) {
 // "fresh segment" -- that broke the widget's displayed elapsed and the
 // Stop-button's minimum-duration check, since both read timerStartedAt
 // directly and had no way to know a checkpoint had silently rewound it.)
-function finalizeCurrentSession(reason) {
+//
+// V14.3.14: this used to blindly checkpoint-and-continue regardless of how
+// long the tab had actually been away -- it only ever measured elapsed from
+// timerStartedAt (in-memory, never lies about total session length) but had
+// no idea whether HEARTBEATS had actually been landing during that time.
+// A tab backgrounded long enough for setInterval to be throttled into
+// silence would come back, fire this on visibilitychange, and "successfully"
+// resume -- reviving a session the stale-heartbeat check was trying to close
+// out. The resume always won that race because it never checked staleness at
+// all. Now it fetches the doc's own ground-truth lastHeartbeat first: if
+// it's beyond STALE_HEARTBEAT_MS, this was abandoned, not just briefly
+// backgrounded -- finalize it as recovered and stop tracking locally instead
+// of reopening a checkpoint.
+async function finalizeCurrentSession(reason) {
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
+
+  try {
+    const liveDoc = await db.collection('timeLogs').doc(currentSessionLogId).get();
+    const lastSeenMs = extractLastSeenMs(liveDoc.data());
+    if (lastSeenMs && (Date.now() - lastSeenMs) >= STALE_HEARTBEAT_MS) {
+      const ageMin = Math.round((Date.now() - lastSeenMs) / 60000);
+      console.log(`[finalize-current-session] ${currentSessionLogId}: heartbeat stale for ${ageMin}m -- treating as abandoned, NOT resuming (reason=${reason})`);
+      const data = liveDoc.data();
+      const startMs = (data.date && data.startTime) ? new Date(`${data.date}T${data.startTime}:00`).getTime() : lastSeenMs;
+      await db.collection('timeLogs').doc(currentSessionLogId).update({
+        inProgress: false,
+        recovered: true,
+        durationMins: Math.max(1, Math.round((lastSeenMs - startMs) / 60000)),
+        endTime: new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${ageMin}m)`,
+        recoveredAt: new Date().toISOString()
+      });
+      await resetTimer(); // this is not a live session -- stop tracking locally, show pre-start UI
+      return;
+    }
+  } catch (e) {
+    console.error('[finalize-current-session] staleness check failed, proceeding with checkpoint:', e);
+  }
+
   const now         = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
   if (sessionSecs < 30) return; // too short to be worth a checkpoint write
@@ -6053,6 +6090,18 @@ async function cleanupStaleTimers() {
 // device's for the same user.
 const STALE_HEARTBEAT_MS = 10 * 60 * 1000; // 10 minutes -- matches the manually-verified threshold
 
+// V14.3.14: shared ground-truth staleness extraction, used by every finalize/
+// resume path so they all agree on what "stale" means. Reads the raw numeric
+// .seconds off the Timestamp directly (matches the manually-verified logic),
+// falling back to ts/updatedAt only for docs written before lastHeartbeat
+// existed. Returns null if there's no usable timestamp at all.
+function extractLastSeenMs(data) {
+  if (!data) return null;
+  return (data.lastHeartbeat && typeof data.lastHeartbeat.seconds === 'number')
+    ? data.lastHeartbeat.seconds * 1000
+    : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
+}
+
 // V14.3.11: debug logging + more robust timestamp extraction. Read the raw
 // .seconds numeric property directly (present on every Firestore Timestamp
 // regardless of SDK read path/caching) instead of gating on the .toMillis
@@ -6096,12 +6145,7 @@ async function finalizeStaleHeartbeatSessions(trigger) {
       }
 
       const data = doc.data();
-      // Read the raw numeric .seconds off the Timestamp directly -- this is
-      // what the manual script that worked used. Falls back to the client
-      // ts/updatedAt only for docs written before lastHeartbeat existed.
-      const lastSeenMs = (data.lastHeartbeat && typeof data.lastHeartbeat.seconds === 'number')
-        ? data.lastHeartbeat.seconds * 1000
-        : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
+      const lastSeenMs = extractLastSeenMs(data);
 
       if (!lastSeenMs) {
         console.log(`[stale-heartbeat] ${doc.id}: no lastHeartbeat/ts/updatedAt at all -- skipping (can't determine staleness)`);
@@ -6183,9 +6227,7 @@ async function finalizeStaleHeartbeatSessionsAllUsers(trigger) {
 
       const data = doc.data();
       console.log(`[stale-heartbeat-admin] doc ${doc.id} -- userId=${JSON.stringify(data.userId)} (type ${typeof data.userId}), inProgress=${JSON.stringify(data.inProgress)} (type ${typeof data.inProgress}), lastHeartbeat present? ${!!data.lastHeartbeat}`);
-      const lastSeenMs = (data.lastHeartbeat && typeof data.lastHeartbeat.seconds === 'number')
-        ? data.lastHeartbeat.seconds * 1000
-        : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
+      const lastSeenMs = extractLastSeenMs(data);
 
       if (!lastSeenMs) {
         console.log(`[stale-heartbeat-admin] ${doc.id}: no lastHeartbeat/ts/updatedAt -- skipping`);
@@ -6293,7 +6335,39 @@ async function restoreTimerState() {
       return; // Don't restore — wait for user decision
     }
 
-    // Timer is recent (< 8h) — restore normally
+    // V14.3.14: ground-truth staleness check before resuming, independent of
+    // whatever ran earlier in the login sequence. finalizeStaleHeartbeatSessions
+    // ('login') already runs before this and should have cleared timerState
+    // for a stale session -- this is a second, direct-by-id check (bypassing
+    // that function's compound query entirely) so restoreTimerState() never
+    // resumes a stale session regardless of call ordering or query bugs
+    // elsewhere.
+    if (state.sessionLogId) {
+      try {
+        const liveDoc = await db.collection('timeLogs').doc(state.sessionLogId).get();
+        const lastSeenMs = extractLastSeenMs(liveDoc.data());
+        if (lastSeenMs && (Date.now() - lastSeenMs) >= STALE_HEARTBEAT_MS) {
+          const ageMin = Math.round((Date.now() - lastSeenMs) / 60000);
+          console.log(`[restore-timer-state] ${state.sessionLogId}: heartbeat stale for ${ageMin}m -- finalizing instead of resuming`);
+          const data = liveDoc.data();
+          const startMs = (data.date && data.startTime) ? new Date(`${data.date}T${data.startTime}:00`).getTime() : lastSeenMs;
+          await db.collection('timeLogs').doc(state.sessionLogId).update({
+            inProgress: false,
+            recovered: true,
+            durationMins: Math.max(1, Math.round((lastSeenMs - startMs) / 60000)),
+            endTime: new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }),
+            desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${ageMin}m)`,
+            recoveredAt: new Date().toISOString()
+          });
+          localStorage.removeItem('timerState');
+          return; // don't resume -- leave the UI at pre-start
+        }
+      } catch (e) {
+        console.error('[restore-timer-state] staleness check failed, proceeding with restore:', e);
+      }
+    }
+
+    // Timer is recent (< 8h) and not stale — restore normally
     // V14.2.23 FIX: Carry forward full elapsed time on page restore.
     // Old V14.2.22 code set timerStartedAt = NOW, discarding all pre-reload time.
     // Fix: compute elapsed before reload, then set timerStartedAt = NOW - elapsed
