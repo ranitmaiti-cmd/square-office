@@ -1393,6 +1393,88 @@ let timerInterval=null, timerStartedAt=null, timerPausedMs=0, timerRunning=false
 let currentSessionLogId = null;
 let sessionHeartbeatInterval = null;
 
+// ═══════════════════════════════════════════════════════
+// V14.3.17: SILENT TIMER DEATH WATCHDOG
+// July 8 incident: three people lost 2.5-6 hours each because their timer's
+// heartbeat silently stopped landing (tab throttled while unfocused-but-
+// visible, laptop sleep with no visibility change, or a write failing while
+// navigator.onLine still reports true) while they kept working. The widget's
+// displayed elapsed time is pure local math (Date.now() - timerStartedAt) --
+// it has NEVER been connected to whether writes are actually succeeding, so
+// it looked completely normal the whole time. This tracks the last CONFIRMED
+// successful write independently of the display, and surfaces a hard,
+// persistent alert the moment that gap exceeds HEARTBEAT_ALERT_MS -- well
+// before the server-side stale-heartbeat cleanup (5-10 min) would silently
+// finalize the session on its own.
+// ═══════════════════════════════════════════════════════
+let lastHeartbeatSuccessAt = null;   // set only when a write genuinely resolves
+let timerHealthState = 'healthy';    // 'healthy' | 'stalled'
+let restartInFlight = false;         // idempotency guard for the Restart button
+const HEARTBEAT_ALERT_MS = 2 * 60 * 1000; // 2 minutes -- shorter than the 5-10min server stale threshold
+
+// Evaluated live against CURRENT freshness, never a sticky "was it ever bad"
+// flag -- a session that was throttled for a few minutes and comes back on
+// its own transitions straight to the soft "reconnected" toast, not the hard
+// banner, since no time was actually lost (timerStartedAt never moved).
+function checkTimerHealth() {
+  if (!timerRunning || !lastHeartbeatSuccessAt) return;
+  const gapMs = Date.now() - lastHeartbeatSuccessAt;
+  if (gapMs < HEARTBEAT_ALERT_MS) {
+    if (timerHealthState === 'stalled') {
+      hideTimerDeathBanner();
+      showNotificationToast('✅ Timer reconnected', 'Your time is safe — tracking resumed.', 'info');
+      timerHealthState = 'healthy';
+    }
+  } else {
+    if (timerHealthState !== 'stalled') {
+      showTimerDeathBanner();
+      timerHealthState = 'stalled';
+    }
+  }
+}
+
+function showTimerDeathBanner() {
+  let banner = document.getElementById('timerDeathBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'timerDeathBanner';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#C0554A;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;font-size:14px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
+    banner.innerHTML = `<span>⚠️ Your timer has stopped and may not be recording. Please restart it.</span>` +
+      `<button id="timerDeathRestartBtn" style="background:#fff;color:#C0554A;border:none;border-radius:6px;padding:6px 16px;font-weight:700;cursor:pointer;font-size:13px;">Restart Timer</button>`;
+    document.body.appendChild(banner);
+    document.getElementById('timerDeathRestartBtn').addEventListener('click', restartStalledTimer);
+  }
+  banner.style.display = 'flex';
+  const btn = document.getElementById('timerDeathRestartBtn');
+  if (btn) btn.disabled = false;
+}
+
+function hideTimerDeathBanner() {
+  const banner = document.getElementById('timerDeathBanner');
+  if (banner) banner.style.display = 'none';
+}
+
+// Idempotent: restartInFlight is checked and set synchronously before any
+// await, and the button is disabled in the same tick, so a panic-double-click
+// physically cannot queue a second restart.
+async function restartStalledTimer() {
+  if (restartInFlight) return;
+  restartInFlight = true;
+  const btn = document.getElementById('timerDeathRestartBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const plan = timerLinkedPlan;
+    await finalizeCurrentSession('watchdog restart'); // checkpoint whatever's real first
+    hideTimerDeathBanner();
+    timerHealthState = 'healthy';
+    if (plan) startTimerWithPlan(plan); // fresh session -- seeds lastHeartbeatSuccessAt itself
+  } catch (e) {
+    console.error('Watchdog restart failed:', e);
+  } finally {
+    restartInFlight = false;
+  }
+}
+
 function upsertTimeLog(log) {
   const i = timeLogs.findIndex(l => l.id === log.id);
   if (i >= 0) timeLogs[i] = log; else timeLogs.push(log);
@@ -1430,6 +1512,13 @@ function heartbeatSession() {
   // tick 60s later, since the doc definitely exists by then.
   db.collection('timeLogs').doc(currentSessionLogId).update({
     lastHeartbeat: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(() => {
+    // V14.3.17: this is the ONLY place lastHeartbeatSuccessAt moves forward --
+    // a confirmed write, not just an interval tick firing. checkTimerHealth()
+    // right after so a recovery (stalled -> healthy) is reflected the instant
+    // a write actually lands, not up to a second later on the next UI tick.
+    lastHeartbeatSuccessAt = Date.now();
+    checkTimerHealth();
   }).catch(e => console.warn('heartbeat ping skipped (will retry next tick):', e.message));
 }
 // V14.2.2: FIX #6 - Inactivity auto-pause
@@ -1834,6 +1923,7 @@ function startInactivityMonitor() {
       // resume, in case the interruption (sleep/background throttling) meant
       // the heartbeat interval missed ticks -- reattaches under the same id.
       try { finalizeCurrentSession('tab resumed'); } catch(e) { console.error('resume checkpoint failed', e); }
+      checkTimerHealth(); // V14.3.17: catch a stale/recovered state the instant the user looks back
     }
   });
   // V14.3.3: best-effort flush if the tab is closed/refreshed mid-session
@@ -5710,6 +5800,14 @@ function startTimerWithPlan(plan) {
   timerPausedMs   = 0;
   timerRunning    = true;
   window.lastSessionStartedAt = Date.now();
+  // V14.3.17: seed the watchdog synchronously at start, not just from the
+  // heartbeat's own success callback -- otherwise a fresh session has null
+  // freshness for its first ~60s and checkTimerHealth() skips it entirely
+  // until the first heartbeat resolves. Also clears any stale banner/state
+  // left over from a prior session so this one starts clean.
+  lastHeartbeatSuccessAt = Date.now();
+  timerHealthState = 'healthy';
+  hideTimerDeathBanner();
   // V14.3.7: generate the session id before persisting so a reload can resume
   // the SAME heartbeat doc (see restoreTimerState) instead of losing track of
   // it and orphaning it at whatever durationMins it had at last heartbeat.
@@ -5739,6 +5837,7 @@ function startTimerWithPlan(plan) {
     // V14.2.25: Live tab title — visible from any other tab or software
     const proj = timerLinkedPlan?.project || 'Timer';
     document.title = `⏱ ${hms} · ${proj}`;
+    checkTimerHealth(); // V14.3.17: unconditional, runs even while tab is hidden
   }, 1000);
   updateTimerVisualState(); // V14.2.25
   renderWidgetTaskList(plan.id);
@@ -5794,6 +5893,11 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
   if (timerInterval) clearInterval(timerInterval);
   timerStartedAt=Date.now(); timerPausedMs=0; timerRunning=true;
   window.lastSessionStartedAt=Date.now();
+  // V14.3.17: seed the watchdog synchronously -- same reasoning as
+  // startTimerWithPlan, this is also a moment tracking freshly resumes.
+  lastHeartbeatSuccessAt = Date.now();
+  timerHealthState = 'healthy';
+  hideTimerDeathBanner();
   localStorage.setItem('timerState',JSON.stringify({startedAt:timerStartedAt,lastSessionStartedAt:window.lastSessionStartedAt,pausedMs:0,running:true,linkedPlan:timerLinkedPlan,sessionLogId:currentSessionLogId}));
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPaused').style.display='none';
@@ -5808,6 +5912,7 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
     document.getElementById('twProgressFill').style.width=Math.min((secs/(8*3600))*100,100)+'%';
     const proj = timerLinkedPlan?.project || 'Timer';
     document.title = `⏱ ${secsToHMS(secs)} · ${proj}`;
+    checkTimerHealth(); // V14.3.17
   },1000);
   updateTimerVisualState(); // V14.2.25
   renderWidgetTaskList(timerLinkedPlan.id);
@@ -6223,6 +6328,7 @@ async function restoreTimerState() {
       document.getElementById('timerDisplay').textContent = secsToHMS(secs);
       const proj = timerLinkedPlan?.project || 'Timer';
       document.title = `⏱ ${secsToHMS(secs)} · ${proj}`;
+      checkTimerHealth(); // V14.3.17
     }, 1000);
     updateTimerVisualState(); // V14.2.25
     console.log('✅ Timer restored from localStorage');
@@ -6429,6 +6535,12 @@ async function resetTimer() {
   currentSessionLogId = null;
   localStorage.removeItem('timerState');
   document.title = 'SQUARE - Office Management'; // V14.2.25: restore title on stop
+  // V14.3.17: clear watchdog state on every normal stop path (Complete button,
+  // EOD auto-complete, etc.) so a stale banner can never linger after the
+  // timer has genuinely been stopped -- there's nothing left to watch.
+  lastHeartbeatSuccessAt = null;
+  timerHealthState = 'healthy';
+  hideTimerDeathBanner();
 
   const display = document.getElementById('timerDisplay');
   if (display) { display.textContent = '00:00:00'; display.classList.remove('running'); }
@@ -6605,6 +6717,7 @@ window.addEventListener('online', () => {
   // V14.3.8: checkpoint-finalize this tab's own in-progress session on
   // reconnect, reattaching under the same id -- see finalizeCurrentSession().
   try { finalizeCurrentSession('reconnected'); } catch(e) { console.error('reconnect checkpoint failed', e); }
+  checkTimerHealth(); // V14.3.17: catch a stale/recovered state the instant connectivity returns
 });
 
 window.addEventListener('offline', () => {
