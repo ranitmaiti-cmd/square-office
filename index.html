@@ -2249,7 +2249,7 @@ async function saveDailyFirebaseBackup() {
 // query -- never loads the documents themselves) on admin login, and shows
 // a banner if it's grown abnormally large again.
 // ═══════════════════════════════════════════════════════════════
-const TIMELOGS_WARN_THRESHOLD = 5000;
+const TIMELOGS_WARN_THRESHOLD = 1000; // TEMP for preview testing -- revert to 5000 before merge
 
 async function checkTimeLogsCollectionSize() {
   if (!currentUser?.isAdmin) return;
