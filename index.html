@@ -2258,7 +2258,7 @@ async function saveDailyFirebaseBackup() {
 // ever needing an exact total -- that's all this guardrail needs to decide
 // whether to warn.
 // ═══════════════════════════════════════════════════════════════
-const TIMELOGS_WARN_THRESHOLD = 1000; // TEMP for preview testing -- revert to 5000 before merge
+const TIMELOGS_WARN_THRESHOLD = 5000;
 
 async function checkTimeLogsCollectionSize() {
   if (!currentUser?.isAdmin) return;
