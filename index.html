@@ -1475,6 +1475,54 @@ async function restartStalledTimer() {
   }
 }
 
+// ═══════════════════════════════════════════════════════
+// V14.3.18: RELIABLE TICK WORKER
+// The single biggest reason timers went silently dead: setInterval callbacks
+// on the main thread get throttled by the browser when a tab is backgrounded
+// (minimized to work in Revit/AutoCAD/etc) -- sometimes severely. Web Worker
+// timers are NOT subject to the same background-tab throttling, so this
+// worker does nothing but post a message every 60 seconds; ALL actual work
+// (the Firestore heartbeat write, the EOD 7:30/8:00 checks) stays exactly
+// where it already was, on the main thread, using the exact same functions.
+// The worker only supplies reliable TIMING -- it never touches Firestore or
+// the DOM directly. One worker, created once and left running for the tab's
+// lifetime; its tick handler is gated by runtime state (timerRunning, etc.)
+// rather than by starting/stopping the worker itself, so there's no
+// create/destroy lifecycle to get wrong across timer start/stop/switch.
+// Falls back to the original main-thread setIntervals if Workers aren't
+// available for any reason -- see startTimerWithPlan/restoreTimerState/
+// startEndOfDayMonitor, which each check reliableTickWorkerActive first.
+// ═══════════════════════════════════════════════════════
+let reliableTickWorker = null;
+let reliableTickWorkerActive = false;
+
+function initReliableTickWorker() {
+  if (reliableTickWorker || reliableTickWorkerActive) return; // already created/attempted
+  try {
+    if (typeof Worker === 'undefined') throw new Error('Worker not supported');
+    const workerSrc = 'setInterval(function(){ postMessage("tick"); }, 60000);';
+    const blob = new Blob([workerSrc], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob));
+    worker.onmessage = () => {
+      // Shared 60s tick for both the heartbeat and the EOD check -- each is
+      // independently guarded (timerRunning / currentUser) so this is a
+      // harmless no-op when there's nothing to do.
+      if (timerRunning) heartbeatSession();
+      runEndOfDayCheck();
+    };
+    worker.onerror = (e) => {
+      console.error('Reliable tick worker error, falling back to main-thread intervals:', e.message);
+      reliableTickWorkerActive = false;
+    };
+    reliableTickWorker = worker;
+    reliableTickWorkerActive = true;
+    console.log('✅ Reliable tick worker active -- heartbeat/EOD checks now survive background-tab throttling');
+  } catch (e) {
+    console.warn('Reliable tick worker unavailable, using main-thread intervals instead:', e.message);
+    reliableTickWorkerActive = false;
+  }
+}
+
 function upsertTimeLog(log) {
   const i = timeLogs.findIndex(l => l.id === log.id);
   if (i >= 0) timeLogs[i] = log; else timeLogs.push(log);
@@ -4755,13 +4803,15 @@ function buildTrPerson(logs,total){
   // Running (inProgress:true) entries are counted in mins below same as any other
   // entry — the heartbeat already saved that time. hasLive just flags the row so
   // it can be tagged "LIVE" in the UI; it must never be used to skip the entry.
-  logs.forEach(l=>{ if(!byU[l.userId])byU[l.userId]={mins:0,n:0,projects:{},hasLive:false}; byU[l.userId].mins+=l.durationMins; byU[l.userId].n++; if(l.inProgress)byU[l.userId].hasLive=true; if(!byU[l.userId].projects[l.projectName||l.activity||'-'])byU[l.userId].projects[l.projectName||l.activity||'-']=0; byU[l.userId].projects[l.projectName||l.activity||'-']+=l.durationMins; });
+  logs.forEach(l=>{ if(!byU[l.userId])byU[l.userId]={mins:0,n:0,projects:{},hasLive:false,hasCapped:false}; byU[l.userId].mins+=l.durationMins; byU[l.userId].n++; if(l.inProgress)byU[l.userId].hasLive=true; if(l.autoCapped)byU[l.userId].hasCapped=true; if(!byU[l.userId].projects[l.projectName||l.activity||'-'])byU[l.userId].projects[l.projectName||l.activity||'-']=0; byU[l.userId].projects[l.projectName||l.activity||'-']+=l.durationMins; });
   const sorted=Object.entries(byU).sort((a,b)=>b[1].mins-a[1].mins); const maxM=sorted[0]?.[1].mins||1;
   let html=`<table class="rpt-table"><thead><tr><th>Member</th><th>Breakdown</th><th style="text-align:right">Time</th><th style="text-align:right">Share</th></tr></thead><tbody>`;
   sorted.forEach(([uid,d])=>{ const u=users.find(u=>u.id===uid); const pct=((d.mins/total)*100).toFixed(1); const bar=((d.mins/maxM)*100).toFixed(1);
     const liveTag=d.hasLive?' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">● LIVE</span>':'';
+    // V14.3.18: flag any person with an auto-capped entry in the current view -- needs review.
+    const cappedTag=d.hasCapped?' <span style="background:#FBEAEA;color:#8B2E24;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">⚠ CAPPED</span>':'';
     const rows=Object.entries(d.projects).sort((a,b)=>b[1]-a[1]).map(([p,m])=>`<tr class="sub"><td colspan="2">📁 ${p}</td><td style="text-align:right;color:#A96E35;font-weight:600;">${minsToHM(m)}</td><td style="text-align:right;color:#8A7E74;">${((m/total)*100).toFixed(1)}%</td></tr>`).join('');
-    html+=`<tr><td><b>${u?.name||'?'}</b>${liveTag}<br><span style="font-size:10px;color:#B0A89E;">${d.n} entries</span></td><td><div class="bar-wrap"><div class="bar-fill" style="width:${bar}%"></div></div></td><td style="text-align:right;font-weight:800;font-size:14px;">${minsToHM(d.mins)}</td><td style="text-align:right;font-weight:700;color:#6B5A4E;">${pct}%</td></tr>${rows}<tr><td colspan="4" style="border:none;height:6px;"></td></tr>`;
+    html+=`<tr><td><b>${u?.name||'?'}</b>${liveTag}${cappedTag}<br><span style="font-size:10px;color:#B0A89E;">${d.n} entries</span></td><td><div class="bar-wrap"><div class="bar-fill" style="width:${bar}%"></div></div></td><td style="text-align:right;font-weight:800;font-size:14px;">${minsToHM(d.mins)}</td><td style="text-align:right;font-weight:700;color:#6B5A4E;">${pct}%</td></tr>${rows}<tr><td colspan="4" style="border:none;height:6px;"></td></tr>`;
   });
   document.getElementById('trPersonTbl').innerHTML=html+'</tbody></table>';
 }
@@ -4788,8 +4838,10 @@ function buildTrDetail(logs){
   sorted.forEach(l=>{ const u=users.find(u=>u.id===l.userId);
     const clockTime = l.startTime && l.endTime ? `${l.startTime} → ${l.endTime}` : '<span style="color:#D0C4B8;font-style:italic;">—</span>';
     const liveTag = l.inProgress ? ' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">● LIVE</span>' : '';
-    const rowStyle = l.inProgress ? ' style="font-style:italic;background:#FAFBF7;"' : '';
-    html+=`<tr${rowStyle}><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#A96E35;font-weight:600;">${l.productive?'📁 '+l.projectName:'🔸 '+l.activity}${liveTag}</td><td style="font-size:11px;">${l.phase||'-'}</td><td style="font-size:11px;">${l.typology||'-'}</td><td style="font-size:11px;white-space:nowrap;">${clockTime}</td><td>${l.desc}</td><td style="text-align:right;font-weight:700;color:#A96E35;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
+    // V14.3.18: distinct visual flag for auto-capped entries -- needs review, not a normal completed entry.
+    const cappedTag = l.autoCapped ? ' <span style="background:#FBEAEA;color:#8B2E24;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">⚠ CAPPED — VERIFY</span>' : '';
+    const rowStyle = l.autoCapped ? ' style="background:#FBEAEA;"' : (l.inProgress ? ' style="font-style:italic;background:#FAFBF7;"' : '');
+    html+=`<tr${rowStyle}><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#A96E35;font-weight:600;">${l.productive?'📁 '+l.projectName:'🔸 '+l.activity}${liveTag}${cappedTag}</td><td style="font-size:11px;">${l.phase||'-'}</td><td style="font-size:11px;">${l.typology||'-'}</td><td style="font-size:11px;white-space:nowrap;">${clockTime}</td><td>${l.desc}</td><td style="text-align:right;font-weight:700;color:#A96E35;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
   });
   // Grand total includes in-progress (running) entries same as finalized ones —
   // the heartbeat already persisted that time, so dropping it here would make it
@@ -5802,21 +5854,47 @@ function renderWidgetTaskList(activePlanId) {
   unplBtn.style.display = 'flex';
 }
 
+// V14.3.18: SESSION DURATION CAP
+// Duration has always been computed as direct subtraction from timerStartedAt
+// (never accumulated from heartbeats) -- that's correct for a live session
+// whenever it gets a chance to close out. But nothing bounded that math: a
+// tab left open overnight and brought back to focus the next morning would
+// compute 15-20+ hours and write it without question. This is the one number
+// that decides when we stop trusting raw elapsed time: below it, write the
+// real computed duration same as always; at or beyond it, cap the write and
+// flag it (autoCapped:true + a desc note) instead of either silently writing
+// an inflated number or silently truncating it invisibly. 12h clears any
+// real workday with margin (real days here run up to ~8h30m) while still
+// catching a timer left running for a genuinely abnormal stretch.
+const MAX_SESSION_HOURS = 12;
+
+function capSessionDuration(sessionSecs) {
+  const maxSecs = MAX_SESSION_HOURS * 3600;
+  if (sessionSecs <= maxSecs) {
+    return { durationMins: Math.max(1, Math.floor(sessionSecs / 60)), capped: false };
+  }
+  return { durationMins: MAX_SESSION_HOURS * 60, capped: true };
+}
+
 // V14.2.24: Switch task — auto-saves current, starts new immediately
 function switchTaskTo(newPlan) {
   if (!timerRunning || !timerStartedAt) { startTimerWithPlan(newPlan); return; }
   const now         = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
-  const mins        = Math.max(1, Math.floor(sessionSecs / 60));
+  const { durationMins: mins, capped } = capSessionDuration(sessionSecs);
   const today       = fmt(new Date());
   const clockStart  = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const clockEnd    = new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   if (sessionSecs >= 30 && timerLinkedPlan && currentSessionLogId) {
-    const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (switched to ${newPlan.project})`;
+    const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (switched to ${newPlan.project})` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
     // V14.3.3: finalise the heartbeat log under the SAME id — no duplicate, no loss
-    upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:false,ts:Date.now()});
+    upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:false,ts:Date.now(),...(capped?{autoCapped:true}:{})});
     autoSave(); renderTimeLog(); renderProjectsBudget();
-    showNotificationToast(`✓ ${minsToHM(mins)} saved`, `${timerLinkedPlan.project} → ${newPlan.project}`, 'info');
+    if (capped) {
+      showNotificationToast('⚠️ Session auto-capped', `${timerLinkedPlan.project} hit the ${MAX_SESSION_HOURS}h cap — please verify this entry in Time Report.`, 'warning');
+    } else {
+      showNotificationToast(`✓ ${minsToHM(mins)} saved`, `${timerLinkedPlan.project} → ${newPlan.project}`, 'info');
+    }
   }
   clearInterval(timerInterval);
   if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
@@ -5845,13 +5923,25 @@ function finalizeCurrentSession(reason) {
   const now         = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
   if (sessionSecs < 30) return; // too short to be worth a checkpoint write
-  const mins        = Math.max(1, Math.floor(sessionSecs / 60));
+  const { durationMins: mins, capped } = capSessionDuration(sessionSecs);
   const today       = fmt(new Date(timerStartedAt));
   const clockStart  = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const clockEnd    = new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (checkpoint: ${reason})`;
+  const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (checkpoint: ${reason})` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
 
-  upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:false,ts:Date.now()});
+  // V14.3.18: a checkpoint that discovers the session is ALREADY over the cap
+  // (e.g. left running overnight, tab regains focus the next morning) treats
+  // it as a real stop, not a "still running" checkpoint -- continuing to
+  // track an already-12h+ session just re-triggers the cap on every future
+  // tick. Below the cap, behavior is unchanged: write and keep running.
+  upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:false,ts:Date.now(),...(capped?{autoCapped:true}:{})});
+
+  if (capped) {
+    console.log(`⚠️ Session auto-capped at ${MAX_SESSION_HOURS}h (${reason}) -- stopping, was likely left running`);
+    showNotificationToast('⚠️ Session auto-capped', `${timerLinkedPlan.project} hit the ${MAX_SESSION_HOURS}h cap and has been stopped — please verify this entry in Time Report.`, 'warning');
+    resetTimer(); // fire-and-forget -- stop local tracking, this is not a live session anymore
+    return;
+  }
 
   console.log(`✅ Session checkpoint written (${reason}): ${minsToHM(mins)} for ${timerLinkedPlan.project} -- still running, timerStartedAt unchanged`);
 }
@@ -5909,8 +5999,16 @@ function startTimerWithPlan(plan) {
   saveActiveTimerToFirebase();
   // V14.3.3: new durable session — start 60s heartbeat + immediate write.
   // (currentSessionLogId is already set above, before the localStorage write.)
+  // V14.3.18: prefer the reliable tick worker (survives background-tab
+  // throttling); its onmessage handler already calls heartbeatSession()
+  // whenever timerRunning is true, so no per-session interval is needed
+  // when it's active. Only fall back to the main-thread interval if the
+  // worker isn't available.
   if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
-  sessionHeartbeatInterval = setInterval(heartbeatSession, 60000);
+  initReliableTickWorker();
+  if (!reliableTickWorkerActive) {
+    sessionHeartbeatInterval = setInterval(heartbeatSession, 60000);
+  }
   heartbeatSession();
   // V14.3.10: starting a fresh session is a clear signal any OTHER inProgress
   // session this user still has open (from a tab/device that never cleanly
@@ -5991,7 +6089,7 @@ document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>
   // V14.2.23: Same as pause — timerStartedAt always reflects full session start
   const now = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
-  const mins = Math.max(1, Math.floor(sessionSecs / 60));
+  const { durationMins: mins, capped } = capSessionDuration(sessionSecs);
   const today = fmt(new Date());
   const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
   const clockEnd = new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
@@ -6020,14 +6118,18 @@ document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>
   }
   
   // Save incremental log AND mark task done
-  const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'}`;
+  const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'}` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
   // V14.3.3: finalise the heartbeat log under the same id (fallback to new id)
-  upsertTimeLog({id:currentSessionLogId||genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,inProgress:false,ts:Date.now()});
+  upsertTimeLog({id:currentSessionLogId||genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,inProgress:false,ts:Date.now(),...(capped?{autoCapped:true}:{})});
   const plan=planEntries.find(p=>p.id===timerLinkedPlan.id);
   if(plan)plan.done=true;
-  
+
   autoSave(); await resetTimer(); renderTimeLog(); renderProjectsBudget(); renderDashboard();
-  alert(`✅ Task Completed!\n\nLogged: ${minsToHM(mins)}\n📁 ${timerLinkedPlan.project}\n\nRemoved from Weekly Planner.`);
+  if (capped) {
+    alert(`⚠️ Task Completed — but auto-capped at ${MAX_SESSION_HOURS}h!\n\n📁 ${timerLinkedPlan.project}\n\nThis session ran longer than ${MAX_SESSION_HOURS} hours, which is unusual — please verify this entry in Time Report.\n\nRemoved from Weekly Planner.`);
+  } else {
+    alert(`✅ Task Completed!\n\nLogged: ${minsToHM(mins)}\n📁 ${timerLinkedPlan.project}\n\nRemoved from Weekly Planner.`);
+  }
 });
 
 // V14.2.2: FIX #4 - Complete Button (from paused) - Fixed alert crash
@@ -6244,7 +6346,11 @@ async function finalizeStaleHeartbeatSessions() {
       const startMs = (data.date && data.startTime)
         ? new Date(`${data.date}T${data.startTime}:00`).getTime()
         : lastSeenMs;
-      const durationMins = Math.max(1, Math.round((lastSeenMs - startMs) / 60000));
+      // V14.3.18: same cap as every live finalize path. No human is present
+      // to ask here (this runs unattended, on login/interval/new-session),
+      // so at/beyond the cap we write the capped value + autoCapped:true
+      // instead of either an unbounded number or a silent truncation.
+      const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((lastSeenMs - startMs) / 1000)));
       const endTime = new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
       await db.collection('timeLogs').doc(doc.id).update({
@@ -6252,8 +6358,9 @@ async function finalizeStaleHeartbeatSessions() {
         recovered: true,
         durationMins,
         endTime,
-        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${Math.round((now-lastSeenMs)/60000)}m)`,
-        recoveredAt: new Date().toISOString()
+        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${Math.round((now-lastSeenMs)/60000)}m)` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : ''),
+        recoveredAt: new Date().toISOString(),
+        ...(capped?{autoCapped:true}:{})
       });
 
       // If localStorage still points restoreTimerState() at this now-closed
@@ -6329,8 +6436,12 @@ async function restoreTimerState() {
     const elapsed = Date.now() - state.startedAt;
     const hours = elapsed / (1000 * 60 * 60);
 
-    // Timer older than 8 hours = orphaned → Option C modal
-    if (hours >= 8) {
+    // V14.3.18: harmonized to MAX_SESSION_HOURS (was a separate hardcoded 8 --
+    // real workdays here run up to ~8h30m, so an 8h threshold could interrupt
+    // a legitimate long day with an unnecessary self-report prompt on a
+    // simple accidental reload. One number now governs every "stop trusting
+    // raw elapsed time" decision across the app.
+    if (hours >= MAX_SESSION_HOURS) {
       orphanTimerState = state;
       showOrphanRecoveryModal(state, Math.floor(hours));
       return; // Don't restore — wait for user decision
@@ -6357,8 +6468,12 @@ async function restoreTimerState() {
     // genId() only for sessions already in flight when this fix ships (their
     // saved state predates the sessionLogId field).
     currentSessionLogId = state.sessionLogId || genId();
+    // V14.3.18: prefer the reliable tick worker, same as startTimerWithPlan.
     if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
-    sessionHeartbeatInterval = setInterval(heartbeatSession, 60000);
+    initReliableTickWorker();
+    if (!reliableTickWorkerActive) {
+      sessionHeartbeatInterval = setInterval(heartbeatSession, 60000);
+    }
     heartbeatSession(); // immediate flush so the restored session is durable again
 
     // Update localStorage so next pause/reload reads correct value
@@ -6514,79 +6629,98 @@ document.getElementById('orphanDiscardBtn').addEventListener('click', async () =
 let endOfDayWarningShown = false;
 let endOfDayInterval = null;
 
+// V14.3.18: extracted from startEndOfDayMonitor's interval callback so both
+// the reliable tick worker and the main-thread fallback interval can drive
+// it identically -- the check logic itself is completely unchanged from
+// before this refactor.
+function runEndOfDayCheck() {
+  if (!currentUser || !timerRunning) return;
+  const now  = new Date();
+  const hour = now.getHours();
+  const min  = now.getMinutes();
+
+  // 7:30 PM warning — V14.2.27: extended from 6:30 PM
+  if (hour === 19 && min >= 30 && min < 35 && !endOfDayWarningShown) {
+    endOfDayWarningShown = true;
+    const projectName = timerLinkedPlan?.project || 'Unplanned';
+    const elapsed = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
+    document.getElementById('endOfDayTimerInfo').innerHTML =
+      `📁 <strong>${projectName}</strong><br>⏱ Running for: <strong>${elapsed}</strong>`;
+    document.getElementById('endOfDayCompleteBtn').onclick = () => {
+      closeModal('endOfDayModal');
+      document.getElementById('timerCompleteBtn')?.click();
+    };
+    openModal('endOfDayModal');
+  }
+
+  // 8:00 PM force auto-complete — V14.2.27: extended from 7PM
+  // Double-fire guard — timerStartedAt cleared immediately so a second
+  // tick in the same minute cannot re-enter this block.
+  if (hour === 20 && min === 0 && timerRunning && timerStartedAt) {
+    closeModal('endOfDayModal');
+    const autoNow = Date.now();
+    const autoSecs = Math.floor((autoNow - timerStartedAt) / 1000);
+    // V14.3.18: EOD normally caps by construction (endTime hardcoded to
+    // 20:00) -- but that only bounds the DISPLAYED end time, not the
+    // computed durationMins, which is still raw subtraction from
+    // timerStartedAt. If this check itself was delayed for a very long
+    // stretch (multi-day) and timerStartedAt is stale from a prior day,
+    // autoSecs could still be huge. Cap it the same as every other
+    // finalize path.
+    const { durationMins: mins, capped } = capSessionDuration(autoSecs);
+    const projectName = timerLinkedPlan?.project || 'Unplanned';
+    const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+    const clockEnd = '20:00';
+    const linkedPlanSnapshot = timerLinkedPlan;
+
+    timerStartedAt = null;
+    timerRunning = false;
+
+    if (linkedPlanSnapshot) {
+      // V14.3.3: finalise the heartbeat log under the same id (no duplicate)
+      upsertTimeLog({
+        id: currentSessionLogId || genId(), userId: currentUser.id, date: fmt(new Date()),
+        projectId: linkedPlanSnapshot.projectId, projectName,
+        phase: linkedPlanSnapshot.phase, typology: linkedPlanSnapshot.typology,
+        activity: '', durationMins: mins,
+        startTime: clockStart, endTime: clockEnd,
+        desc: `${linkedPlanSnapshot.typology || linkedPlanSnapshot.phase || 'Work on project'} (Auto-completed at end of day)` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : ''),
+        productive: true, inProgress: false, ts: Date.now(),
+        ...(capped?{autoCapped:true}:{})
+      });
+      const plan = planEntries.find(p => p.id === linkedPlanSnapshot?.id);
+      if (plan) plan.done = true;
+    }
+
+    resetTimer();
+    autoSave();
+    renderTimeLog(); renderProjectsBudget(); renderDashboard();
+    endOfDayWarningShown = true;
+    showNotificationToast(capped ? '⚠️ Timer Auto-Capped' : '⏹️ Timer Auto-Completed', `${minsToHM(mins)} logged for ${projectName} at 8:00 PM.${capped?' Please verify this entry.':''}`, 'warning');
+    console.log('⏹️ End-of-day auto-complete fired at 8:00 PM');
+
+    setTimeout(() => showEodSummary(), 1000);
+  }
+
+  // 8:05 PM — show EOD summary even if no timer was running
+  if (hour === 20 && min === 5 && !endOfDayWarningShown) {
+    endOfDayWarningShown = true;
+    showEodSummary();
+  }
+
+  // Reset flag at midnight for next day
+  if (hour === 0 && min === 0) endOfDayWarningShown = false;
+}
+
 function startEndOfDayMonitor() {
   if (endOfDayInterval) clearInterval(endOfDayInterval);
-  endOfDayInterval = setInterval(() => {
-    if (!currentUser || !timerRunning) return;
-    const now  = new Date();
-    const hour = now.getHours();
-    const min  = now.getMinutes();
-
-    // 7:30 PM warning — V14.2.27: extended from 6:30 PM
-    if (hour === 19 && min >= 30 && min < 35 && !endOfDayWarningShown) {
-      endOfDayWarningShown = true;
-      const projectName = timerLinkedPlan?.project || 'Unplanned';
-      const elapsed = secsToHMS(getElapsed(timerStartedAt, timerPausedMs));
-      document.getElementById('endOfDayTimerInfo').innerHTML =
-        `📁 <strong>${projectName}</strong><br>⏱ Running for: <strong>${elapsed}</strong>`;
-      document.getElementById('endOfDayCompleteBtn').onclick = () => {
-        closeModal('endOfDayModal');
-        document.getElementById('timerCompleteBtn')?.click();
-      };
-      openModal('endOfDayModal');
-    }
-
-    // 8:00 PM force auto-complete — V14.2.27: extended from 7PM
-    // Double-fire guard — timerStartedAt cleared immediately so a second
-    // tick in the same minute cannot re-enter this block.
-    if (hour === 20 && min === 0 && timerRunning && timerStartedAt) {
-      closeModal('endOfDayModal');
-      const autoNow = Date.now();
-      const autoSecs = Math.floor((autoNow - timerStartedAt) / 1000);
-      const mins = Math.max(1, Math.floor(autoSecs / 60));
-      const projectName = timerLinkedPlan?.project || 'Unplanned';
-      const clockStart = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-      const clockEnd = '20:00';
-      const linkedPlanSnapshot = timerLinkedPlan;
-
-      timerStartedAt = null;
-      timerRunning = false;
-
-      if (linkedPlanSnapshot) {
-        // V14.3.3: finalise the heartbeat log under the same id (no duplicate)
-        upsertTimeLog({
-          id: currentSessionLogId || genId(), userId: currentUser.id, date: fmt(new Date()),
-          projectId: linkedPlanSnapshot.projectId, projectName,
-          phase: linkedPlanSnapshot.phase, typology: linkedPlanSnapshot.typology,
-          activity: '', durationMins: mins,
-          startTime: clockStart, endTime: clockEnd,
-          desc: `${linkedPlanSnapshot.typology || linkedPlanSnapshot.phase || 'Work on project'} (Auto-completed at end of day)`,
-          productive: true, inProgress: false, ts: Date.now()
-        });
-        const plan = planEntries.find(p => p.id === linkedPlanSnapshot?.id);
-        if (plan) plan.done = true;
-      }
-
-      resetTimer();
-      autoSave();
-      renderTimeLog(); renderProjectsBudget(); renderDashboard();
-      endOfDayWarningShown = true;
-      showNotificationToast('⏹️ Timer Auto-Completed', `${minsToHM(mins)} logged for ${projectName} at 8:00 PM.`, 'warning');
-      console.log('⏹️ End-of-day auto-complete fired at 8:00 PM');
-
-      setTimeout(() => showEodSummary(), 1000);
-    }
-
-    // 8:05 PM — show EOD summary even if no timer was running
-    if (hour === 20 && min === 5 && !endOfDayWarningShown) {
-      endOfDayWarningShown = true;
-      showEodSummary();
-    }
-
-    // Reset flag at midnight for next day
-    if (hour === 0 && min === 0) endOfDayWarningShown = false;
-
-  }, 60000);
+  // V14.3.18: prefer the reliable tick worker (immune to background-tab
+  // throttling); only fall back to a main-thread interval if the worker
+  // isn't available. initReliableTickWorker() is idempotent -- safe to call
+  // here even if it was already created elsewhere (e.g. at login).
+  initReliableTickWorker();
+  if (reliableTickWorkerActive) return; // worker's onmessage already calls runEndOfDayCheck()
+  endOfDayInterval = setInterval(runEndOfDayCheck, 60000);
 }
 
 async function resetTimer() {
