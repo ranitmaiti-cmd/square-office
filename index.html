@@ -1176,6 +1176,12 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 // V14.2.9: Cache bypassed via {source:'server'} on all reads — see loadData()
 
+// V14.3.19: bump this alongside version.json on every meaningful deploy --
+// see checkForNewVersion(). Team leaves this tab open all day, so nothing
+// about a new deploy reaches an already-running tab unless something inside
+// it actively checks and acts.
+const APP_VERSION = '2026-07-15.1';
+
 let dataLoaded = false; // Prevent saves before load completes
 
 // ═══════════════════════════════════════════════════════
@@ -1495,6 +1501,7 @@ async function restartStalledTimer() {
 // ═══════════════════════════════════════════════════════
 let reliableTickWorker = null;
 let reliableTickWorkerActive = false;
+let workerTickCount = 0; // V14.3.19: gates the version check to ~every 5th tick (~5 min)
 
 function initReliableTickWorker() {
   if (reliableTickWorker || reliableTickWorkerActive) return; // already created/attempted
@@ -1509,6 +1516,12 @@ function initReliableTickWorker() {
       // harmless no-op when there's nothing to do.
       if (timerRunning) heartbeatSession();
       runEndOfDayCheck();
+      // V14.3.19: version check rides the same reliable tick (a plain
+      // main-thread interval would itself be throttled while backgrounded --
+      // exactly the condition "reaches everyone within minutes" needs to
+      // survive), but doesn't need 60s granularity -- only fire every 5th tick.
+      workerTickCount++;
+      if (workerTickCount % 5 === 0) checkForNewVersion();
     };
     worker.onerror = (e) => {
       console.error('Reliable tick worker error, falling back to main-thread intervals:', e.message);
@@ -1521,6 +1534,61 @@ function initReliableTickWorker() {
     console.warn('Reliable tick worker unavailable, using main-thread intervals instead:', e.message);
     reliableTickWorkerActive = false;
   }
+}
+
+// ═══════════════════════════════════════════════════════
+// V14.3.19: DEPLOY VERSION CHECK
+// Team leaves the SQUARE tab open all day, so a deploy doesn't reach an
+// already-running tab on its own -- nothing about a fresh index.html on the
+// server changes what's already loaded and executing in memory. This checks
+// a small version.json (bumped alongside APP_VERSION on every meaningful
+// deploy) and shows a persistent banner if they've drifted apart. Read-only:
+// never touches timerRunning/currentSessionLogId/heartbeat state, and never
+// reloads on its own -- only the person clicking "Reload Now" does that.
+// ═══════════════════════════════════════════════════════
+let versionCheckInterval = null;
+let newVersionBannerShown = false;
+
+async function checkForNewVersion() {
+  try {
+    const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return; // transient failure -- just retry next cycle
+    const data = await res.json();
+    if (data.version && data.version !== APP_VERSION) {
+      showNewVersionBanner();
+    }
+  } catch (e) {
+    console.warn('Version check failed (will retry next cycle):', e.message);
+  }
+}
+
+function showNewVersionBanner() {
+  if (newVersionBannerShown) return; // already showing, don't recreate/flicker it
+  newVersionBannerShown = true;
+  const banner = document.createElement('div');
+  banner.id = 'newVersionBanner';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#2E5C8A;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;font-size:14px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
+  banner.innerHTML = `<span>🔄 A new version of SQUARE is available.</span>` +
+    `<button id="newVersionReloadBtn" style="background:#fff;color:#2E5C8A;border:none;border-radius:6px;padding:6px 16px;font-weight:700;cursor:pointer;font-size:13px;">Reload Now</button>`;
+  document.body.appendChild(banner);
+  // V14.3.19: deliberately no dismiss/close button -- the whole point is
+  // reaching everyone within minutes, so a one-time dismiss that's then
+  // forgotten would defeat that. Stays until they click Reload.
+  document.getElementById('newVersionReloadBtn').addEventListener('click', () => {
+    // No explicit timer finalize here -- a bare reload is already safe by
+    // construction: restoreTimerState() reattaches to the same session id
+    // and correctly recomputes the true elapsed time, so a running timer
+    // keeps counting the correct total under one continuous entry, with no
+    // split and no re-pick-your-task step required.
+    location.reload();
+  });
+}
+
+function startVersionCheckMonitor() {
+  if (versionCheckInterval) clearInterval(versionCheckInterval);
+  initReliableTickWorker();
+  if (reliableTickWorkerActive) return; // worker's onmessage already calls checkForNewVersion() every 5th tick
+  versionCheckInterval = setInterval(checkForNewVersion, 5 * 60 * 1000);
 }
 
 function upsertTimeLog(log) {
@@ -2441,6 +2509,9 @@ loadData().then(async () => {
         // V14.2.5: Start end-of-day monitor
         startEndOfDayMonitor();
 
+        // V14.3.19: Start deploy version-check monitor
+        startVersionCheckMonitor();
+
         // V14.2.26: Hourly stale cleanup — guarded against compound intervals on re-login
         if (!window._staleCleanupInterval) {
           window._staleCleanupInterval = setInterval(() => {
@@ -2524,6 +2595,9 @@ async function doLogin(){
     
     // V14.2.24: Start end-of-day monitor
     startEndOfDayMonitor();
+
+    // V14.3.19: Start deploy version-check monitor
+    startVersionCheckMonitor();
 
     // V14.2.26: Hourly stale cleanup — guarded against compound intervals
     if (!window._staleCleanupInterval) {
