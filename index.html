@@ -2595,6 +2595,7 @@ loadData().then(async () => {
         if (!window._staleHeartbeatInterval) {
           window._staleHeartbeatInterval = setInterval(() => {
             if (currentUser) finalizeStaleHeartbeatSessions();
+            if (currentUser?.isAdmin) finalizeStaleHeartbeatSessionsAllUsers(); // V14.3.22: Fix 2
           }, 5 * 60 * 1000);
         }
 
@@ -2681,6 +2682,7 @@ async function doLogin(){
     if (!window._staleHeartbeatInterval) {
       window._staleHeartbeatInterval = setInterval(() => {
         if (currentUser) finalizeStaleHeartbeatSessions();
+        if (currentUser?.isAdmin) finalizeStaleHeartbeatSessionsAllUsers(); // V14.3.22: Fix 2
       }, 5 * 60 * 1000);
     }
 
@@ -4898,6 +4900,10 @@ function dedupeSessionLogs(logs) {
   return dropIds.size ? logs.filter(l => !dropIds.has(l.id)) : logs;
 }
 function runTimeReport(){
+  // V14.3.22: Fix 2 -- fire-and-forget, don't block the report render on it.
+  // The periodic interval is the real delivery mechanism; this just gives an
+  // admin looking at the report a chance to catch something sooner.
+  finalizeStaleHeartbeatSessionsAllUsers();
   const currentUserId=document.getElementById('trUser').value, currentProjId=document.getElementById('trProject').value;
   document.getElementById('trUser').innerHTML='<option value="">All Members</option>'+users.map(u=>`<option value="${u.id}">${u.name}</option>`).join('');
   document.getElementById('trProject').innerHTML='<option value="">All Projects</option>'+projectsData.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
@@ -6464,6 +6470,20 @@ async function cleanupStaleTimers() {
 // device's for the same user.
 const STALE_HEARTBEAT_MS = 5 * 60 * 1000; // 5 minutes
 
+// V14.3.22: shared ground-truth staleness extraction, used by every
+// finalize path so they all agree on what "stale" means. Reads the raw
+// numeric .seconds off the Timestamp directly rather than gating on the
+// .toMillis method existing -- a manual console script using
+// lastHeartbeat.seconds*1000 found and fixed sessions the old .toMillis-only
+// check was silently missing in production. Falls back to ts/updatedAt only
+// for docs written before lastHeartbeat existed.
+function extractLastSeenMs(data) {
+  if (!data) return null;
+  return (data.lastHeartbeat && typeof data.lastHeartbeat.seconds === 'number')
+    ? data.lastHeartbeat.seconds * 1000
+    : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
+}
+
 async function finalizeStaleHeartbeatSessions() {
   if (!currentUser) return;
   try {
@@ -6479,11 +6499,7 @@ async function finalizeStaleHeartbeatSessions() {
       if (doc.id === currentSessionLogId) continue; // this tab's own live session -- never touch
 
       const data = doc.data();
-      // Prefer the server-timestamped heartbeat; fall back to whatever client
-      // timestamp the last successful write left behind. If neither exists,
-      // skip rather than guess an end time.
-      const lastSeenMs = data.lastHeartbeat?.toMillis ? data.lastHeartbeat.toMillis()
-        : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
+      const lastSeenMs = extractLastSeenMs(data);
       if (!lastSeenMs) continue;
       if (now - lastSeenMs < STALE_HEARTBEAT_MS) continue; // fresh -- leave it alone
 
@@ -6524,6 +6540,72 @@ async function finalizeStaleHeartbeatSessions() {
     }
   } catch (e) {
     console.error('❌ Stale-heartbeat finalization failed:', e);
+  }
+}
+
+// V14.3.22: Fix 2 -- admin-wide stale-heartbeat sweep. The function above is
+// scoped to userId == currentUser.id by design (query + the doc-level
+// comment both say so), so it only ever fixes whoever is CURRENTLY logged
+// in. If the affected user's tab closed at 1pm, none of their own triggers
+// (login/interval/new-session) fire again until they reopen the app -- which
+// is exactly why recoveredAt has been landing next-morning instead of
+// minutes later. This is the same logic with no userId filter, gated to
+// admins only, wired onto the same 5-min interval as the per-user version
+// (see the two window._staleHeartbeatInterval call sites) so ANY admin
+// client left open sweeps every user's stale sessions, not just its own.
+// Must not fight Fix 1: uses the same STALE_HEARTBEAT_MS threshold and the
+// same ground-truth extractLastSeenMs() check, so a session Fix 1 is
+// actively re-arming (fresh heartbeat within the threshold) is left alone --
+// only a session with NO heartbeat inside the threshold gets finalized here.
+async function finalizeStaleHeartbeatSessionsAllUsers() {
+  if (!currentUser?.isAdmin) return;
+  try {
+    const now = Date.now();
+    const snap = await db.collection('timeLogs').where('inProgress', '==', true).get();
+    if (snap.empty) return;
+
+    let recoveredCount = 0;
+    for (const doc of snap.docs) {
+      if (doc.id === currentSessionLogId) continue; // never touch the viewing admin's own live session
+
+      const data = doc.data();
+      const lastSeenMs = extractLastSeenMs(data);
+      if (!lastSeenMs) continue;
+      if (now - lastSeenMs < STALE_HEARTBEAT_MS) continue; // fresh -- leave it alone, Fix 1 may be re-arming it
+
+      const startMs = (data.date && data.startTime)
+        ? new Date(`${data.date}T${data.startTime}:00`).getTime()
+        : lastSeenMs;
+      const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((lastSeenMs - startMs) / 1000)));
+      // endTime comes from lastSeenMs (the last real heartbeat), never "now"
+      // -- an admin sweeping other users' sessions must not invent extra
+      // duration just because they happened to be the one whose client caught it.
+      const endTime = new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+      const updates = {
+        inProgress: false,
+        recovered: true,
+        durationMins,
+        endTime,
+        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${Math.round((now-lastSeenMs)/60000)}m)` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : ''),
+        recoveredAt: new Date().toISOString(),
+        ...(capped?{autoCapped:true}:{})
+      };
+      await db.collection('timeLogs').doc(doc.id).update(updates);
+
+      // Patch the local array too, so a report generated right after this
+      // sweep reflects the fix immediately instead of needing a reload.
+      const localIdx = timeLogs.findIndex(l => l.id === doc.id);
+      if (localIdx >= 0) timeLogs[localIdx] = { ...timeLogs[localIdx], ...updates };
+
+      recoveredCount++;
+    }
+    if (recoveredCount > 0) {
+      console.log(`✅ Admin sweep: finalized ${recoveredCount} stale-heartbeat session(s) across the team`);
+      showNotificationToast('🔧 Sessions Recovered', `${recoveredCount} abandoned session(s) across the team were closed out automatically.`, 'info');
+    }
+  } catch (e) {
+    console.error('❌ Admin-wide stale-heartbeat sweep failed:', e);
   }
 }
 
