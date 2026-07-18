@@ -2337,11 +2337,21 @@ async function runAttendanceAutoDeduction() {
       );
       if (alreadyDeducted) continue;
 
-      // Check 3: logged >= 30 productive minutes this day?
-      const prodMins = timeLogs
-        .filter(l => l.userId === user.id && l.date === ds && l.productive)
-        .reduce((s, l) => s + l.durationMins, 0);
-      if (prodMins >= 30) continue;
+      // Check 3 (V14.3.23, Fix 4): any timeLogs activity at all this day?
+      // Previously required >=30 *productive* minutes -- but the attendance
+      // scan runs 3s after admin login, reading whatever timeLogs state
+      // exists at that instant. A session still inProgress:true and not yet
+      // recovered by the stale-heartbeat sweep contributes 0 productive
+      // minutes even though the person was genuinely working (this is what
+      // wrongly flagged Sarbani on July 16). There's no real biometric data
+      // in this app to cross-reference -- that lives in external PDF reports
+      // reviewed manually -- so the honest fix is to widen "present" to ANY
+      // log entry that day, regardless of productive flag or inProgress
+      // state. Deliberately lenient: a false "not absent" costs nothing (an
+      // admin catches genuine absences in monthly biometric review anyway),
+      // a false "absent" wrongly docks real leave.
+      const hasAnyActivity = timeLogs.some(l => l.userId === user.id && l.date === ds);
+      if (hasAnyActivity) continue;
 
       // → Mark as absent: ML first, fallback to CL if ML exhausted
       // V14.2.45: Forward sandwich — if absent day is followed by closed days, count them too
@@ -2396,7 +2406,7 @@ async function runAttendanceAutoDeduction() {
       endDate: fmt(sandwichEnd),
       days: deductAmt,
       isHalf: false,
-      reason: 'Absent (biometric)',
+      reason: 'Absent (no timelog activity)', // V14.3.23: was 'Absent (biometric)' -- nothing biometric is actually checked
       status: 'approved',
       autoDeducted: true,
       date: fmt(new Date()),
