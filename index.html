@@ -1269,11 +1269,16 @@ let onlineUsers = [];
 async function saveTimeLog(log) {
   if (!useGranularSaves) return saveData();
   try {
+    // V14.3.21: {merge:true} -- this is the heartbeat's main write path
+    // (every 60s while a timer runs). A bare .set() here would replace the
+    // whole doc each tick, silently wiping any field a different write path
+    // (recovery sweep, admin edit, lastHeartbeat's own .update()) added
+    // between heartbeats.
     await db.collection("timeLogs").doc(log.id).set({
       ...log,
       updatedAt: new Date().toISOString(),
       updatedBy: currentUser?.name || 'Unknown'
-    });
+    }, { merge: true });
     console.log('✅ Time log saved:', log.id);
   } catch(e) {
     console.error('❌ Save time log failed:', e);
@@ -1508,6 +1513,7 @@ async function restartStalledTimer() {
 let reliableTickWorker = null;
 let reliableTickWorkerActive = false;
 let workerTickCount = 0; // V14.3.19: gates the version check to ~every 5th tick (~5 min)
+let lastWorkerTickAt = null; // V14.3.21: last time onmessage actually fired -- lets a re-arm check tell "flagged active" apart from "genuinely still ticking"
 
 function initReliableTickWorker() {
   if (reliableTickWorker || reliableTickWorkerActive) return; // already created/attempted
@@ -1517,6 +1523,7 @@ function initReliableTickWorker() {
     const blob = new Blob([workerSrc], { type: 'application/javascript' });
     const worker = new Worker(URL.createObjectURL(blob));
     worker.onmessage = () => {
+      lastWorkerTickAt = Date.now();
       // Shared 60s tick for both the heartbeat and the EOD check -- each is
       // independently guarded (timerRunning / currentUser) so this is a
       // harmless no-op when there's nothing to do.
@@ -1531,14 +1538,59 @@ function initReliableTickWorker() {
     };
     worker.onerror = (e) => {
       console.error('Reliable tick worker error, falling back to main-thread intervals:', e.message);
+      // V14.3.21: must null the worker ref too, not just the active flag --
+      // otherwise initReliableTickWorker()'s own guard above (`if
+      // (reliableTickWorker || reliableTickWorkerActive) return`) blocks it
+      // from ever being recreated for the rest of the session.
+      reliableTickWorker = null;
       reliableTickWorkerActive = false;
     };
     reliableTickWorker = worker;
     reliableTickWorkerActive = true;
+    lastWorkerTickAt = Date.now(); // seed so a re-arm check right after creation doesn't see a stale null
     console.log('✅ Reliable tick worker active -- heartbeat/EOD checks now survive background-tab throttling');
   } catch (e) {
     console.warn('Reliable tick worker unavailable, using main-thread intervals instead:', e.message);
     reliableTickWorkerActive = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// V14.3.21: HEARTBEAT SELF-RESTART (Fix 1, root-cause brief)
+// The worker surviving background-tab throttling only helps if something
+// actually re-arms it after a real interruption -- a throttled/frozen worker
+// that silently stops posting ticks (laptop sleep, OS-level suspension,
+// severe backgrounding) was never detected or recreated before; the tab had
+// to be reloaded (next morning) to get a working worker back. This runs on
+// every tab-visible / window-focus / network-online event and force-recreates
+// the worker if it's either flagged inactive OR flagged active but hasn't
+// actually ticked in over 90s (silently wedged) -- then fires one heartbeat
+// immediately so coverage resumes right away instead of waiting up to 60s.
+// ═══════════════════════════════════════════════════════
+const WORKER_STALE_MS = 90 * 1000; // generous margin over the 60s tick interval
+let reArmInFlight = false; // laptop wake fires focus+visibilitychange+online near-simultaneously
+
+function reArmHeartbeat() {
+  if (!timerRunning || reArmInFlight) return;
+  reArmInFlight = true;
+  try {
+    const workerLooksDead = !reliableTickWorkerActive;
+    const workerLooksWedged = reliableTickWorkerActive && lastWorkerTickAt && (Date.now() - lastWorkerTickAt > WORKER_STALE_MS);
+    if (workerLooksDead || workerLooksWedged) {
+      console.warn(`Re-arming heartbeat worker (${workerLooksWedged ? 'wedged -- no tick in 90s+' : 'inactive'})`);
+      if (reliableTickWorker) {
+        try { reliableTickWorker.terminate(); } catch (e) {}
+      }
+      reliableTickWorker = null;
+      reliableTickWorkerActive = false;
+      initReliableTickWorker();
+    }
+    // Fire a heartbeat right now regardless -- cheap, guarded internally by
+    // timerRunning/currentSessionLogId, and means coverage resumes the instant
+    // the interruption ends rather than waiting for the next tick.
+    heartbeatSession();
+  } finally {
+    reArmInFlight = false;
   }
 }
 
@@ -2045,9 +2097,21 @@ function startInactivityMonitor() {
       // resume, in case the interruption (sleep/background throttling) meant
       // the heartbeat interval missed ticks -- reattaches under the same id.
       try { finalizeCurrentSession('tab resumed'); } catch(e) { console.error('resume checkpoint failed', e); }
+      // V14.3.21: re-arm BEFORE checkTimerHealth() -- reArmHeartbeat() fires
+      // a fresh heartbeat synchronously, which is what moves
+      // lastHeartbeatSuccessAt forward and lets checkTimerHealth() report
+      // "healthy" instead of just displaying the stale-since-backgrounding gap.
+      reArmHeartbeat();
       checkTimerHealth(); // V14.3.17: catch a stale/recovered state the instant the user looks back
     }
   });
+  // V14.3.21: network back -- worker survives offline fine (it's just a
+  // timer), but the Firestore write path itself needs a fresh attempt rather
+  // than waiting up to 60s for the next tick.
+  window.addEventListener('online', () => { console.log('🌐 Network back online -- re-arming heartbeat'); reArmHeartbeat(); });
+  // V14.3.21: focus fires on its own in cases visibilitychange doesn't catch
+  // cleanly (e.g. some OS/browser sleep-wake sequences) -- same re-arm check.
+  window.addEventListener('focus', () => { reArmHeartbeat(); });
   // V14.3.3: best-effort flush if the tab is closed/refreshed mid-session
   window.addEventListener('beforeunload', () => { try { heartbeatSession(); } catch(e){} });
   console.log('✅ Inactivity monitor: tab-hidden auto-pause disabled (V14.2.28)');
