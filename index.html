@@ -3875,9 +3875,9 @@ async function fetchActiveTimersFromFirebase() {
       }
     });
 
-    console.log('📊 Firebase activeTimers collection size:', snapshot.size);
-    snapshot.forEach(doc => console.log('📄 Active timer doc:', doc.id, doc.data()));
-    console.log('✅ Active timers loaded:', activeTimers.length, activeTimers);
+    if (DEBUG) console.log('📊 Firebase activeTimers collection size:', snapshot.size);
+    if (DEBUG) snapshot.forEach(doc => console.log('📄 Active timer doc:', doc.id, doc.data()));
+    if (DEBUG) console.log('✅ Active timers loaded:', activeTimers.length, activeTimers);
 
     // Clean up stale timers
     for (const id of staleTimers) {
