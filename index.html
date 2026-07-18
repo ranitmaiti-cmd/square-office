@@ -1182,6 +1182,12 @@ const db = firebase.firestore();
 // it actively checks and acts.
 const APP_VERSION = '2026-07-15.1';
 
+// V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
+// calls were logging unconditionally, flooding the console and burying every
+// diagnostic query run during this week's investigations. Repeating logs go
+// behind this guard; one-time/error logs stay on unconditionally.
+const DEBUG = false; // set true only when actively debugging
+
 let dataLoaded = false; // Prevent saves before load completes
 
 // ═══════════════════════════════════════════════════════
@@ -3967,13 +3973,13 @@ function startDashboardAutoRefresh() {
   
   // Auto-refresh every 30 seconds
   dashboardRefreshInterval = setInterval(async () => {
-    console.log('🔄 Auto-refreshing Dashboard data...');
-    
+    if (DEBUG) console.log('🔄 Auto-refreshing Dashboard data...');
+
     // V14.2.23 FIX: Guard — never clobber timeLogs while a timer is actively running.
     // If timerRunning, the in-memory timeLogs may have an unsaved entry from the
     // current session. Overwriting from Firebase would lose that entry.
     if (timerRunning) {
-      console.log('⏭️ Dashboard refresh skipped — timer is running, protecting in-memory logs');
+      if (DEBUG) console.log('⏭️ Dashboard refresh skipped — timer is running, protecting in-memory logs');
       renderLiveTimeLogFeed();
       return;
     }
@@ -3985,7 +3991,7 @@ function startDashboardAutoRefresh() {
       snapshot.forEach(doc => {
         timeLogs.push({ id: doc.id, ...doc.data() });
       });
-      console.log('✅ Time logs refreshed:', timeLogs.length);
+      if (DEBUG) console.log('✅ Time logs refreshed:', timeLogs.length);
       // Only clear unsaved flag if we are sure there's nothing pending
       if (!timerRunning) hasUnsavedChanges = false;
       // Re-render Recent Time Logs widget
@@ -4019,22 +4025,22 @@ function renderDashboardStats() {
 
 // V13.3: Live Time Log Feed
 function renderLiveTimeLogFeed() {
-  console.log('🔥🔥🔥 renderLiveTimeLogFeed() CALLED!');
+  if (DEBUG) console.log('🔥🔥🔥 renderLiveTimeLogFeed() CALLED!');
   const feedEl = document.getElementById('liveTimeLogFeed');
-  console.log('🔥 Feed element found:', !!feedEl);
+  if (DEBUG) console.log('🔥 Feed element found:', !!feedEl);
   if (!feedEl) {
     console.error('❌❌❌ liveTimeLogFeed element NOT FOUND!');
     return;
   }
-  
-  console.log('📡 Rendering live feed - Total time logs:', timeLogs.length);
-  
+
+  if (DEBUG) console.log('📡 Rendering live feed - Total time logs:', timeLogs.length);
+
   // Get last 10 time logs sorted by date (most recent first)
   const recentLogs = [...timeLogs]
     .sort((a, b) => new Date(b.date) - new Date(a.date))
     .slice(0, 10);
-  
-  console.log('📡 Recent logs to display:', recentLogs.length, recentLogs.map(l => `${l.date} - ${users.find(u=>u.id===l.userId)?.name}`));
+
+  if (DEBUG) console.log('📡 Recent logs to display:', recentLogs.length, recentLogs.map(l => `${l.date} - ${users.find(u=>u.id===l.userId)?.name}`));
   
   if (recentLogs.length === 0) {
     feedEl.innerHTML = '<div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">No time logs yet</div>';
