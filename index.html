@@ -6284,11 +6284,20 @@ document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>
   const plan=planEntries.find(p=>p.id===timerLinkedPlan.id);
   if(plan)plan.done=true;
 
+  // V14.3.25: capture before resetTimer() -- it nulls timerLinkedPlan as its
+  // first statement, and both alerts below used to re-read
+  // timerLinkedPlan.project AFTER the await, throwing "Cannot read
+  // properties of null (reading 'project')" on every normal Complete-Task
+  // click. Pre-existing since the alerts were added (Mar 2026), unrelated to
+  // anything from this session -- autoDesc/upsertTimeLog above already got
+  // this right by capturing before the reset.
+  const completedProjectName = timerLinkedPlan.project;
+
   autoSave(); await resetTimer(); renderTimeLog(); renderProjectsBudget(); renderDashboard();
   if (capped) {
-    alert(`⚠️ Task Completed — but auto-capped at ${MAX_SESSION_HOURS}h!\n\n📁 ${timerLinkedPlan.project}\n\nThis session ran longer than ${MAX_SESSION_HOURS} hours, which is unusual — please verify this entry in Time Report.\n\nRemoved from Weekly Planner.`);
+    alert(`⚠️ Task Completed — but auto-capped at ${MAX_SESSION_HOURS}h!\n\n📁 ${completedProjectName}\n\nThis session ran longer than ${MAX_SESSION_HOURS} hours, which is unusual — please verify this entry in Time Report.\n\nRemoved from Weekly Planner.`);
   } else {
-    alert(`✅ Task Completed!\n\nLogged: ${minsToHM(mins)}\n📁 ${timerLinkedPlan.project}\n\nRemoved from Weekly Planner.`);
+    alert(`✅ Task Completed!\n\nLogged: ${minsToHM(mins)}\n📁 ${completedProjectName}\n\nRemoved from Weekly Planner.`);
   }
 });
 
