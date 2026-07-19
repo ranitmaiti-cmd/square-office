@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-15.1';
+const APP_VERSION = '2026-07-19.1'; // V14.3.24: bumped -- covers Fix 5/1/2/4 (console flood, heartbeat self-restart, cross-user sweep, attendance presence check), none of which had bumped this since 2026-07-15.1
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
