@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-21.4'; // V14.3.27: covers Task 1 (appVersion on presence) + Task 2 (duplicate-doc fix, merged to main)
+const APP_VERSION = '2026-07-21.6'; // V14.3.28: covers Task 3 (worker-based sweep) + Task 1 + Task 2 (both merged to main)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -1535,6 +1535,16 @@ function initReliableTickWorker() {
       // survive), but doesn't need 60s granularity -- only fire every 5th tick.
       workerTickCount++;
       if (workerTickCount % 5 === 0) checkForNewVersion();
+      // V14.3.28: Task 3 fix -- the admin-wide cross-user stale-heartbeat
+      // sweep used to run on a plain window._staleHeartbeatInterval
+      // setInterval, which is exactly the kind of timer Chrome throttles
+      // when the tab is backgrounded. On 20 July the admin was logged in
+      // with the tab backgrounded all afternoon; the sweep never fired
+      // until next-morning page load. This is the same worker tick
+      // heartbeatSession() already proved survives backgrounding (Fix 1's
+      // 30-min hard-background test), so the sweep rides it too now,
+      // gated to admins only inside the function itself.
+      if (workerTickCount % 5 === 0) finalizeStaleHeartbeatSessionsAllUsers();
     };
     worker.onerror = (e) => {
       console.error('Reliable tick worker error, falling back to main-thread intervals:', e.message);
@@ -2642,7 +2652,10 @@ loadData().then(async () => {
         if (!window._staleHeartbeatInterval) {
           window._staleHeartbeatInterval = setInterval(() => {
             if (currentUser) finalizeStaleHeartbeatSessions();
-            if (currentUser?.isAdmin) finalizeStaleHeartbeatSessionsAllUsers(); // V14.3.22: Fix 2
+            // V14.3.28: admin-wide sweep now rides the reliable worker tick
+            // (see initReliableTickWorker) -- only fall back to this
+            // throttle-prone plain interval if the worker isn't active.
+            if (currentUser?.isAdmin && !reliableTickWorkerActive) finalizeStaleHeartbeatSessionsAllUsers();
           }, 5 * 60 * 1000);
         }
 
@@ -2729,7 +2742,10 @@ async function doLogin(){
     if (!window._staleHeartbeatInterval) {
       window._staleHeartbeatInterval = setInterval(() => {
         if (currentUser) finalizeStaleHeartbeatSessions();
-        if (currentUser?.isAdmin) finalizeStaleHeartbeatSessionsAllUsers(); // V14.3.22: Fix 2
+        // V14.3.28: admin-wide sweep now rides the reliable worker tick
+        // (see initReliableTickWorker) -- only fall back to this
+        // throttle-prone plain interval if the worker isn't active.
+        if (currentUser?.isAdmin && !reliableTickWorkerActive) finalizeStaleHeartbeatSessionsAllUsers();
       }, 5 * 60 * 1000);
     }
 
