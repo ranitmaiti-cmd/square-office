@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-19.1'; // V14.3.24: bumped -- covers Fix 5/1/2/4 (console flood, heartbeat self-restart, cross-user sweep, attendance presence check), none of which had bumped this since 2026-07-15.1
+const APP_VERSION = '2026-07-21.2'; // V14.3.27: bumped -- Task 2, fixes the duplicate-timeLogs auto-save bug
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -1724,9 +1724,27 @@ function showSaveIndicator() {
 // catching each chunk individually means one failed chunk is logged on its
 // own and can no longer take the rest of the save down with it.
 async function commitInChunks(collectionName, items, buildDocData) {
+  // V14.3.27: guard against the root cause of the duplicate-doc bug (Task 2)
+  // ever recurring via some other path. db.collection(x).doc(undefined)
+  // does NOT throw -- it silently generates a fresh random id every call,
+  // so an item with no id would get a brand-new duplicate doc on every
+  // single auto-save cycle instead of updating its real one. Skipping (and
+  // loudly warning) is a far safer failure mode than silently corrupting
+  // data -- the item just isn't re-saved this cycle instead of spawning a
+  // duplicate every 30 seconds.
+  const validItems = [];
+  const skipped = [];
+  items.forEach(item => {
+    if (item && typeof item.id === 'string' && item.id.length > 0) validItems.push(item);
+    else skipped.push(item);
+  });
+  if (skipped.length > 0) {
+    console.error(`⚠️ ${collectionName}: ${skipped.length} item(s) had no valid id -- SKIPPED (not saved) to avoid creating duplicate docs. This should never happen; investigate the load path.`, skipped);
+  }
+
   const CHUNK_SIZE = 450;
-  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
-    const chunk = items.slice(i, i + CHUNK_SIZE);
+  for (let i = 0; i < validItems.length; i += CHUNK_SIZE) {
+    const chunk = validItems.slice(i, i + CHUNK_SIZE);
     const batch = db.batch();
     chunk.forEach(item => {
       batch.set(db.collection(collectionName).doc(item.id), buildDocData(item));
@@ -1734,7 +1752,7 @@ async function commitInChunks(collectionName, items, buildDocData) {
     try {
       await batch.commit();
     } catch (e) {
-      console.error(`❌ ${collectionName} chunk failed (items ${i}-${i + chunk.length - 1} of ${items.length}):`, e);
+      console.error(`❌ ${collectionName} chunk failed (items ${i}-${i + chunk.length - 1} of ${validItems.length}):`, e);
     }
   }
 }
@@ -1950,7 +1968,9 @@ async function loadData() {
       // Load projects
       const projectsSnapshot = await db.collection("projects").get({source:'server'});
       projectsData = [];
-      projectsSnapshot.forEach(doc => { projectsData.push(doc.data()); });
+      // V14.3.27: doc.id must win, spread AFTER it, and must always be
+      // attached at all -- see the timeLogs load a few lines down for why.
+      projectsSnapshot.forEach(doc => { projectsData.push({ ...doc.data(), id: doc.id }); });
       console.log('✅ Loaded projects from server:', projectsData.length);
       
       // Load time logs — V14.2.24: limit to last 90 days to prevent unbounded memory growth
@@ -1962,13 +1982,30 @@ async function loadData() {
         .where("date", ">=", cutoffDate)
         .get({source:'server'});
       timeLogs = [];
-      timeLogsSnapshot.forEach(doc => { timeLogs.push(doc.data()); });
+      // V14.3.27: THE root cause of the duplicate-timeLogs bug (Task 2). This
+      // pushed doc.data() alone, with no id at all -- relying entirely on the
+      // document's own internal `id` field happening to already match, which
+      // isn't guaranteed for anything written outside the app's normal
+      // upsertTimeLog()/saveTimeLog() path (e.g. a console-written
+      // reconciliation entry). Whenever that internal field was missing,
+      // item.id was undefined here, and commitInChunks()'s
+      // db.collection(...).doc(item.id) call silently became
+      // db.collection(...).doc(undefined) -- which doesn't throw, it
+      // generates a NEW random id on every single call. Every 30s
+      // periodicSaveInterval tick then created another duplicate for that
+      // entry. Same underlying mechanism as the historical 319k-doc bloat,
+      // just triggered by a different path. doc.id is authoritative
+      // Firestore metadata -- it must always be attached, and must win over
+      // whatever (possibly stale) id the document's own data might carry.
+      timeLogsSnapshot.forEach(doc => { timeLogs.push({ ...doc.data(), id: doc.id }); });
       console.log('✅ Loaded time logs from server:', timeLogs.length, '(last 90 days from', cutoffDate, ')');
-      
+
       // Load plan entries
       const planEntriesSnapshot = await db.collection("planEntries").get({source:'server'});
       planEntries = [];
-      planEntriesSnapshot.forEach(doc => { planEntries.push(doc.data()); });
+      // V14.3.27: same fix as timeLogs/projects above -- planEntries goes
+      // through the same commitInChunks() re-save path in saveData().
+      planEntriesSnapshot.forEach(doc => { planEntries.push({ ...doc.data(), id: doc.id }); });
       console.log('✅ Loaded plan entries from server:', planEntries.length);
       
       // Load leave requests
