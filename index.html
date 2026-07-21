@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-21.5'; // V14.3.28: covers Task 3 (worker-based sweep) + Task 2 (duplicate-doc fix, merged to main)
+const APP_VERSION = '2026-07-21.6'; // V14.3.28: covers Task 3 (worker-based sweep) + Task 1 + Task 2 (both merged to main)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -7263,14 +7263,18 @@ updateConnectionStatus(navigator.onLine);
 
 async function updatePresence() {
   if (!currentUser) return;
-  
+
   try {
+    // V14.3.26: appVersion + {merge:true} -- lets a single presence query
+    // answer "who's on new code" instead of guessing; merge so this narrow
+    // write never clobbers anything else written to this doc.
     await db.collection("presence").doc(currentUser.id).set({
       userId: currentUser.id,
       userName: currentUser.name,
       status: 'online',
-      lastSeen: new Date().toISOString()
-    });
+      lastSeen: new Date().toISOString(),
+      appVersion: APP_VERSION
+    }, { merge: true });
   } catch(e) {
     console.error('Presence update failed:', e);
   }
@@ -7348,8 +7352,9 @@ async function markOffline() {
       userId: currentUser.id,
       userName: currentUser.name,
       status: 'offline',
-      lastSeen: new Date().toISOString()
-    });
+      lastSeen: new Date().toISOString(),
+      appVersion: APP_VERSION
+    }, { merge: true });
   } catch(e) {
     console.error('Mark offline failed:', e);
   }
