@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-21.6'; // V14.3.28: covers Task 3 (worker-based sweep) + Task 1 + Task 2 (both merged to main)
+const APP_VERSION = '2026-07-21.8'; // V14.3.30: stale-heartbeat sweep resilience + observability fix
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -6629,22 +6629,54 @@ async function finalizeStaleHeartbeatSessions() {
 // same ground-truth extractLastSeenMs() check, so a session Fix 1 is
 // actively re-arming (fresh heartbeat within the threshold) is left alone --
 // only a session with NO heartbeat inside the threshold gets finalized here.
+// V14.3.30: resilience + observability fix. Root cause of the "one user
+// recovered per run, runs minutes apart" pattern: a single try wrapped the
+// WHOLE for loop, so one rejected .update() (a flaky link is sufficient)
+// jumped straight to the outer catch and abandoned every remaining stale
+// doc for that cycle -- it took ~170 sweep opportunities across a day to
+// clear 5 stale sessions one at a time. Also: .get() with no
+// {source:'server'} could silently resolve from local cache when the
+// connection was down, and logging only fired when recoveredCount > 0, so a
+// healthy idle sweep and a blind/failing sweep looked identical in the
+// console -- this is why diagnosis took three days.
+//
+// Behaviour preserved exactly: admin gate, currentSessionLogId skip,
+// STALE_HEARTBEAT_MS threshold (Fix 1 may be re-arming a fresh session),
+// endTime derived from lastSeenMs never now(), capSessionDuration/
+// autoCapped, local timeLogs array patch after a successful write.
 async function finalizeStaleHeartbeatSessionsAllUsers() {
-  if (!currentUser?.isAdmin) return;
+  const startedAt = Date.now();
+  if (!currentUser?.isAdmin) return { status: 'not-admin' };
+
+  let snap;
   try {
-    const now = Date.now();
-    const snap = await db.collection('timeLogs').where('inProgress', '==', true).get();
-    if (snap.empty) return;
+    // {source:'server'} so a dead connection THROWS instead of silently
+    // resolving from local cache -- the old bare .get() plus
+    // `if (snap.empty) return;` was a blind sweep that left no trace.
+    snap = await db.collection('timeLogs').where('inProgress', '==', true).get({ source: 'server' });
+  } catch (e) {
+    const result = { status: 'read-failed', scanned: 0, finalized: 0, failed: 0, fresh: 0, noHeartbeat: 0, durationMs: Date.now() - startedAt };
+    console.error(`❌ [sweep] read failed (${e.message}) -- connection likely down, nothing scanned this run`, result);
+    return result;
+  }
 
-    let recoveredCount = 0;
-    for (const doc of snap.docs) {
-      if (doc.id === currentSessionLogId) continue; // never touch the viewing admin's own live session
+  const now = Date.now();
+  let finalized = 0, failed = 0, fresh = 0, noHeartbeat = 0;
+  const failures = [];
 
-      const data = doc.data();
-      const lastSeenMs = extractLastSeenMs(data);
-      if (!lastSeenMs) continue;
-      if (now - lastSeenMs < STALE_HEARTBEAT_MS) continue; // fresh -- leave it alone, Fix 1 may be re-arming it
+  for (const doc of snap.docs) {
+    if (doc.id === currentSessionLogId) continue; // never touch the viewing admin's own live session
 
+    const data = doc.data();
+    const lastSeenMs = extractLastSeenMs(data);
+    if (!lastSeenMs) { noHeartbeat++; continue; }
+    if (now - lastSeenMs < STALE_HEARTBEAT_MS) { fresh++; continue; } // fresh -- leave it alone, Fix 1 may be re-arming it
+
+    // V14.3.30: per-document try/catch -- one failing write must not
+    // abandon every remaining stale doc in this batch. Failures are
+    // counted and logged, not silently dropped; they'll be retried on the
+    // next sweep since the doc is still inProgress:true.
+    try {
       const startMs = (data.date && data.startTime)
         ? new Date(`${data.date}T${data.startTime}:00`).getTime()
         : lastSeenMs;
@@ -6670,15 +6702,22 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
       const localIdx = timeLogs.findIndex(l => l.id === doc.id);
       if (localIdx >= 0) timeLogs[localIdx] = { ...timeLogs[localIdx], ...updates };
 
-      recoveredCount++;
+      finalized++;
+    } catch (e) {
+      failed++;
+      failures.push({ id: doc.id, userId: data.userId, userName: data.userName, error: e.message });
+      console.error(`❌ [sweep] failed to finalize ${doc.id} (${data.userName || data.userId}): ${e.message} -- will retry next sweep`);
     }
-    if (recoveredCount > 0) {
-      console.log(`✅ Admin sweep: finalized ${recoveredCount} stale-heartbeat session(s) across the team`);
-      showNotificationToast('🔧 Sessions Recovered', `${recoveredCount} abandoned session(s) across the team were closed out automatically.`, 'info');
-    }
-  } catch (e) {
-    console.error('❌ Admin-wide stale-heartbeat sweep failed:', e);
   }
+
+  const result = { status: 'ok', scanned: snap.size, finalized, failed, fresh, noHeartbeat, durationMs: Date.now() - startedAt };
+  // V14.3.30: logs on EVERY run, unconditionally -- a healthy idle sweep
+  // (nothing stale) and a sweep that never ran must never look the same.
+  console.log(`[sweep] ran -- scanned:${result.scanned} finalized:${finalized} failed:${failed} fresh:${fresh} noHeartbeat:${noHeartbeat} (${result.durationMs}ms)`);
+  if (failed > 0) console.error(`⚠️ [sweep] ${failed} document(s) failed this run, will retry next sweep:`, failures);
+  if (finalized > 0) showNotificationToast('🔧 Sessions Recovered', `${finalized} abandoned session(s) across the team were closed out automatically.`, 'info');
+
+  return result;
 }
 
 // ═══════════════════════════════════════════════════════
