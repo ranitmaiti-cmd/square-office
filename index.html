@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-21.8'; // V14.3.30: stale-heartbeat sweep resilience + observability fix
+const APP_VERSION = '2026-07-21.9'; // V14.3.30+V14.3.29: combined release -- sweep resilience/observability fix + Detail Log Lunch Break display fix
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -5054,7 +5054,16 @@ function buildTrDetail(logs){
     // V14.3.18: distinct visual flag for auto-capped entries -- needs review, not a normal completed entry.
     const cappedTag = l.autoCapped ? ' <span style="background:#FBEAEA;color:#8B2E24;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">⚠ CAPPED — VERIFY</span>' : '';
     const rowStyle = l.autoCapped ? ' style="background:#FBEAEA;"' : (l.inProgress ? ' style="font-style:italic;background:#FAFBF7;"' : '');
-    html+=`<tr${rowStyle}><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#A96E35;font-weight:600;">${l.productive?'📁 '+l.projectName:'🔸 '+l.activity}${liveTag}${cappedTag}</td><td style="font-size:11px;">${l.phase||'-'}</td><td style="font-size:11px;">${l.typology||'-'}</td><td style="font-size:11px;white-space:nowrap;">${clockTime}</td><td>${l.desc}</td><td style="text-align:right;font-weight:700;color:#A96E35;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
+    // V14.3.29: display-only Lunch Break / non-productive detection for the
+    // Detail Log table -- broader than just !l.productive so it also catches
+    // rows with no projectId or an explicit "Lunch Break" projectName.
+    // Does not touch stored data, only how these cells render.
+    const isBreak = l.productive === false || l.projectName === 'Lunch Break' || !l.projectId;
+    const projCell = isBreak ? 'Lunch Break' : (l.productive?'📁 '+l.projectName:'🔸 '+l.activity);
+    const phaseCell = isBreak ? 'Non-Productive' : (l.phase||'-');
+    const typologyCell = isBreak ? 'Non-Productive' : (l.typology||'-');
+    const descCell = isBreak ? '' : l.desc;
+    html+=`<tr${rowStyle}><td style="white-space:nowrap">${fmtD(l.date)}</td><td><b>${u?.name||'?'}</b></td><td style="color:#A96E35;font-weight:600;">${projCell}${liveTag}${cappedTag}</td><td style="font-size:11px;">${phaseCell}</td><td style="font-size:11px;">${typologyCell}</td><td style="font-size:11px;white-space:nowrap;">${clockTime}</td><td>${descCell}</td><td style="text-align:right;font-weight:700;color:#A96E35;white-space:nowrap;">${minsToHM(l.durationMins)}</td></tr>`;
   });
   // Grand total includes in-progress (running) entries same as finalized ones —
   // the heartbeat already persisted that time, so dropping it here would make it
