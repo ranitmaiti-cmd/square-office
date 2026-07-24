@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-21.9'; // V14.3.30+V14.3.29: combined release -- sweep resilience/observability fix + Detail Log Lunch Break display fix
+const APP_VERSION = '2026-07-24.1'; // V14.3.31: timer death watchdog, stage 2 (desktop notification + sound + tab title)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -1411,7 +1411,7 @@ let currentSessionLogId = null;
 let sessionHeartbeatInterval = null;
 
 // ═══════════════════════════════════════════════════════
-// V14.3.17: SILENT TIMER DEATH WATCHDOG
+// V14.3.17 / V14.3.31: SILENT TIMER DEATH WATCHDOG (two-stage)
 // July 8 incident: three people lost 2.5-6 hours each because their timer's
 // heartbeat silently stopped landing (tab throttled while unfocused-but-
 // visible, laptop sleep with no visibility change, or a write failing while
@@ -1420,14 +1420,30 @@ let sessionHeartbeatInterval = null;
 // it has NEVER been connected to whether writes are actually succeeding, so
 // it looked completely normal the whole time. This tracks the last CONFIRMED
 // successful write independently of the display, and surfaces a hard,
-// persistent alert the moment that gap exceeds HEARTBEAT_ALERT_MS -- well
-// before the server-side stale-heartbeat cleanup (5-10 min) would silently
-// finalize the session on its own.
+// persistent alert the moment that gap exceeds HEARTBEAT_ALERT_MS.
+//
+// V14.3.31: even with the sweep fix live and correctly finalizing dead
+// sessions within minutes (2026-07-21.9), Angana/Neha/Suravi still lost
+// 3h39m/2h03m/1h45m on 23 Jul -- finalizing the DATA doesn't tell the PERSON.
+// This adds a second, louder stage (5 min) with a desktop notification,
+// sound, and tab-title change, so the alert reaches someone who has the tab
+// backgrounded working in Revit/AutoCAD -- exactly who this needs to reach.
+// Deliberately built as an upgrade to the existing single-stage mechanism
+// above, not a second parallel system: reuses lastHeartbeatSuccessAt/
+// timerRunning as the single source of truth (already correctly wired to
+// the heartbeat's success path -- see heartbeatSession()) and the existing
+// #timerDeathBanner/restartStalledTimer() rather than a second banner and a
+// second "dismiss" action that only fakes freshness without actually fixing
+// anything.
 // ═══════════════════════════════════════════════════════
 let lastHeartbeatSuccessAt = null;   // set only when a write genuinely resolves
-let timerHealthState = 'healthy';    // 'healthy' | 'stalled'
+let wdStage = 0;                     // 0 healthy | 1 warn (2min) | 2 alert (5min)
+let wdLastNotifiedMs = 0;            // last desktop-notification fire, for the re-nag interval
+let wdSavedTitle = null;             // tab title to restore on recovery
 let restartInFlight = false;         // idempotency guard for the Restart button
-const HEARTBEAT_ALERT_MS = 2 * 60 * 1000; // 2 minutes -- shorter than the 5-10min server stale threshold
+const HEARTBEAT_ALERT_MS = 2 * 60 * 1000; // stage 1: 2 minutes -- shorter than the 5-10min server stale threshold
+const WD_ALERT_MS = 5 * 60 * 1000;        // stage 2: 5 minutes -- desktop notification + sound
+const WD_RENOTIFY_MS = 10 * 60 * 1000;    // re-nag interval while still dead at stage 2
 
 // Evaluated live against CURRENT freshness, never a sticky "was it ever bad"
 // flag -- a session that was throttled for a few minutes and comes back on
@@ -1436,39 +1452,105 @@ const HEARTBEAT_ALERT_MS = 2 * 60 * 1000; // 2 minutes -- shorter than the 5-10m
 function checkTimerHealth() {
   if (!timerRunning || !lastHeartbeatSuccessAt) return;
   const gapMs = Date.now() - lastHeartbeatSuccessAt;
+
   if (gapMs < HEARTBEAT_ALERT_MS) {
-    if (timerHealthState === 'stalled') {
+    if (wdStage > 0) {
       hideTimerDeathBanner();
       showNotificationToast('✅ Timer reconnected', 'Your time is safe — tracking resumed.', 'info');
-      timerHealthState = 'healthy';
+      // Restore immediately rather than waiting for the next elapsed-time
+      // tick -- correct even if the tab is currently backgrounded and that
+      // main-thread interval is throttled.
+      if (wdSavedTitle !== null) { document.title = wdSavedTitle; wdSavedTitle = null; }
+      wdStage = 0;
+      wdLastNotifiedMs = 0;
     }
+    return;
+  }
+
+  const staleMin = Math.round(gapMs / 60000);
+  const newStage = gapMs >= WD_ALERT_MS ? 2 : 1;
+  const escalated = newStage > wdStage;
+  if (escalated) wdStage = newStage;
+  if (wdSavedTitle === null) wdSavedTitle = document.title;
+
+  if (wdStage === 1) {
+    document.title = '⚠️ Timer may not be recording — Square OMS';
+    showTimerDeathBanner(1, staleMin);
+    if (escalated) console.warn(`[watchdog] STAGE 1 -- stale ${staleMin}m`);
   } else {
-    if (timerHealthState !== 'stalled') {
-      showTimerDeathBanner();
-      timerHealthState = 'stalled';
+    document.title = '🛑 TIMER STOPPED — Square OMS';
+    showTimerDeathBanner(2, staleMin);
+    if (escalated || (Date.now() - wdLastNotifiedMs) >= WD_RENOTIFY_MS) {
+      wdNotify('🛑 Square OMS — timer stopped', `Your timer stopped recording about ${staleMin} minutes ago. Open Square OMS and restart it.`);
+      wdPlaySound();
+      wdLastNotifiedMs = Date.now();
+      console.error(`[watchdog] STAGE 2 -- stale ${staleMin}m`);
     }
   }
 }
 
-function showTimerDeathBanner() {
+// stage 1: orange, "may not be recording". stage 2: red, "STOPPED". Same
+// banner element as before, same real "Restart Timer" action at both stages
+// -- no separate click-to-dismiss that only silences the alert without
+// actually re-arming anything.
+function showTimerDeathBanner(stage, staleMin) {
   let banner = document.getElementById('timerDeathBanner');
   if (!banner) {
     banner = document.createElement('div');
     banner.id = 'timerDeathBanner';
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#C0554A;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;font-size:14px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
-    banner.innerHTML = `<span>⚠️ Your timer has stopped and may not be recording. Please restart it.</span>` +
-      `<button id="timerDeathRestartBtn" style="background:#fff;color:#C0554A;border:none;border-radius:6px;padding:6px 16px;font-weight:700;cursor:pointer;font-size:13px;">Restart Timer</button>`;
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;font-size:14px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
+    banner.innerHTML = `<span id="timerDeathMsg"></span>` +
+      `<button id="timerDeathRestartBtn" style="background:#fff;border:none;border-radius:6px;padding:6px 16px;font-weight:700;cursor:pointer;font-size:13px;">Restart Timer</button>`;
     document.body.appendChild(banner);
     document.getElementById('timerDeathRestartBtn').addEventListener('click', restartStalledTimer);
   }
-  banner.style.display = 'flex';
+  const severe = stage === 2;
+  banner.style.background = severe ? '#C0554A' : '#C8860D';
+  document.getElementById('timerDeathMsg').textContent = severe
+    ? `🛑 Your timer STOPPED recording about ${staleMin}m ago. Restart it and note the time.`
+    : `⚠️ Connection problem — your timer may not be recording (${staleMin}m).`;
   const btn = document.getElementById('timerDeathRestartBtn');
-  if (btn) btn.disabled = false;
+  if (btn) { btn.style.color = severe ? '#C0554A' : '#C8860D'; btn.disabled = false; }
+  banner.style.display = 'flex';
 }
 
 function hideTimerDeathBanner() {
   const banner = document.getElementById('timerDeathBanner');
   if (banner) banner.style.display = 'none';
+}
+
+// ── alert channels (V14.3.31) ───────────────────────────────────────────
+function wdNotify(title, body) {
+  try {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'granted') {
+      const n = new Notification(title, { body, tag: 'sq-timer-dead', requireInteraction: true });
+      n.onclick = () => { window.focus(); n.close(); };
+    }
+  } catch (e) { console.warn('[watchdog] notification failed', e); }
+}
+
+function wdPlaySound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.35, 0.7].forEach(off => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = 880; o.type = 'sine';
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + off);
+      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + off + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + off + 0.28);
+      o.start(ctx.currentTime + off); o.stop(ctx.currentTime + off + 0.3);
+    });
+  } catch (e) { console.warn('[watchdog] sound failed', e); }
+}
+
+// Browsers only allow the permission prompt from a user gesture -- called
+// from startTimerWithPlan/timerResumeBtn, never on page load.
+function wdRequestPermission() {
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission();
+  } catch (e) {}
 }
 
 // Idempotent: restartInFlight is checked and set synchronously before any
@@ -1483,7 +1565,9 @@ async function restartStalledTimer() {
     const plan = timerLinkedPlan;
     await finalizeCurrentSession('watchdog restart'); // checkpoint whatever's real first
     hideTimerDeathBanner();
-    timerHealthState = 'healthy';
+    wdStage = 0;
+    wdLastNotifiedMs = 0;
+    wdSavedTitle = null;
     if (plan) startTimerWithPlan(plan); // fresh session -- seeds lastHeartbeatSuccessAt itself
   } catch (e) {
     console.error('Watchdog restart failed:', e);
@@ -1529,6 +1613,13 @@ function initReliableTickWorker() {
       // harmless no-op when there's nothing to do.
       if (timerRunning) heartbeatSession();
       runEndOfDayCheck();
+      // V14.3.31: watchdog rides the same reliable tick, every tick (not
+      // gated) -- this is what lets stage 1/2 actually escalate while the
+      // tab is backgrounded. The existing 1s main-thread interval also
+      // calls checkTimerHealth() for fast response while foregrounded, but
+      // that interval is exactly what gets throttled when hidden, which is
+      // the scenario this needs to survive.
+      checkTimerHealth();
       // V14.3.19: version check rides the same reliable tick (a plain
       // main-thread interval would itself be throttled while backgrounded --
       // exactly the condition "reaches everyone within minutes" needs to
@@ -6183,8 +6274,14 @@ function startTimerWithPlan(plan) {
   // until the first heartbeat resolves. Also clears any stale banner/state
   // left over from a prior session so this one starts clean.
   lastHeartbeatSuccessAt = Date.now();
-  timerHealthState = 'healthy';
+  wdStage = 0;
+  wdLastNotifiedMs = 0;
+  wdSavedTitle = null;
   hideTimerDeathBanner();
+  // V14.3.31: user-gesture entry point (clicking a task starts the timer) --
+  // browsers only allow the notification permission prompt from here, never
+  // from page load.
+  wdRequestPermission();
   // V14.3.7: generate the session id before persisting so a reload can resume
   // the SAME heartbeat doc (see restoreTimerState) instead of losing track of
   // it and orphaning it at whatever durationMins it had at last heartbeat.
@@ -6213,7 +6310,7 @@ function startTimerWithPlan(plan) {
     document.getElementById('twProgressFill').style.width = Math.min((secs/(8*3600))*100,100)+'%';
     // V14.2.25: Live tab title — visible from any other tab or software
     const proj = timerLinkedPlan?.project || 'Timer';
-    document.title = `⏱ ${hms} · ${proj}`;
+    if (wdStage === 0) document.title = `⏱ ${hms} · ${proj}`; // V14.3.31: don't clobber an active watchdog alert title
     checkTimerHealth(); // V14.3.17: unconditional, runs even while tab is hidden
   }, 1000);
   updateTimerVisualState(); // V14.2.25
@@ -6281,8 +6378,11 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
   // V14.3.17: seed the watchdog synchronously -- same reasoning as
   // startTimerWithPlan, this is also a moment tracking freshly resumes.
   lastHeartbeatSuccessAt = Date.now();
-  timerHealthState = 'healthy';
+  wdStage = 0;
+  wdLastNotifiedMs = 0;
+  wdSavedTitle = null;
   hideTimerDeathBanner();
+  wdRequestPermission(); // V14.3.31: user gesture -- resuming is also "starting" a timer running
   localStorage.setItem('timerState',JSON.stringify({startedAt:timerStartedAt,lastSessionStartedAt:window.lastSessionStartedAt,pausedMs:0,running:true,linkedPlan:timerLinkedPlan,sessionLogId:currentSessionLogId}));
   document.getElementById('timerWidget').classList.add('running');
   document.getElementById('timerPaused').style.display='none';
@@ -6296,7 +6396,7 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
     document.getElementById('timerDisplay').textContent=secsToHMS(secs);
     document.getElementById('twProgressFill').style.width=Math.min((secs/(8*3600))*100,100)+'%';
     const proj = timerLinkedPlan?.project || 'Timer';
-    document.title = `⏱ ${secsToHMS(secs)} · ${proj}`;
+    if (wdStage === 0) document.title = `⏱ ${secsToHMS(secs)} · ${proj}`; // V14.3.31: don't clobber an active watchdog alert title
     checkTimerHealth(); // V14.3.17
   },1000);
   updateTimerVisualState(); // V14.2.25
@@ -6853,7 +6953,7 @@ async function restoreTimerState() {
       const secs = getElapsed(timerStartedAt, timerPausedMs);
       document.getElementById('timerDisplay').textContent = secsToHMS(secs);
       const proj = timerLinkedPlan?.project || 'Timer';
-      document.title = `⏱ ${secsToHMS(secs)} · ${proj}`;
+      if (wdStage === 0) document.title = `⏱ ${secsToHMS(secs)} · ${proj}`; // V14.3.31: don't clobber an active watchdog alert title
       checkTimerHealth(); // V14.3.17
     }, 1000);
     updateTimerVisualState(); // V14.2.25
@@ -7084,7 +7184,9 @@ async function resetTimer() {
   // EOD auto-complete, etc.) so a stale banner can never linger after the
   // timer has genuinely been stopped -- there's nothing left to watch.
   lastHeartbeatSuccessAt = null;
-  timerHealthState = 'healthy';
+  wdStage = 0;
+  wdLastNotifiedMs = 0;
+  wdSavedTitle = null; // title already restored unconditionally two lines up
   hideTimerDeathBanner();
 
   const display = document.getElementById('timerDisplay');
