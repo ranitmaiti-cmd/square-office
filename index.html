@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-24.1'; // V14.3.31: timer death watchdog, stage 2 (desktop notification + sound + tab title)
+const APP_VERSION = '2026-07-24.3'; // V14.3.33: phantom-LIVE fix extended to Time Report (buildTrPerson/buildTrDetail), shared liveStatusFromHeartbeat()
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -4077,6 +4077,32 @@ async function fetchActiveTimersFromFirebase() {
     const STALE_THRESHOLD = 8 * 60 * 60 * 1000;
     const staleTimers = [];
 
+    // V14.3.32: "Who's Working Now" phantom-LIVE fix. activeTimers docs have
+    // NO heartbeat field of their own -- they're written once at session
+    // start (saveActiveTimerToFirebase) and never refreshed, so inProgress/
+    // running alone can't tell a live session from one whose heartbeat died
+    // hours ago. The real heartbeat lives on the corresponding timeLogs doc
+    // (written every 60s by heartbeatSession()), keyed by sessionLogId, not
+    // userId -- so cross-reference by userId to find each active timer's
+    // most recent heartbeat. {source:'server'} so a stale local cache can
+    // never show a dead session as live (same lesson as the sweep's Defect 2).
+    let lastSeenByUser = new Map();
+    try {
+      const hbSnap = await db.collection('timeLogs').where('inProgress', '==', true).get({ source: 'server' });
+      hbSnap.forEach(doc => {
+        const data = doc.data();
+        const seenMs = extractLastSeenMs(data);
+        if (!seenMs || !data.userId) return;
+        const existing = lastSeenByUser.get(data.userId);
+        if (!existing || seenMs > existing) lastSeenByUser.set(data.userId, seenMs); // most recent, if a user somehow has >1
+      });
+    } catch (e) {
+      console.error('❌ [live-status] heartbeat cross-reference read failed -- all rows will show NO SIGNAL this cycle:', e.message);
+      // lastSeenByUser stays empty -- every entry below falls through to
+      // 'unknown' rather than silently showing a trusted LIVE badge on data
+      // we couldn't actually verify.
+    }
+
     snapshot.forEach(doc => {
       const timer = doc.data();
       const elapsed = Date.now() - timer.startTime;
@@ -4090,7 +4116,8 @@ async function fetchActiveTimersFromFirebase() {
           userName:    timer.userName,
           startTime:   timer.startTime,
           projectName: timer.projectName || 'Unknown Activity',
-          phase:       timer.phase || ''
+          phase:       timer.phase || '',
+          lastSeenMs:  lastSeenByUser.get(doc.id) || null
         });
       }
     });
@@ -4128,18 +4155,40 @@ function renderLiveTimers() {
     return;
   }
 
-  // Sort by elapsed (longest first) and update elapsed seconds from startTime
-  const sorted = cachedActiveTimers
-    .map(t => ({ ...t, elapsedSecs: Math.floor((now - t.startTime) / 1000) }))
-    .sort((a, b) => b.elapsedSecs - a.elapsedSecs);
+  // V14.3.32: phantom-LIVE fix. Judge live-ness from lastSeenMs (the
+  // corresponding timeLogs doc's heartbeat, cross-referenced in
+  // fetchActiveTimersFromFirebase), not from inProgress/running alone.
+  // Deliberately reuses the EXACT existing (now - t.startTime) epoch-ms
+  // formula for elapsed -- t.startTime is already a raw epoch-ms number
+  // (Date.now() at session start, see saveActiveTimerToFirebase), never an
+  // "HH:MM" string, so there is no timezone parsing here to get wrong. A
+  // stale row freezes by substituting lastSeenMs for now in that SAME
+  // formula -- same math, just a different "now".
+  // V14.3.33: judgment itself now comes from the shared liveStatusFromHeartbeat()
+  // (also used by buildTrPerson/buildTrDetail) -- this panel just maps
+  // status to its own dot/color scheme.
+  const withStatus = cachedActiveTimers.map(t => {
+    const st = liveStatusFromHeartbeat(t.lastSeenMs, now);
+    const badgeColor = st.status === 'live' ? '#6E8F52' : st.status === 'stale' ? '#C0554A' : '#8A7E74';
+    const dot = st.status === 'live' ? '🟢' : st.status === 'stale' ? '🟠' : '⚪';
+    const elapsedSecs = st.status === 'stale'
+      ? Math.max(0, Math.floor((t.lastSeenMs - t.startTime) / 1000)) // frozen at last heartbeat
+      : Math.floor((now - t.startTime) / 1000); // live/unknown: ticks, same as before
+    return { ...t, status: st.status, badge: st.label, badgeColor, dot, elapsedSecs };
+  });
+
+  // Sort by elapsed (longest first) -- unchanged, now just fed a
+  // possibly-frozen elapsedSecs for stale rows.
+  const sorted = withStatus.sort((a, b) => b.elapsedSecs - a.elapsedSecs);
 
   feedEl.innerHTML = sorted.map(item => {
     const timeStr = secsToHMS(item.elapsedSecs);
+    const arrow = item.status === 'stale' ? '' : ' ⬆️'; // frozen number shouldn't imply it's still climbing
     return `
-      <div style="background:#EDF2E6;padding:10px;border-radius:6px;border-left:3px solid #6E8F52;">
+      <div style="background:#EDF2E6;padding:10px;border-radius:6px;border-left:3px solid ${item.badgeColor};">
         <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px;">
-          <div style="font-weight:600;font-size:13px;color:#3D332A;">🟢 ${item.userName}</div>
-          <div style="font-size:14px;font-weight:700;color:#6E8F52;font-family:monospace;">${timeStr} ⬆️</div>
+          <div style="font-weight:600;font-size:13px;color:#3D332A;">${item.dot} ${item.userName} <span style="background:${item.badgeColor};color:#fff;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">${item.badge}</span></div>
+          <div style="font-size:14px;font-weight:700;color:${item.badgeColor};font-family:monospace;">${timeStr}${arrow}</div>
         </div>
         <div style="font-size:12px;color:#5C4F42;">
           📁 ${item.projectName}${item.phase ? ` - ${item.phase}` : ''}
@@ -5105,13 +5154,26 @@ function runTimeReport(){
 function buildTrPerson(logs,total){
   const byU={};
   // Running (inProgress:true) entries are counted in mins below same as any other
-  // entry — the heartbeat already saved that time. hasLive just flags the row so
-  // it can be tagged "LIVE" in the UI; it must never be used to skip the entry.
-  logs.forEach(l=>{ if(!byU[l.userId])byU[l.userId]={mins:0,n:0,projects:{},hasLive:false,hasCapped:false}; byU[l.userId].mins+=l.durationMins; byU[l.userId].n++; if(l.inProgress)byU[l.userId].hasLive=true; if(l.autoCapped)byU[l.userId].hasCapped=true; if(!byU[l.userId].projects[l.projectName||l.activity||'-'])byU[l.userId].projects[l.projectName||l.activity||'-']=0; byU[l.userId].projects[l.projectName||l.activity||'-']+=l.durationMins; });
+  // entry — the heartbeat already saved that time. hasLive/hasStale just flag
+  // the row for the badge; they must never be used to skip the entry.
+  // V14.3.33: phantom-LIVE fix -- inProgress alone no longer means LIVE.
+  // Judge per-entry via the shared liveStatusFromHeartbeat(), same as
+  // "Who's Working Now" and buildTrDetail.
+  logs.forEach(l=>{
+    if(!byU[l.userId])byU[l.userId]={mins:0,n:0,projects:{},hasLive:false,hasStale:false,staleLabel:null,hasCapped:false};
+    byU[l.userId].mins+=l.durationMins; byU[l.userId].n++;
+    if(l.inProgress){
+      const st=liveStatusFromHeartbeat(extractLastSeenMs(l));
+      if(st.status==='live') byU[l.userId].hasLive=true;
+      else { byU[l.userId].hasStale=true; byU[l.userId].staleLabel=st.label; }
+    }
+    if(l.autoCapped)byU[l.userId].hasCapped=true; if(!byU[l.userId].projects[l.projectName||l.activity||'-'])byU[l.userId].projects[l.projectName||l.activity||'-']=0; byU[l.userId].projects[l.projectName||l.activity||'-']+=l.durationMins; });
   const sorted=Object.entries(byU).sort((a,b)=>b[1].mins-a[1].mins); const maxM=sorted[0]?.[1].mins||1;
   let html=`<table class="rpt-table"><thead><tr><th>Member</th><th>Breakdown</th><th style="text-align:right">Time</th><th style="text-align:right">Share</th></tr></thead><tbody>`;
   sorted.forEach(([uid,d])=>{ const u=users.find(u=>u.id===uid); const pct=((d.mins/total)*100).toFixed(1); const bar=((d.mins/maxM)*100).toFixed(1);
-    const liveTag=d.hasLive?' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">● LIVE</span>':'';
+    const liveTag=d.hasLive?' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">● LIVE</span>'
+      :d.hasStale?` <span style="background:#FBF0DC;color:#8B6914;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">${d.staleLabel}</span>`
+      :'';
     // V14.3.18: flag any person with an auto-capped entry in the current view -- needs review.
     const cappedTag=d.hasCapped?' <span style="background:#FBEAEA;color:#8B2E24;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">⚠ CAPPED</span>':'';
     const rows=Object.entries(d.projects).sort((a,b)=>b[1]-a[1]).map(([p,m])=>`<tr class="sub"><td colspan="2">📁 ${p}</td><td style="text-align:right;color:#A96E35;font-weight:600;">${minsToHM(m)}</td><td style="text-align:right;color:#8A7E74;">${((m/total)*100).toFixed(1)}%</td></tr>`).join('');
@@ -5141,10 +5203,23 @@ function buildTrDetail(logs){
   let html=`<table class="rpt-table"><thead><tr><th>Date</th><th>Member</th><th>Project / Activity</th><th>Phase</th><th>Typology</th><th>Clock Time</th><th>Description</th><th style="text-align:right">Time</th></tr></thead><tbody>`;
   sorted.forEach(l=>{ const u=users.find(u=>u.id===l.userId);
     const clockTime = l.startTime && l.endTime ? `${l.startTime} → ${l.endTime}` : '<span style="color:#D0C4B8;font-style:italic;">—</span>';
-    const liveTag = l.inProgress ? ' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">● LIVE</span>' : '';
+    // V14.3.33: phantom-LIVE fix -- inProgress alone no longer means LIVE.
+    // Judge via the shared liveStatusFromHeartbeat(), same as "Who's Working
+    // Now" and buildTrPerson. l carries its own lastHeartbeat directly
+    // (heartbeatSession() writes it to this same timeLogs doc), so no
+    // cross-reference is needed here, unlike activeTimers.
+    const liveStat = l.inProgress ? liveStatusFromHeartbeat(extractLastSeenMs(l)) : null;
+    const liveTag = liveStat
+      ? (liveStat.status === 'live'
+          ? ' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">● LIVE</span>'
+          : ` <span style="background:#FBF0DC;color:#8B6914;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">${liveStat.label}</span>`)
+      : '';
     // V14.3.18: distinct visual flag for auto-capped entries -- needs review, not a normal completed entry.
     const cappedTag = l.autoCapped ? ' <span style="background:#FBEAEA;color:#8B2E24;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">⚠ CAPPED — VERIFY</span>' : '';
-    const rowStyle = l.autoCapped ? ' style="background:#FBEAEA;"' : (l.inProgress ? ' style="font-style:italic;background:#FAFBF7;"' : '');
+    const rowStyle = l.autoCapped ? ' style="background:#FBEAEA;"'
+      : liveStat?.status === 'live' ? ' style="font-style:italic;background:#FAFBF7;"'
+      : liveStat ? ' style="background:#FBF0DC;"' // stale/unknown but still inProgress -- flag it, don't dress it as a healthy live row
+      : '';
     // V14.3.29: display-only Lunch Break / non-productive detection for the
     // Detail Log table -- broader than just !l.productive so it also catches
     // rows with no projectId or an explicit "Lunch Break" projectName.
@@ -6663,6 +6738,21 @@ function extractLastSeenMs(data) {
   return (data.lastHeartbeat && typeof data.lastHeartbeat.seconds === 'number')
     ? data.lastHeartbeat.seconds * 1000
     : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
+}
+
+// V14.3.33: shared judgment used by every "is this actually live" display --
+// "Who's Working Now" (fetchActiveTimersFromFirebase/renderLiveTimers) and
+// the Time Report's buildTrPerson/buildTrDetail. Pure function: takes an
+// already-resolved lastSeenMs (each call site resolves it however fits its
+// own data shape -- direct extractLastSeenMs(entry) for a timeLogs doc that
+// carries its own lastHeartbeat, or a cross-referenced value for
+// activeTimers docs which don't) plus `now`, so it's trivially testable
+// against a fixture without touching Firestore or racing the sweep.
+function liveStatusFromHeartbeat(lastSeenMs, now = Date.now()) {
+  if (lastSeenMs == null) return { status: 'unknown', label: 'NO SIGNAL', staleMin: null };
+  const staleMs = now - lastSeenMs;
+  if (staleMs < STALE_HEARTBEAT_MS) return { status: 'live', label: 'LIVE', staleMin: Math.round(staleMs / 60000) };
+  return { status: 'stale', label: `STALLED ${Math.round(staleMs / 60000)}m`, staleMin: Math.round(staleMs / 60000) };
 }
 
 async function finalizeStaleHeartbeatSessions() {
