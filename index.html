@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-24.3'; // V14.3.33: phantom-LIVE fix extended to Time Report (buildTrPerson/buildTrDetail), shared liveStatusFromHeartbeat()
+const APP_VERSION = '2026-07-24.4'; // V14.3.33: combined release -- phantom-LIVE fix (Who's Working Now + Time Report) + orphaned-session-on-load warning
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -2769,6 +2769,11 @@ loadData().then(async () => {
         // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
         await restoreTimerState();
 
+        // V14.3.33: after restore has had its chance, check for a session
+        // Firestore still shows inProgress that this page did NOT resume --
+        // an orphan from a prior reload (e.g. a deploy refresh).
+        await checkForOrphanedSessionOnLoad();
+
         // V14.2.25: Auto-show timer widget on session restore
         const tw = document.getElementById('timerWidget');
         if (tw) tw.style.display = 'flex';
@@ -2858,6 +2863,10 @@ async function doLogin(){
 
     // V14.2.2: FIX #7 - Restore timer state (with old timer recovery)
     await restoreTimerState();
+
+    // V14.3.33: after restore has had its chance, check for a session
+    // Firestore still shows inProgress that this page did NOT resume.
+    await checkForOrphanedSessionOnLoad();
 
     // V14.2.25: Auto-show timer widget on login — always visible
     const tw = document.getElementById('timerWidget');
@@ -6917,6 +6926,80 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
   if (finalized > 0) showNotificationToast('🔧 Sessions Recovered', `${finalized} abandoned session(s) across the team were closed out automatically.`, 'info');
 
   return result;
+}
+
+// ═══════════════════════════════════════════════════════
+// V14.3.33: ORPHANED-SESSION-ON-LOAD WARNING
+// The watchdog (checkTimerHealth) only fires when a timer is RUNNING and its
+// heartbeat goes stale -- it needs a running timer to watch. A page RELOAD
+// (every deploy triggers one via the version banner) starts with NO running
+// timer at all, even if Firestore still holds an inProgress session for this
+// user that the fresh page didn't restore. On 24 Jul the 11:00 deploy did
+// exactly this to Taskiya and Ridhi -- each lost a near-full day, only
+// discovered the next morning. This closes that gap: after restoreTimerState()
+// has had its chance to resume a session, if it didn't AND Firestore still
+// shows one inProgress for this user, tell them. Read-only -- never
+// auto-restarts or auto-closes anything; the user decides.
+// Uses the SAME "is a timer running" test as the watchdog (timerRunning) and
+// the same STALE_HEARTBEAT_MS/extractLastSeenMs as the watchdog and the
+// phantom-LIVE fix, so all three agree on what "stale" means.
+// ═══════════════════════════════════════════════════════
+async function checkForOrphanedSessionOnLoad() {
+  if (!currentUser?.id) return; // not logged in -- no-op
+  if (timerRunning) return;     // this page already restored a live timer -- nothing orphaned
+
+  let snap;
+  try {
+    snap = await db.collection('timeLogs')
+      .where('userId', '==', currentUser.id)
+      .where('inProgress', '==', true)
+      .get({ source: 'server' });
+  } catch (e) {
+    console.warn('[orphan-check] read failed -- staying silent rather than risk a false warning:', e.message);
+    return; // fails safe: never warn on an unverified read
+  }
+
+  // V14.3.33: only flag heartbeats that are genuinely stale (or never seen),
+  // same STALE_HEARTBEAT_MS/extractLastSeenMs the watchdog and phantom-LIVE
+  // use. A doc with a FRESH heartbeat here is far more likely a legitimate
+  // session running live on another device/tab right now -- warning on that
+  // would be a false "orphan" alarm for something that isn't actually dead.
+  const now = Date.now();
+  const orphans = [];
+  snap.forEach(doc => {
+    if (doc.id === currentSessionLogId) return; // defensive -- shouldn't be possible when !timerRunning, but never flag "your own" session
+    const data = doc.data();
+    const hb = extractLastSeenMs(data);
+    if (hb && (now - hb) < STALE_HEARTBEAT_MS) return; // fresh -- likely still live elsewhere, not an orphan
+    orphans.push({ id: doc.id, ...data });
+  });
+  if (orphans.length === 0) return;
+
+  // Report the most recently active one if there's more than one.
+  orphans.sort((a, b) => (extractLastSeenMs(b) || 0) - (extractLastSeenMs(a) || 0));
+  const o = orphans[0];
+  const hbMs = extractLastSeenMs(o);
+  const staleMin = hbMs ? Math.round((now - hbMs) / 60000) : null;
+
+  console.warn(`[orphan-check] ${orphans.length} orphaned inProgress session(s) found on load; newest: ${o.projectName || 'a project'} stale ${staleMin == null ? '?' : staleMin}m`);
+  showOrphanSessionBanner(o, orphans.length, staleMin);
+}
+
+function showOrphanSessionBanner(orphan, count, staleMin) {
+  let banner = document.getElementById('orphanSessionBanner');
+  if (banner) return; // already showing -- don't stack a second one
+  banner = document.createElement('div');
+  banner.id = 'orphanSessionBanner';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#C8860D;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;font-size:14px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
+  const proj = orphan.projectName || 'a project';
+  const staleTxt = staleMin == null ? 'an unknown time ago' : `${staleMin} min ago`;
+  const countTxt = count > 1 ? ` (+${count - 1} more)` : '';
+  banner.innerHTML = `<span>⚠️ You have an unfinished <b>${proj}</b> session from ${orphan.startTime || 'earlier'} that stopped recording ${staleTxt}${countTxt}. It was likely orphaned by a page reload -- start a new timer to keep tracking, or check Time Report to close it out.</span>` +
+    `<button id="orphanSessionDismissBtn" style="background:#fff;color:#C8860D;border:none;border-radius:6px;padding:6px 16px;font-weight:700;cursor:pointer;font-size:13px;">Dismiss</button>`;
+  document.body.appendChild(banner);
+  document.getElementById('orphanSessionDismissBtn').addEventListener('click', () => {
+    banner.style.display = 'none';
+  });
 }
 
 // ═══════════════════════════════════════════════════════
