@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-24.4'; // V14.3.33: combined release -- phantom-LIVE fix (Who's Working Now + Time Report) + orphaned-session-on-load warning
+const APP_VERSION = '2026-07-24.5'; // V14.3.34: sessionStartMs on timeLogs (Stage 1, additive-only, activeTimers collapse)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -1775,7 +1775,19 @@ function heartbeatSession() {
     desc: `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (in progress)`,
     productive: timerLinkedPlan.type !== 'lunch',
     inProgress: true,
-    ts: now
+    ts: now,
+    // V14.3.34: raw epoch session-start anchor, additive-only (Stage 1 of
+    // the activeTimers collapse). Deliberately timerStartedAt, not `now` --
+    // this is the session's true origin, not this heartbeat's timestamp,
+    // and it's what closes the timezone-parsing hazard the "HH:MM" startTime
+    // string carries (the exact parse that caused the 5.5h skew). Written
+    // unconditionally on every heartbeat rather than gated to "only if
+    // unset": verified timerStartedAt is stable across a same-tab reload
+    // (restoreTimerState() reconstructs the identical wall-clock value,
+    // since timerPausedMs is always 0 -- pause was removed elsewhere in
+    // this codebase's history), so every heartbeat writes the same value --
+    // behaviorally "written once," without needing a first-write flag.
+    sessionStartMs: timerStartedAt
   });
   // V14.3.8: field-level heartbeat ping (.update(), not .set()) so reconnect and
   // login-recovery have a server-trustworthy "still alive" timestamp, independent
