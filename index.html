@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-24.5'; // V14.3.34: sessionStartMs on timeLogs (Stage 1, additive-only, activeTimers collapse)
+const APP_VERSION = '2026-07-24.6'; // V14.3.35: "Who's Working Now" reads timeLogs directly (Stage 2, activeTimers collapse)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -4053,26 +4053,16 @@ async function renderAppraisal() {
 }
 
 
+// V14.3.35: Stage 2 of the activeTimers collapse -- no-op. "Who's Working
+// Now" now reads timeLogs directly (fetchActiveTimersFromFirebase), so
+// nothing consumes new activeTimers docs anymore. Left as a no-op function
+// rather than removed, so its call sites (startTimerWithPlan,
+// timerResumeBtn) don't need to change. removeActiveTimerFromFirebase and
+// the delete-user cleanup are left working so any EXISTING activeTimers
+// docs still get cleaned up on normal stop/account-delete paths -- full
+// removal of the collection and these remaining call sites is Stage 3.
 async function saveActiveTimerToFirebase() {
-  if (!currentUser || !timerRunning || !timerStartedAt) return;
-  
-  try {
-    const timerData = {
-      userId: currentUser.id,
-      userName: currentUser.name,
-      projectName: timerLinkedPlan ? timerLinkedPlan.project : 'Unplanned',
-      projectId: timerLinkedPlan ? timerLinkedPlan.projectId : null,
-      phase: timerLinkedPlan ? (timerLinkedPlan.phase || timerLinkedPlan.typology || '') : '',
-      startTime: timerStartedAt,
-      running: true,
-      updatedAt: Date.now()
-    };
-    
-    await db.collection("activeTimers").doc(currentUser.id).set(timerData);
-    console.log('✅ Active timer saved to Firebase');
-  } catch (e) {
-    console.error('❌ Error saving active timer:', e);
-  }
+  // Intentionally does nothing.
 }
 
 async function removeActiveTimerFromFirebase() {
@@ -4092,65 +4082,50 @@ let cachedActiveTimers = []; // V14.2.10: Cache timer data, only refresh from Fi
 
 async function fetchActiveTimersFromFirebase() {
   // Only called every 30 seconds — not every second
+  // V14.3.35: Stage 2 of the activeTimers collapse. Reads timeLogs directly
+  // instead of activeTimers cross-referenced against timeLogs -- one query
+  // now answers both "who's active" and "how fresh is their heartbeat",
+  // since each timeLogs doc already carries its own lastHeartbeat.
+  // {source:'server'} so a stale local cache can never show a dead session
+  // as live (same lesson as the sweep's Defect 2).
   const activeTimers = [];
   try {
-    const snapshot = await db.collection("activeTimers").get();
-    const STALE_THRESHOLD = 8 * 60 * 60 * 1000;
-    const staleTimers = [];
+    const snapshot = await db.collection('timeLogs').where('inProgress', '==', true).get({ source: 'server' });
 
-    // V14.3.32: "Who's Working Now" phantom-LIVE fix. activeTimers docs have
-    // NO heartbeat field of their own -- they're written once at session
-    // start (saveActiveTimerToFirebase) and never refreshed, so inProgress/
-    // running alone can't tell a live session from one whose heartbeat died
-    // hours ago. The real heartbeat lives on the corresponding timeLogs doc
-    // (written every 60s by heartbeatSession()), keyed by sessionLogId, not
-    // userId -- so cross-reference by userId to find each active timer's
-    // most recent heartbeat. {source:'server'} so a stale local cache can
-    // never show a dead session as live (same lesson as the sweep's Defect 2).
-    let lastSeenByUser = new Map();
-    try {
-      const hbSnap = await db.collection('timeLogs').where('inProgress', '==', true).get({ source: 'server' });
-      hbSnap.forEach(doc => {
-        const data = doc.data();
-        const seenMs = extractLastSeenMs(data);
-        if (!seenMs || !data.userId) return;
-        const existing = lastSeenByUser.get(data.userId);
-        if (!existing || seenMs > existing) lastSeenByUser.set(data.userId, seenMs); // most recent, if a user somehow has >1
-      });
-    } catch (e) {
-      console.error('❌ [live-status] heartbeat cross-reference read failed -- all rows will show NO SIGNAL this cycle:', e.message);
-      // lastSeenByUser stays empty -- every entry below falls through to
-      // 'unknown' rather than silently showing a trusted LIVE badge on data
-      // we couldn't actually verify.
-    }
-
+    // Dedupe by userId, keeping the freshest heartbeat -- timeLogs is keyed
+    // by session id, not user id, so in the rare case a user somehow has
+    // more than one inProgress:true doc, only the most-likely-genuine one
+    // should show.
+    const byUser = new Map();
     snapshot.forEach(doc => {
-      const timer = doc.data();
-      const elapsed = Date.now() - timer.startTime;
-      if (elapsed > STALE_THRESHOLD) {
-        staleTimers.push(doc.id);
-        return;
-      }
-      if (timer.running && timer.startTime) {
-        activeTimers.push({
-          userId:      doc.id,
-          userName:    timer.userName,
-          startTime:   timer.startTime,
-          projectName: timer.projectName || 'Unknown Activity',
-          phase:       timer.phase || '',
-          lastSeenMs:  lastSeenByUser.get(doc.id) || null
-        });
-      }
+      const data = doc.data();
+      if (!data.userId) return;
+      const seenMs = extractLastSeenMs(data);
+      const existing = byUser.get(data.userId);
+      if (!existing || (seenMs || 0) > (existing.seenMs || 0)) byUser.set(data.userId, { data, seenMs });
     });
 
-    if (DEBUG) console.log('📊 Firebase activeTimers collection size:', snapshot.size);
-    if (DEBUG) snapshot.forEach(doc => console.log('📄 Active timer doc:', doc.id, doc.data()));
-    if (DEBUG) console.log('✅ Active timers loaded:', activeTimers.length, activeTimers);
+    byUser.forEach(({ data, seenMs }, userId) => {
+      // V14.3.35: sessionStartMs (Stage 1) when present -- raw epoch,
+      // timezone-safe. Falls back to parsing the "HH:MM" startTime string
+      // for in-flight sessions that predate Stage 1; no backfill needed,
+      // this only matters until those specific sessions finish.
+      const startMs = data.sessionStartMs != null ? data.sessionStartMs
+        : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00`).getTime() : null);
+      if (startMs == null) return; // can't place this session on a timeline at all -- skip rather than guess
 
-    // Clean up stale timers
-    for (const id of staleTimers) {
-      try { await db.collection("activeTimers").doc(id).delete(); } catch(e) {}
-    }
+      const u = users.find(u => u.id === userId);
+      activeTimers.push({
+        userId,
+        userName:    u?.name || 'Unknown',
+        startTime:   startMs,
+        projectName: data.projectName || 'Unknown Activity',
+        phase:       data.phase || '',
+        lastSeenMs:  seenMs || null
+      });
+    });
+
+    if (DEBUG) console.log('✅ Active timers loaded (from timeLogs):', activeTimers.length, activeTimers);
 
     cachedActiveTimers = activeTimers;
   } catch(e) {
@@ -4176,15 +4151,16 @@ function renderLiveTimers() {
     return;
   }
 
-  // V14.3.32: phantom-LIVE fix. Judge live-ness from lastSeenMs (the
-  // corresponding timeLogs doc's heartbeat, cross-referenced in
-  // fetchActiveTimersFromFirebase), not from inProgress/running alone.
+  // V14.3.32: phantom-LIVE fix. Judge live-ness from lastSeenMs (each
+  // timeLogs doc's own heartbeat -- V14.3.35 reads timeLogs directly, no
+  // cross-reference needed anymore), not from inProgress/running alone.
   // Deliberately reuses the EXACT existing (now - t.startTime) epoch-ms
-  // formula for elapsed -- t.startTime is already a raw epoch-ms number
-  // (Date.now() at session start, see saveActiveTimerToFirebase), never an
-  // "HH:MM" string, so there is no timezone parsing here to get wrong. A
-  // stale row freezes by substituting lastSeenMs for now in that SAME
-  // formula -- same math, just a different "now".
+  // formula for elapsed -- t.startTime is a raw epoch-ms number
+  // (fetchActiveTimersFromFirebase resolves it from sessionStartMs, falling
+  // back to a parsed "HH:MM" string only for sessions that predate Stage 1),
+  // so there is no timezone parsing to get wrong HERE. A stale row freezes
+  // by substituting lastSeenMs for now in that SAME formula -- same math,
+  // just a different "now".
   // V14.3.33: judgment itself now comes from the shared liveStatusFromHeartbeat()
   // (also used by buildTrPerson/buildTrDetail) -- this panel just maps
   // status to its own dot/color scheme.
@@ -6538,7 +6514,10 @@ document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>
   // Save incremental log AND mark task done
   const autoDesc=`${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'}` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
   // V14.3.3: finalise the heartbeat log under the same id (fallback to new id)
-  upsertTimeLog({id:currentSessionLogId||genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,inProgress:false,ts:Date.now(),...(capped?{autoCapped:true}:{})});
+  // V14.3.35: sessionStartMs here too -- a session under 60s never ticks a
+  // heartbeat, so this is its ONLY write. Matches Stage 1's heartbeat path
+  // exactly: timerStartedAt (the session's true origin), not Date.now().
+  upsertTimeLog({id:currentSessionLogId||genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,inProgress:false,ts:Date.now(),sessionStartMs:timerStartedAt,...(capped?{autoCapped:true}:{})});
   const plan=planEntries.find(p=>p.id===timerLinkedPlan.id);
   if(plan)plan.done=true;
 
