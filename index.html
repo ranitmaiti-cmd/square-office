@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-24.7'; // V14.3.36: fix Stage 2 fallback timezone bug -- pin IST offset so it's correct for any reader, not just IST-set machines
+const APP_VERSION = '2026-07-26.1'; // V14.3.37: remove activeTimers writers/readers (Stage 3, final step of the activeTimers collapse)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -2939,11 +2939,6 @@ document.getElementById('resetPasswordBtn').addEventListener('click', () => {
 });
 
 document.getElementById('logoutBtn').addEventListener('click',async ()=>{
-  // V14.2.2: FIX #1 - Clean up timer before logout
-  if (timerRunning) {
-    await removeActiveTimerFromFirebase();
-    console.log('🧹 Timer cleaned up on logout');
-  }
   localStorage.removeItem('timerState');
   
   await markOffline(); // V13: Mark user as offline
@@ -4053,28 +4048,13 @@ async function renderAppraisal() {
 }
 
 
-// V14.3.35: Stage 2 of the activeTimers collapse -- no-op. "Who's Working
-// Now" now reads timeLogs directly (fetchActiveTimersFromFirebase), so
-// nothing consumes new activeTimers docs anymore. Left as a no-op function
-// rather than removed, so its call sites (startTimerWithPlan,
-// timerResumeBtn) don't need to change. removeActiveTimerFromFirebase and
-// the delete-user cleanup are left working so any EXISTING activeTimers
-// docs still get cleaned up on normal stop/account-delete paths -- full
-// removal of the collection and these remaining call sites is Stage 3.
-async function saveActiveTimerToFirebase() {
-  // Intentionally does nothing.
-}
-
-async function removeActiveTimerFromFirebase() {
-  if (!currentUser) return;
-  
-  try {
-    await db.collection("activeTimers").doc(currentUser.id).delete();
-    console.log('✅ Active timer removed from Firebase');
-  } catch (e) {
-    console.error('❌ Error removing active timer:', e);
-  }
-}
+// V14.3.37: Stage 3 of the activeTimers collapse -- removed.
+// saveActiveTimerToFirebase() and removeActiveTimerFromFirebase() were the
+// last two writers. Both, and every call site, are gone now -- nothing
+// writes to activeTimers anymore. "Who's Working Now" reads timeLogs
+// directly since Stage 2. Existing activeTimers docs are left alone in
+// Firestore -- nothing reads them anymore, and deleting the collection's
+// data is out of scope here (harmless orphans, not a correctness risk).
 
 // V13.4: Live Timer Widget
 let liveTimerInterval = null;
@@ -5833,8 +5813,40 @@ function renderManage(){
         planEntries = planEntries.filter(p => p.userId !== u.id);
         // Delete presence doc
         await db.collection("presence").doc(u.id).delete().catch(()=>{});
-        // Delete active timer if any
-        await db.collection("activeTimers").doc(u.id).delete().catch(()=>{});
+        // V14.3.37: Stage 3 -- finalize any inProgress timeLogs doc for this
+        // user instead of deleting an activeTimers doc (removed). The old
+        // activeTimers delete only ever cleaned up a display cache; it never
+        // touched the REAL record, so a user deleted mid-session left their
+        // timeLogs doc orphaned at inProgress:true forever -- invisible to
+        // every report, since nothing looks for it once the user is gone.
+        // Same finalize math as the sweep (extractLastSeenMs/
+        // capSessionDuration), not the sweep functions themselves.
+        try {
+          const inProgSnap = await db.collection('timeLogs')
+            .where('userId', '==', u.id)
+            .where('inProgress', '==', true)
+            .get({ source: 'server' });
+          for (const doc of inProgSnap.docs) {
+            const data = doc.data();
+            const lastSeenMs = extractLastSeenMs(data);
+            const startMs = data.sessionStartMs != null ? data.sessionStartMs
+              : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00+05:30`).getTime() : lastSeenMs);
+            const effectiveEndMs = lastSeenMs || startMs || Date.now();
+            const { durationMins, capped } = startMs
+              ? capSessionDuration(Math.max(0, Math.round((effectiveEndMs - startMs) / 1000)))
+              : { durationMins: data.durationMins || 0, capped: false };
+            const endTime = new Date(effectiveEndMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+            await db.collection('timeLogs').doc(doc.id).update({
+              inProgress: false,
+              recovered: true,
+              durationMins,
+              endTime,
+              desc: `${data.desc || 'Work on project'} (recovered — user account deleted)`,
+              recoveredAt: new Date().toISOString(),
+              ...(capped ? { autoCapped: true } : {})
+            });
+          }
+        } catch (e) { console.error('finalize in-progress timeLogs on user delete failed', e); }
         // Note: timeLogs intentionally kept for project history/reporting
         await autoSave();
         renderManage();
@@ -6398,7 +6410,6 @@ function startTimerWithPlan(plan) {
   }, 1000);
   updateTimerVisualState(); // V14.2.25
   renderWidgetTaskList(plan.id);
-  saveActiveTimerToFirebase();
   // V14.3.3: new durable session — start 60s heartbeat + immediate write.
   // (currentSessionLogId is already set above, before the localStorage write.)
   // V14.3.18: prefer the reliable tick worker (survives background-tab
@@ -6484,7 +6495,6 @@ document.getElementById('timerResumeBtn').addEventListener('click',()=>{
   },1000);
   updateTimerVisualState(); // V14.2.25
   renderWidgetTaskList(timerLinkedPlan.id);
-  saveActiveTimerToFirebase();
 });
 
 // V14.2.24: New Task button removed — replaced by tap-to-switch task list in widget
@@ -6572,151 +6582,98 @@ document.getElementById('timerCompletePausedBtn').addEventListener('click', asyn
 });
 
 // ═══════════════════════════════════════════════════════
-// V14.2.23: OVERNIGHT STALE TIMER AUTO-CLEANUP (smart gap-fill)
+// V14.2.23 / V14.3.37: OVERNIGHT STALE TIMER CLEANUP
 //
-// Core principle: only log the UNACCOUNTED gap.
+// V14.3.37 (Stage 3 of the activeTimers collapse): repointed from
+// activeTimers to timeLogs.inProgress:true directly. The old version
+// sourced from activeTimers and reconstructed a "gap" by comparing its
+// startTime against updatedAt -- but activeTimers.updatedAt was only ever
+// set once, at session start (same moment as startTime), so that window
+// math was close to a no-op in practice; the gap-reconstruction rarely
+// produced anything meaningful. Reading timeLogs directly makes the
+// reconstruction unnecessary in the first place: a stale inProgress doc
+// already carries an ACCURATE durationMins from its last real heartbeat.
+// So this now finalizes the doc in place (same math as the sweep --
+// extractLastSeenMs/capSessionDuration, not the sweep functions
+// themselves) instead of reconstructing a separate gap-fill entry.
 //
-// Old behaviour: always wrote a flat 8h (or 9h cap) entry regardless
-// of what the user had already logged — causing massive inflation when
-// someone had paused+logged multiple sessions and left the timer running.
-//
-// New behaviour:
-//  1. Find the timer's session window: startTime → 20:00 that day (hard EOD cap)
-//  2. Sum all logs already recorded for that user+project+date that fall
-//     within that window (their real pause entries)
-//  3. Gap = window duration − already logged
-//  4. If gap ≤ 5 min  → nothing meaningful to add, just delete the stale doc
-//  5. If gap > 5 min  → write ONE gap-fill entry for exactly that duration
-//  6. Never write more than one autoCompleted entry per user+project+date
+// Query is inProgress==true only (no composite index needed, same reason
+// the sweep does it this way) -- the date<today filter happens client-side.
+// Skips a session that's still genuinely fresh even if its `date` is a
+// previous day (a real overnight session), and never touches this tab's
+// own currentSessionLogId.
 // ═══════════════════════════════════════════════════════
 async function cleanupStaleTimers() {
   try {
     const today = fmt(new Date());
-    const snapshot = await db.collection("activeTimers").get();
+    const snapshot = await db.collection('timeLogs').where('inProgress', '==', true).get({ source: 'server' });
     if (snapshot.empty) return;
 
     const stale = [];
     snapshot.forEach(doc => {
+      if (doc.id === currentSessionLogId) return; // never touch this tab's own live session
       const data = doc.data();
-      if (!data.startTime) return;
-      const timerDate = fmt(new Date(data.startTime));
-      if (timerDate < today) {
-        stale.push({ id: doc.id, data });
-      }
+      if (data.date && data.date < today) stale.push({ id: doc.id, data });
     });
 
     if (stale.length === 0) return;
 
-    console.log(`🧹 Found ${stale.length} stale timer(s) from previous day — smart gap-fill...`);
+    console.log(`🧹 Found ${stale.length} stale timer(s) from previous day(s) — finalizing...`);
 
-    const autoCompleted = [];
+    const finalized = [];
     const skipped = [];
+    const now = Date.now();
 
     for (const { id, data } of stale) {
-      const startTime = data.startTime;
-      const timerDate = fmt(new Date(startTime));
+      const lastSeenMs = extractLastSeenMs(data);
 
-      // V14.2.25: Guard — never write a second autoCompleted entry for same user+project+date
-      // Use loose equality so null === null and undefined === null both match
-      const alreadyAutoCompleted = timeLogs.find(l =>
-        l.userId === id &&
-        l.date === timerDate &&
-        (l.projectId || null) === (data.projectId || null) &&
-        l.autoCompleted === true
-      );
-      if (alreadyAutoCompleted) {
-        console.log(`⏭️ Already auto-completed for ${data.userName || id} on ${timerDate} — deleting stale doc only`);
-        await db.collection("activeTimers").doc(id).delete();
-        skipped.push(data.userName || id);
+      // Still genuinely fresh (a real overnight session) even though its
+      // date is a previous day -- leave it alone, same threshold the sweep
+      // and watchdog use.
+      if (lastSeenMs && (now - lastSeenMs) < STALE_HEARTBEAT_MS) {
+        skipped.push(data.userName || data.userId || id);
         continue;
       }
 
-      // Session window: timer start → 20:00 that day (hard EOD cap)
-      // V14.2.27: extended from 19:00 to 20:00
-      // This prevents multi-day elapsed time from inflating a single entry
-      const timerDateObj  = new Date(startTime);
-      const eodMs         = new Date(
-        timerDateObj.getFullYear(),
-        timerDateObj.getMonth(),
-        timerDateObj.getDate(),
-        20, 0, 0  // 8:00 PM hard cap
-      ).getTime();
-      const windowStartMs = startTime;
-      const windowEndMs   = Math.min(eodMs, data.updatedAt || eodMs); // respect last known activity
-      const windowMins    = Math.max(0, Math.round((windowEndMs - windowStartMs) / 60000));
+      const startMs = data.sessionStartMs != null ? data.sessionStartMs
+        : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00+05:30`).getTime() : lastSeenMs);
+      const effectiveEndMs = lastSeenMs || startMs || now;
+      const { durationMins, capped } = startMs
+        ? capSessionDuration(Math.max(0, Math.round((effectiveEndMs - startMs) / 1000)))
+        : { durationMins: data.durationMins || 0, capped: false };
+      const endTime = new Date(effectiveEndMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const ageMin = lastSeenMs ? Math.round((now - lastSeenMs) / 60000) : null;
 
-      // Sum all existing logs for this user + project + date within the window
-      const existingMins = timeLogs
-        .filter(l =>
-          l.userId    === id &&
-          l.date      === timerDate &&
-          l.projectId === (data.projectId || null) &&
-          !l.autoCompleted
-        )
-        .reduce((sum, l) => sum + (l.durationMins || 0), 0);
-
-      const gapMins = Math.max(0, windowMins - existingMins);
-
-      console.log(`🔍 ${data.userName || id} | window: ${windowMins}m | already logged: ${existingMins}m | gap: ${gapMins}m`);
-
-      // Delete stale doc regardless — cleanup always happens
-      await db.collection("activeTimers").doc(id).delete();
-
-      // If gap is 5 minutes or less — nothing meaningful to add
-      if (gapMins <= 5) {
-        console.log(`⏭️ Gap too small (${gapMins}m) for ${data.userName || id} — no entry written`);
-        skipped.push(data.userName || id);
-        continue;
-      }
-
-      // Calculate clock times for the gap entry
-      // Gap starts at: timerStart + existingMins (i.e. after all their real sessions)
-      const gapStartMs  = windowStartMs + (existingMins * 60000);
-      const gapEndMs    = gapStartMs + (gapMins * 60000);
-      const clockStart  = new Date(gapStartMs).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', hour12:false});
-      const clockEnd    = new Date(Math.min(gapEndMs, eodMs)).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', hour12:false});
-
-      const logEntry = {
-        id:           genId(),
-        userId:       id,
-        date:         timerDate,
-        projectId:    data.projectId   || null,
-        projectName:  data.projectName || 'Unknown Project',
-        phase:        data.phase       || '',
-        typology:     data.typology    || '',
-        activity:     '',
-        durationMins: gapMins,
-        startTime:    clockStart,
-        endTime:      clockEnd,
-        desc:         `${data.phase || data.projectName || 'Work on project'} (Auto-completed — ${gapMins}m unaccounted gap after ${existingMins}m of logged sessions)`,
-        productive:   true,
-        ts:           Date.now(),
-        autoCompleted: true
+      const updates = {
+        inProgress: false,
+        recovered: true,
+        durationMins,
+        endTime,
+        desc: `${data.desc || 'Work on project'} (recovered — previous-day cleanup${ageMin != null ? `, heartbeat stale for ${ageMin}m` : ''})`,
+        recoveredAt: new Date().toISOString(),
+        ...(capped ? { autoCapped: true } : {})
       };
 
-      await db.collection("timeLogs").doc(logEntry.id).set({
-        ...logEntry,
-        updatedAt: new Date().toISOString()
-      });
-      timeLogs.push(logEntry);
-      autoCompleted.push({ name: data.userName || id, mins: gapMins });
-
-      console.log(`✅ Gap-fill for ${data.userName || id}: ${minsToHM(gapMins)} (window ${windowMins}m − logged ${existingMins}m)`);
+      try {
+        await db.collection('timeLogs').doc(id).update(updates);
+        const localIdx = timeLogs.findIndex(l => l.id === id);
+        if (localIdx >= 0) timeLogs[localIdx] = { ...timeLogs[localIdx], ...updates };
+        finalized.push({ name: data.userName || users.find(u => u.id === data.userId)?.name || data.userId || id, mins: durationMins });
+        console.log(`✅ Finalized ${data.userName || data.userId || id}: ${minsToHM(durationMins)}`);
+      } catch (e) {
+        console.error(`❌ Failed to finalize stale timer ${id}:`, e.message);
+      }
     }
 
-    if (autoCompleted.length > 0 || skipped.length > 0) {
+    if (finalized.length > 0) {
       renderDashboard();
       renderTimeLog();
       if (currentUser?.isAdmin) {
-        if (autoCompleted.length > 0) {
-          const details = autoCompleted.map(a => `${a.name}: ${minsToHM(a.mins)}`).join(', ');
-          showNotificationToast('🧹 Stale Timers Gap-Filled', details, 'warning');
-        }
-        if (skipped.length > 0) {
-          console.log(`⏭️ Stale timers with no gap to fill: ${skipped.join(', ')}`);
-        }
+        const details = finalized.map(f => `${f.name}: ${minsToHM(f.mins)}`).join(', ');
+        showNotificationToast('🧹 Stale Timers Finalized', details, 'warning');
       }
     }
+    if (skipped.length > 0) console.log(`⏭️ Left alone (still fresh): ${skipped.join(', ')}`);
   } catch(e) {
     console.error('❌ Stale timer cleanup failed:', e);
   }
@@ -7236,7 +7193,6 @@ document.getElementById('orphanDiscardBtn').addEventListener('click', async () =
   if (!confirm('Discard this timer completely? No time will be logged.')) return;
   localStorage.removeItem('timerState');
   if (orphanSnoozeTimeout) clearTimeout(orphanSnoozeTimeout);
-  await removeActiveTimerFromFirebase();
   orphanTimerState  = null;
   orphanSnoozeCount = 0;
   closeModal('orphanTimerModal');
@@ -7407,8 +7363,6 @@ async function resetTimer() {
     }
     preStart.style.display = 'block';
   }
-
-  await removeActiveTimerFromFirebase();
 }
 
 // V14.2.24: EOD Summary — shows what was logged today, asks staff to confirm
