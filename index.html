@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-24.6'; // V14.3.35: "Who's Working Now" reads timeLogs directly (Stage 2, activeTimers collapse)
+const APP_VERSION = '2026-07-24.7'; // V14.3.36: fix Stage 2 fallback timezone bug -- pin IST offset so it's correct for any reader, not just IST-set machines
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -4106,12 +4106,23 @@ async function fetchActiveTimersFromFirebase() {
     });
 
     byUser.forEach(({ data, seenMs }, userId) => {
-      // V14.3.35: sessionStartMs (Stage 1) when present -- raw epoch,
+      // V14.3.35/36: sessionStartMs (Stage 1) when present -- raw epoch,
       // timezone-safe. Falls back to parsing the "HH:MM" startTime string
       // for in-flight sessions that predate Stage 1; no backfill needed,
       // this only matters until those specific sessions finish.
+      //
+      // V14.3.36: the fallback parse MUST pin the timezone the string was
+      // WRITTEN in (IST -- toLocaleTimeString('en-IN',...) at write time),
+      // not whatever timezone the READING machine happens to be in. Without
+      // an explicit offset, `new Date(...)` parses "HH:MM" as the READER's
+      // own local time, which drifts by exactly the gap between the
+      // reader's zone and IST whenever they differ -- reproduced a 5.5h
+      // (UTC+5:30) skew from a UTC-zoned reader, the exact signature of the
+      // earlier double-skew bug this whole sessionStartMs field exists to
+      // prevent. +05:30 makes the parse correct for ANY reader, not just
+      // one that happens to already be set to IST.
       const startMs = data.sessionStartMs != null ? data.sessionStartMs
-        : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00`).getTime() : null);
+        : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00+05:30`).getTime() : null);
       if (startMs == null) return; // can't place this session on a timeline at all -- skip rather than guess
 
       const u = users.find(u => u.id === userId);
