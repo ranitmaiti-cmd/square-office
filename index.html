@@ -152,7 +152,18 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .bar-fill{height:6px;border-radius:4px;background:#A96E35;}
 
 /* TIMER WIDGET V14.2.25 — tap to switch */
-.timer-widget{position:fixed;bottom:28px;right:28px;background:#2A201A;border-radius:24px;padding:0;box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:9999;display:flex;flex-direction:column;width:310px;border:2px solid #3D332A;user-select:none;transition:box-shadow 0.4s ease,border-color 0.4s ease;}
+/* V14.3.38: translucent at rest (background alpha, not the `opacity`
+   property -- opacity would fade the widget's own text too; a translucent
+   background + backdrop-filter keeps page content visible behind it while
+   text stays fully crisp) with backdrop-filter:blur() so what shows
+   through reads as soft, not distracting. Full opacity (solid background,
+   no blur needed since nothing shows through) on hover, while dragging
+   (.dragging, toggled in the drag handler below), and whenever a timer is
+   actually running (.running, already existed) -- those are exactly the
+   moments the widget needs to be unambiguous, not decorative. */
+.timer-widget{position:fixed;bottom:28px;right:28px;background:rgba(42,32,26,0.68);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-radius:24px;padding:0;box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:9999;display:flex;flex-direction:column;width:310px;border:2px solid #3D332A;user-select:none;transition:box-shadow 0.4s ease,border-color 0.4s ease,background 0.25s ease;}
+.timer-widget:hover,.timer-widget.dragging,.timer-widget.running{background:#2A201A;}
+.timer-widget:hover .timer-handle,.timer-widget.dragging .timer-handle,.timer-widget.running .timer-handle{background:#3D332A;}
 .timer-widget.running{border-color:#6E8F52;box-shadow:0 20px 60px rgba(56,161,105,0.35),0 0 0 4px rgba(56,161,105,0.12);}
 .timer-widget.running .timer-pulse-ring{opacity:1;}
 /* Pulse ring — outer glow that breathes when running */
@@ -162,7 +173,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .timer-widget.idle-warn{border-color:#C0554A;box-shadow:0 20px 60px rgba(229,62,62,0.25),0 0 0 4px rgba(229,62,62,0.1);}
 .timer-widget.idle-warn .timer-pulse-ring{border-color:rgba(229,62,62,0.5);opacity:1;animation:timerPulseRed 3s ease-in-out infinite;}
 @keyframes timerPulseRed{0%,100%{transform:scale(1);opacity:0.5;}50%{transform:scale(1.04);opacity:0.1;}}
-.timer-handle{background:#3D332A;border-radius:22px 22px 0 0;padding:10px 18px;cursor:grab;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #5C4F42;font-size:11px;font-weight:700;color:#B0A89E;letter-spacing:0.06em;text-transform:uppercase;}
+.timer-handle{background:rgba(61,51,42,0.68);border-radius:22px 22px 0 0;padding:10px 18px;cursor:grab;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #5C4F42;font-size:11px;font-weight:700;color:#B0A89E;letter-spacing:0.06em;text-transform:uppercase;transition:background 0.25s ease;}
 .timer-handle:active{cursor:grabbing;}
 .timer-body{padding:18px;display:flex;flex-direction:column;gap:11px;}
 .timer-display{font-size:52px;font-weight:900;font-variant-numeric:tabular-nums;text-align:center;color:#E0D8CE;letter-spacing:4px;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,0.4);}
@@ -1180,7 +1191,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-26.1'; // V14.3.37: remove activeTimers writers/readers (Stage 3, final step of the activeTimers collapse)
+const APP_VERSION = '2026-07-26.2'; // V14.3.38: translucent-at-rest timer widget (cosmetic only)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -6098,12 +6109,15 @@ function updateTimerVisualState() {
 (function(){
   const widget=document.getElementById('timerWidget'),handle=document.getElementById('timerHandle');
   let drag=false,sx,sy,or,ob;
-  handle.addEventListener('mousedown',e=>{ drag=true; sx=e.clientX; sy=e.clientY; const r=widget.getBoundingClientRect(); or=window.innerWidth-r.right; ob=window.innerHeight-r.bottom; e.preventDefault(); });
+  // V14.3.38: .dragging class toggle alongside the existing drag=true/false
+  // -- purely cosmetic (lets the translucent-widget CSS go full-opacity
+  // while dragging), does not touch the positioning math or event flow.
+  handle.addEventListener('mousedown',e=>{ drag=true; widget.classList.add('dragging'); sx=e.clientX; sy=e.clientY; const r=widget.getBoundingClientRect(); or=window.innerWidth-r.right; ob=window.innerHeight-r.bottom; e.preventDefault(); });
   document.addEventListener('mousemove',e=>{ if(!drag) return; widget.style.right=Math.max(0,or+(sx-e.clientX))+'px'; widget.style.bottom=Math.max(0,ob+(sy-e.clientY))+'px'; });
-  document.addEventListener('mouseup',()=>{ drag=false; });
-  handle.addEventListener('touchstart',e=>{ const t=e.touches[0]; drag=true; sx=t.clientX; sy=t.clientY; const r=widget.getBoundingClientRect(); or=window.innerWidth-r.right; ob=window.innerHeight-r.bottom; },{passive:true});
+  document.addEventListener('mouseup',()=>{ drag=false; widget.classList.remove('dragging'); });
+  handle.addEventListener('touchstart',e=>{ const t=e.touches[0]; drag=true; widget.classList.add('dragging'); sx=t.clientX; sy=t.clientY; const r=widget.getBoundingClientRect(); or=window.innerWidth-r.right; ob=window.innerHeight-r.bottom; },{passive:true});
   document.addEventListener('touchmove',e=>{ if(!drag) return; const t=e.touches[0]; widget.style.right=Math.max(0,or+(sx-t.clientX))+'px'; widget.style.bottom=Math.max(0,ob+(sy-t.clientY))+'px'; },{passive:true});
-  document.addEventListener('touchend',()=>{ drag=false; });
+  document.addEventListener('touchend',()=>{ drag=false; widget.classList.remove('dragging'); });
 })();
 
 // ═══════════════════════════════════════════════════════
