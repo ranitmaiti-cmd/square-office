@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-26.1'; // V14.3.37: remove activeTimers writers/readers (Stage 3, final step of the activeTimers collapse)
+const APP_VERSION = '2026-07-28.1'; // V14.3.39: appVersion stamping on live timeLogs writes + force-reload version gate
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -1701,46 +1701,112 @@ function reArmHeartbeat() {
 // already-running tab on its own -- nothing about a fresh index.html on the
 // server changes what's already loaded and executing in memory. This checks
 // a small version.json (bumped alongside APP_VERSION on every meaningful
-// deploy) and shows a persistent banner if they've drifted apart. Read-only:
-// never touches timerRunning/currentSessionLogId/heartbeat state, and never
-// reloads on its own -- only the person clicking "Reload Now" does that.
+// deploy) and gates on a mismatch -- see showVersionGateModal() below.
+// Read-only: never touches timerRunning/currentSessionLogId/heartbeat state.
 // ═══════════════════════════════════════════════════════
 let versionCheckInterval = null;
-let newVersionBannerShown = false;
 
 async function checkForNewVersion() {
   try {
     const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
-    if (!res.ok) return; // transient failure -- just retry next cycle
+    if (!res.ok) return; // fail open -- transient failure, just retry next cycle
     const data = await res.json();
-    if (data.version && data.version !== APP_VERSION) {
-      showNewVersionBanner();
+    if (!data.version) return; // fail open -- malformed response
+    if (data.version === APP_VERSION) {
+      // V14.3.39: back in sync -- clear any loop-guard count left over from
+      // a past mismatch so a LATER, unrelated mismatch starts its own fresh
+      // count instead of inheriting one from an already-resolved incident.
+      try { sessionStorage.removeItem(VERSION_GATE_ATTEMPTS_KEY); } catch (e) {}
+      return;
     }
+    // V14.3.39: any difference at all means reload -- deliberately not a
+    // newer-than compare (that would need a version-ordering scheme this
+    // app doesn't have, and would risk NOT gating on a difference that
+    // matters, e.g. a hotfix redeploy under the same date that a strict
+    // "newer" check might miss).
+    showVersionGateModal(data.version);
   } catch (e) {
+    // fail open -- never gate on a check that itself couldn't complete
     console.warn('Version check failed (will retry next cycle):', e.message);
   }
 }
 
-function showNewVersionBanner() {
-  if (newVersionBannerShown) return; // already showing, don't recreate/flicker it
-  newVersionBannerShown = true;
-  const banner = document.createElement('div');
-  banner.id = 'newVersionBanner';
-  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#2E5C8A;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;font-size:14px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,0.25);';
-  banner.innerHTML = `<span>🔄 A new version of SQUARE is available.</span>` +
-    `<button id="newVersionReloadBtn" style="background:#fff;color:#2E5C8A;border:none;border-radius:6px;padding:6px 16px;font-weight:700;cursor:pointer;font-size:13px;">Reload Now</button>`;
-  document.body.appendChild(banner);
-  // V14.3.19: deliberately no dismiss/close button -- the whole point is
-  // reaching everyone within minutes, so a one-time dismiss that's then
-  // forgotten would defeat that. Stays until they click Reload.
-  document.getElementById('newVersionReloadBtn').addEventListener('click', () => {
-    // No explicit timer finalize here -- a bare reload is already safe by
-    // construction: restoreTimerState() reattaches to the same session id
-    // and correctly recomputes the true elapsed time, so a running timer
-    // keeps counting the correct total under one continuous entry, with no
-    // split and no re-pick-your-task step required.
-    location.reload();
-  });
+// ═══════════════════════════════════════════════════════
+// V14.3.39: Force-reload version gate -- replaces the dismissible banner.
+// A version mismatch means this tab is running JS that no longer matches
+// what's deployed, so it's made non-dismissible on purpose: no close
+// button, and the full-screen overlay swallows clicks instead of treating
+// them as "dismiss." Reload is still safe to force here for the same
+// reason the old banner's reload was: restoreTimerState() reattaches to
+// the same session id and recomputes true elapsed time, so a running
+// timer isn't disrupted by the reload itself.
+// ═══════════════════════════════════════════════════════
+const VERSION_GATE_COUNTDOWN_SECS = 60; // tunable
+const VERSION_GATE_MAX_AUTO_ATTEMPTS = 2;
+const VERSION_GATE_ATTEMPTS_KEY = 'versionGateReloadAttempts';
+let versionGateModalShown = false;
+
+function getVersionGateAttempts() {
+  const n = parseInt(sessionStorage.getItem(VERSION_GATE_ATTEMPTS_KEY), 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function forceReloadToVersion(remoteVersion) {
+  // V14.3.39: loop guard -- counts every auto-reload attempt this gate has
+  // fired, in sessionStorage so it survives the reload it's about to cause
+  // (same-tab navigation, not a new tab). If the version STILL mismatches
+  // after VERSION_GATE_MAX_AUTO_ATTEMPTS of these, checkForNewVersion's next
+  // cycle finds the count already at the cap and shows the manual modal
+  // instead of trying a 3rd time.
+  const attempts = getVersionGateAttempts() + 1;
+  try { sessionStorage.setItem(VERSION_GATE_ATTEMPTS_KEY, String(attempts)); } catch (e) {}
+  location.href = '/?v=' + encodeURIComponent(remoteVersion) + '&t=' + Date.now();
+}
+
+function showVersionGateModal(remoteVersion) {
+  if (versionGateModalShown) return; // already showing, don't recreate/flicker it
+  versionGateModalShown = true;
+  const manualMode = getVersionGateAttempts() >= VERSION_GATE_MAX_AUTO_ATTEMPTS;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'versionGateOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(20,15,12,0.75);display:flex;align-items:center;justify-content:center;';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:12px;padding:28px 32px;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.4);text-align:center;font-size:14px;color:#2A201A;';
+
+  if (manualMode) {
+    // V14.3.39: two automatic same-origin reloads already failed to pick up
+    // the new version -- that's not a transient race anymore, it's most
+    // likely a stale cached asset a JS-triggered reload can't bypass, so
+    // stop looping and hand the person a manual, browser-level way out.
+    box.innerHTML = `<div style="font-size:32px;margin-bottom:10px;">⚠️</div>` +
+      `<div style="font-weight:700;font-size:16px;margin-bottom:10px;">Still on an old version</div>` +
+      `<div style="margin-bottom:14px;line-height:1.5;">Automatic reload didn't pick up the new version after ${VERSION_GATE_MAX_AUTO_ATTEMPTS} tries. Please:</div>` +
+      `<div style="text-align:left;line-height:1.7;">1. Close <b>every</b> SQUARE Office tab/window<br>2. Reopen the site, or press <b>Ctrl+Shift+R</b> (<b>Cmd+Shift+R</b> on Mac) to hard-refresh</div>`;
+  } else {
+    box.innerHTML = `<div style="font-size:32px;margin-bottom:10px;">🔄</div>` +
+      `<div style="font-weight:700;font-size:16px;margin-bottom:10px;">A new version of SQUARE is available</div>` +
+      `<div style="margin-bottom:14px;line-height:1.5;">Reloading in <span id="versionGateCountdown">${VERSION_GATE_COUNTDOWN_SECS}</span>s to keep everyone on the same version.</div>` +
+      `<button id="versionGateReloadBtn" style="background:#2E5C8A;color:#fff;border:none;border-radius:6px;padding:10px 22px;font-weight:700;cursor:pointer;font-size:14px;">Reload now</button>`;
+  }
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  if (!manualMode) {
+    let secsLeft = VERSION_GATE_COUNTDOWN_SECS;
+    const countdownEl = document.getElementById('versionGateCountdown');
+    const intervalId = setInterval(() => {
+      secsLeft--;
+      if (secsLeft <= 0) { clearInterval(intervalId); forceReloadToVersion(remoteVersion); return; }
+      if (countdownEl) countdownEl.textContent = String(secsLeft);
+    }, 1000);
+    document.getElementById('versionGateReloadBtn').addEventListener('click', () => {
+      clearInterval(intervalId);
+      forceReloadToVersion(remoteVersion);
+    });
+  }
 }
 
 function startVersionCheckMonitor() {
@@ -1776,6 +1842,13 @@ function heartbeatSession() {
     productive: timerLinkedPlan.type !== 'lunch',
     inProgress: true,
     ts: now,
+    // V14.3.39: stamp the app version running THIS live session, so a stuck
+    // client on an old build is visible in the data itself. Only on the two
+    // live-session write paths (this upsert + the heartbeat ping below) --
+    // deliberately not in saveTimeLog/upsertTimeLog generally, since gap-fill
+    // and sweep/finalize writes reuse those same shared functions and should
+    // stay untouched.
+    appVersion: APP_VERSION,
     // V14.3.34: raw epoch session-start anchor, additive-only (Stage 1 of
     // the activeTimers collapse). Deliberately timerStartedAt, not `now` --
     // this is the session's true origin, not this heartbeat's timestamp,
@@ -1798,7 +1871,8 @@ function heartbeatSession() {
   // doc; if this loses that race it fails silently and self-heals on the next
   // tick 60s later, since the doc definitely exists by then.
   db.collection('timeLogs').doc(currentSessionLogId).update({
-    lastHeartbeat: firebase.firestore.FieldValue.serverTimestamp()
+    lastHeartbeat: firebase.firestore.FieldValue.serverTimestamp(),
+    appVersion: APP_VERSION
   }).then(() => {
     // V14.3.17: this is the ONLY place lastHeartbeatSuccessAt moves forward --
     // a confirmed write, not just an interval tick firing. checkTimerHealth()
