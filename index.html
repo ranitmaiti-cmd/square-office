@@ -1623,9 +1623,14 @@ function initReliableTickWorker() {
       // V14.3.19: version check rides the same reliable tick (a plain
       // main-thread interval would itself be throttled while backgrounded --
       // exactly the condition "reaches everyone within minutes" needs to
-      // survive), but doesn't need 60s granularity -- only fire every 5th tick.
+      // survive).
+      // V14.3.40: shortened from every-5th-tick (~5min) to every tick
+      // (~60s) -- a single small version.json fetch is cheap, and the
+      // 29 Jul incident showed the 5-tick gap plus a misbehaving edge
+      // cache compounded into an hours-long stale window. The sweep just
+      // below stays on its own 5th-tick cadence -- unrelated to this fix.
       workerTickCount++;
-      if (workerTickCount % 5 === 0) checkForNewVersion();
+      checkForNewVersion();
       // V14.3.28: Task 3 fix -- the admin-wide cross-user stale-heartbeat
       // sweep used to run on a plain window._staleHeartbeatInterval
       // setInterval, which is exactly the kind of timer Chrome throttles
@@ -1809,11 +1814,61 @@ function showVersionGateModal(remoteVersion) {
   }
 }
 
+// V14.3.40: catch a backgrounded stale tab within seconds of refocus rather
+// than waiting out the tick cadence below -- cheap and safe to call any
+// time (checkForNewVersion() is a no-op on match/fail, and independent of
+// login state).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkForNewVersion();
+});
+window.addEventListener('focus', () => checkForNewVersion());
+
+// ═══════════════════════════════════════════════════════
+// V14.3.40: pre-init version check. Runs immediately, at script-load time --
+// before loadData()/auto-login/restoreTimerState() even start further down
+// this same script -- so a mismatch reloads before any session (new or
+// resumed) can run under old code. This closes the actual root cause found
+// on production: Vercel's edge cache was serving version.json (and /) stale
+// for hours, ignoring the existing cache-busting query string entirely (the
+// edge cache key ignores query strings on these static assets), so the
+// periodic checkForNewVersion() cycle was comparing against an equally-stale
+// target and only caught up whenever that edge PoP's entry happened to get
+// evicted -- explaining the observed "converts mid-morning to midday"
+// instead of within minutes. vercel.json's Cache-Control is now strengthened
+// to no-cache/no-store/must-revalidate to fix that at the source; this is
+// an independent second layer in case any edge PoP is still slow to catch up
+// right after a fresh deploy.
+async function checkVersionBeforeInit() {
+  try {
+    const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return; // fail open -- transient failure, periodic checks will retry
+    const data = await res.json();
+    if (!data.version || data.version === APP_VERSION) {
+      try { sessionStorage.removeItem(VERSION_GATE_ATTEMPTS_KEY); } catch (e) {}
+      return;
+    }
+    if (getVersionGateAttempts() >= VERSION_GATE_MAX_AUTO_ATTEMPTS) {
+      // Same manual-fallback the periodic gate uses -- don't attempt a 3rd
+      // automatic reload, just show the "close all tabs" instructions.
+      showVersionGateModal(data.version);
+      return;
+    }
+    // Nothing has started yet -- no rendered session, no running timer -- so
+    // reload immediately instead of showing a countdown; there's nothing
+    // here yet that an abrupt reload could disrupt.
+    forceReloadToVersion(data.version);
+  } catch (e) {
+    // fail open -- never block app load on a check that itself couldn't complete
+    console.warn('Pre-init version check failed (will retry via periodic checks):', e.message);
+  }
+}
+checkVersionBeforeInit();
+
 function startVersionCheckMonitor() {
   if (versionCheckInterval) clearInterval(versionCheckInterval);
   initReliableTickWorker();
-  if (reliableTickWorkerActive) return; // worker's onmessage already calls checkForNewVersion() every 5th tick
-  versionCheckInterval = setInterval(checkForNewVersion, 5 * 60 * 1000);
+  if (reliableTickWorkerActive) return; // worker's onmessage now calls checkForNewVersion() every tick (see initReliableTickWorker)
+  versionCheckInterval = setInterval(checkForNewVersion, 60 * 1000);
 }
 
 function upsertTimeLog(log) {
