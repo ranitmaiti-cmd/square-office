@@ -1623,9 +1623,14 @@ function initReliableTickWorker() {
       // V14.3.19: version check rides the same reliable tick (a plain
       // main-thread interval would itself be throttled while backgrounded --
       // exactly the condition "reaches everyone within minutes" needs to
-      // survive), but doesn't need 60s granularity -- only fire every 5th tick.
+      // survive).
+      // V14.3.40: shortened from every-5th-tick (~5min) to every tick
+      // (~60s) -- a single small /api/version fetch is cheap, and the
+      // 29 Jul incident showed the 5-tick gap plus a misbehaving edge
+      // cache compounded into an hours-long stale window. The sweep just
+      // below stays on its own 5th-tick cadence -- unrelated to this fix.
       workerTickCount++;
-      if (workerTickCount % 5 === 0) checkForNewVersion();
+      checkForNewVersion();
       // V14.3.28: Task 3 fix -- the admin-wide cross-user stale-heartbeat
       // sweep used to run on a plain window._staleHeartbeatInterval
       // setInterval, which is exactly the kind of timer Chrome throttles
@@ -1700,15 +1705,19 @@ function reArmHeartbeat() {
 // Team leaves the SQUARE tab open all day, so a deploy doesn't reach an
 // already-running tab on its own -- nothing about a fresh index.html on the
 // server changes what's already loaded and executing in memory. This checks
-// a small version.json (bumped alongside APP_VERSION on every meaningful
+// version.json's contents (bumped alongside APP_VERSION on every meaningful
 // deploy) and gates on a mismatch -- see showVersionGateModal() below.
 // Read-only: never touches timerRunning/currentSessionLogId/heartbeat state.
+// V14.3.41: fetches /api/version (a serverless function), not /version.json
+// directly -- see api/version.js for why: Vercel's static-asset edge cache
+// was proven to serve version.json stale for hours regardless of Cache-
+// Control or query-string cache-busting.
 // ═══════════════════════════════════════════════════════
 let versionCheckInterval = null;
 
 async function checkForNewVersion() {
   try {
-    const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
+    const res = await fetch('/api/version?_=' + Date.now(), { cache: 'no-store' });
     if (!res.ok) return; // fail open -- transient failure, just retry next cycle
     const data = await res.json();
     if (!data.version) return; // fail open -- malformed response
@@ -1809,11 +1818,60 @@ function showVersionGateModal(remoteVersion) {
   }
 }
 
+// V14.3.40: catch a backgrounded stale tab within seconds of refocus rather
+// than waiting out the tick cadence below -- cheap and safe to call any
+// time (checkForNewVersion() is a no-op on match/fail, and independent of
+// login state).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkForNewVersion();
+});
+window.addEventListener('focus', () => checkForNewVersion());
+
+// ═══════════════════════════════════════════════════════
+// V14.3.40: pre-init version check. Runs immediately, at script-load time --
+// before loadData()/auto-login/restoreTimerState() even start further down
+// this same script -- so a mismatch reloads before any session (new or
+// resumed) can run under old code.
+// V14.3.41: root cause on production turned out to be one level deeper than
+// a header problem -- Vercel's static-asset edge cache serves /version.json
+// (and /) by path, ignoring query-string cache-busting entirely, and kept
+// returning stale content for hours even after Cache-Control was
+// strengthened to no-store (confirmed via repeated live probes: Age kept
+// climbing, X-Vercel-Cache stayed HIT). That's why conversion took
+// "mid-morning to midday" instead of minutes. Fixed structurally by moving
+// off the static file: this now fetches /api/version, a serverless function
+// (see api/version.js) that isn't subject to that static-file edge cache.
+async function checkVersionBeforeInit() {
+  try {
+    const res = await fetch('/api/version?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return; // fail open -- transient failure, periodic checks will retry
+    const data = await res.json();
+    if (!data.version || data.version === APP_VERSION) {
+      try { sessionStorage.removeItem(VERSION_GATE_ATTEMPTS_KEY); } catch (e) {}
+      return;
+    }
+    if (getVersionGateAttempts() >= VERSION_GATE_MAX_AUTO_ATTEMPTS) {
+      // Same manual-fallback the periodic gate uses -- don't attempt a 3rd
+      // automatic reload, just show the "close all tabs" instructions.
+      showVersionGateModal(data.version);
+      return;
+    }
+    // Nothing has started yet -- no rendered session, no running timer -- so
+    // reload immediately instead of showing a countdown; there's nothing
+    // here yet that an abrupt reload could disrupt.
+    forceReloadToVersion(data.version);
+  } catch (e) {
+    // fail open -- never block app load on a check that itself couldn't complete
+    console.warn('Pre-init version check failed (will retry via periodic checks):', e.message);
+  }
+}
+checkVersionBeforeInit();
+
 function startVersionCheckMonitor() {
   if (versionCheckInterval) clearInterval(versionCheckInterval);
   initReliableTickWorker();
-  if (reliableTickWorkerActive) return; // worker's onmessage already calls checkForNewVersion() every 5th tick
-  versionCheckInterval = setInterval(checkForNewVersion, 5 * 60 * 1000);
+  if (reliableTickWorkerActive) return; // worker's onmessage now calls checkForNewVersion() every tick (see initReliableTickWorker)
+  versionCheckInterval = setInterval(checkForNewVersion, 60 * 1000);
 }
 
 function upsertTimeLog(log) {
