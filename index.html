@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-28.1'; // V14.3.39: appVersion stamping on live timeLogs writes + force-reload version gate
+const APP_VERSION = '2026-07-29.1'; // V14.3.41: fix HTML/version.json cache freshness -- serve version via serverless function, not static file
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
