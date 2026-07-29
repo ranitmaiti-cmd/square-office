@@ -1,4 +1,7 @@
 {
+  "functions": {
+    "api/version.js": { "includeFiles": "version.json" }
+  },
   "headers": [
     {
       "source": "/",
