@@ -3,6 +3,10 @@
 // that closes dead sessions same-day; this fills the resulting gap up to
 // the real biometric OUT time, so morning reconciliation from biometric
 // stops being a manual, next-day chore.
+// V14.3.47: extended past tail-only -- now walks the WHOLE day (INTime ->
+// every logged segment -> OUT) and fills every gap >5min anywhere biometric
+// shows presence, not just the end-of-day tail. See computeDayGaps()/
+// isKnownFaultNeighbor() below for the walk and the anomaly-flag logic.
 //
 // STATUS: writes are live behind the confirm=true query param (dry-run by
 // default). Lunch handling is resolved -- see LUNCH_WINDOW_START below.
@@ -167,33 +171,87 @@ function lunchOverlapMs(isoDate, startMs, endMs) {
   return Math.max(0, Math.min(endMs, lunchEndMs) - Math.max(startMs, lunchStartMs));
 }
 
-// Reads existing timeLogs for one user+date and returns the latest endTime
-// (as an epoch), or null if nothing finished yet, plus whether an existing
-// productive:false entry already overlaps the lunch window (condition (b)
-// above). Returns { blocked: true } instead if ANY entry for that
-// user+date is still inProgress:true -- gap-filling around a live/
-// unresolved session is api/finalize-stale.js's job, not this one's;
-// colliding with it isn't this endpoint's call to make.
-async function getLastLoggedEnd(db, userId, isoDate) {
+// V14.3.47: gaps at or below this are ignored as micro-breaks, never
+// filled -- per-instruction, not tunable via the lunch-deduction constants.
+const MIN_FILLABLE_GAP_MINS = 5;
+const ANOMALY_CLEAN_GAP_FLAG = 'anomaly-clean-gap';
+
+// Reads ALL existing timeLogs segments for one user+date, sorted
+// chronologically, plus whether an existing productive:false entry already
+// overlaps the lunch window (condition (b) of the lunch rule above).
+// Returns { blocked: true } instead if ANY entry for that user+date is
+// still inProgress:true -- gap-filling around a live/unresolved session is
+// api/finalize-stale.js's job, not this one's; colliding with it isn't
+// this endpoint's call to make.
+//
+// V14.3.46: also blocks on a non-inProgress doc that's missing endTime --
+// i.e. malformed data (it claims to be finished but has no end recorded).
+// A WFH-safety audit found the old code silently skipped such a doc when
+// computing the tail's start point, which could land on biometric INTime
+// instead and overlap the malformed doc's real (unrecorded) activity.
+// V14.3.47: this same guard now ALSO covers a doc missing startTime --
+// the old tail-only code never needed a doc's OWN startTime for anything
+// but the mid-day gap walk needs every segment's start AND end to build
+// the day's timeline, so a doc with one but not the other is exactly as
+// unusable/malformed as one missing endTime was before. Same philosophy,
+// extended to the field this feature now actually depends on -- not a new
+// rule, the same one applied to what changed.
+async function getDayTimeline(db, userId, isoDate) {
   const snap = await getDocs(query(
     collection(db, 'timeLogs'),
     where('userId', '==', userId),
     where('date', '==', isoDate),
   ));
-  let latestEndMs = null;
+  const segments = [];
   let hasLunchEntry = false;
   for (const d of snap.docs) {
     const data = d.data();
     if (data.inProgress === true) return { blocked: true, reason: 'has an inProgress entry for this date -- leave it to the finalizer' };
-    if (!data.endTime) continue;
+    if (!data.endTime) return { blocked: true, reason: `malformed existing doc (${d.id}) -- missing endTime, needs manual review` };
+    if (!data.startTime) return { blocked: true, reason: `malformed existing doc (${d.id}) -- missing startTime, needs manual review` };
+    const startMs = hhmmToEpoch(isoDate, data.startTime);
     const endMs = hhmmToEpoch(isoDate, data.endTime);
-    if (latestEndMs === null || endMs > latestEndMs) latestEndMs = endMs;
-    if (data.productive === false && data.startTime) {
-      const startMs = hhmmToEpoch(isoDate, data.startTime);
-      if (lunchOverlapMs(isoDate, startMs, endMs) > 0) hasLunchEntry = true;
-    }
+    segments.push({ startMs, endMs, data });
+    if (data.productive === false && lunchOverlapMs(isoDate, startMs, endMs) > 0) hasLunchEntry = true;
   }
-  return { blocked: false, latestEndMs, hasLunchEntry, lastDoc: snap.docs.length ? snap.docs[snap.docs.length - 1].data() : null };
+  segments.sort((a, b) => a.startMs - b.startMs);
+  return { blocked: false, segments, hasLunchEntry };
+}
+
+// Walks INTime -> [segments] -> OUT and returns every gap where logged
+// time does NOT already cover the span -- the initial gap (INTime to the
+// first segment, beforeSeg:null), every gap BETWEEN consecutive segments,
+// and the final tail gap (last segment to OUT, afterSeg:null) all fall out
+// of the same loop. If segments is empty, this naturally produces a
+// single INTime-to-OUT gap, subsuming the old "nothing logged yet" case.
+function computeDayGaps(segments, inMs, outMs) {
+  const gaps = [];
+  let cursor = inMs;
+  let beforeSeg = null;
+  for (const seg of segments) {
+    if (seg.startMs > cursor) gaps.push({ startMs: cursor, endMs: seg.startMs, beforeSeg, afterSeg: seg });
+    cursor = Math.max(cursor, seg.endMs); // tolerates overlapping segments without going backward
+    beforeSeg = seg;
+  }
+  if (outMs > cursor) gaps.push({ startMs: cursor, endMs: outMs, beforeSeg, afterSeg: null });
+  return gaps;
+}
+
+// V14.3.47: ANOMALY FLAG -- flags by CAUSE, not by size, per instruction.
+// "Known fault" means either neighbor of the gap is itself a doc this
+// system already knows the story of: recovered:true (a session that went
+// stale and had to be force-closed -- the 206/214 real-session case found
+// in the Step 0 signal-reliability check) OR gapfill:true (an earlier
+// biometric-fill, from this endpoint or the pre-existing manual
+// reconciliation script -- the Step 0 check also found 102 of 110
+// gapfill:true docs do NOT carry recovered:true, so checking recovered
+// alone would wrongly flag a gap next to an already-explained fill,
+// e.g. on a second run of the same date). If EITHER neighbor is a known
+// fault, the gap is explained -- fill silently. If neither neighbor
+// exists or qualifies (both sides clean, or no side to check on an edge
+// gap), the cause is a mystery -- fill it, but flag it.
+function isKnownFaultNeighbor(seg) {
+  return !!seg && (seg.data.recovered === true || seg.data.gapfill === true);
 }
 
 async function computePlanForDate(db, isoDate, punchRecords) {
@@ -208,42 +266,79 @@ async function computePlanForDate(db, isoDate, punchRecords) {
       continue;
     }
 
+    const inMs = hhmmToEpoch(isoDate, rec.INTime);
     const outMs = hhmmToEpoch(isoDate, rec.OUTTime);
-    const last = await getLastLoggedEnd(db, userId, isoDate);
-    if (last.blocked) { plan.push({ empcode, userId, name: rec.Name, skipped: true, reason: last.reason }); continue; }
+    const timeline = await getDayTimeline(db, userId, isoDate);
+    if (timeline.blocked) { plan.push({ empcode, userId, name: rec.Name, skipped: true, reason: timeline.reason }); continue; }
 
-    const startMs = last.latestEndMs !== null ? last.latestEndMs : hhmmToEpoch(isoDate, rec.INTime);
-    if (startMs >= outMs) { plan.push({ empcode, userId, name: rec.Name, skipped: true, reason: 'already logged through OUTTime, nothing to fill' }); continue; }
+    const dayGaps = computeDayGaps(timeline.segments, inMs, outMs);
+    const ignoredGaps = [];
+    const entries = [];
+    // Day-level "already accounted for" flag -- starts from an existing
+    // real lunch entry (if any), and flips true the first time THIS run
+    // applies a deduction, so a fragmented day with multiple lunch-window-
+    // overlapping gaps can never be deducted more than once (still "do
+    // NOT double-count," just generalized past the single-tail case).
+    let lunchAccountedFor = timeline.hasLunchEntry;
 
-    const rawDurationMins = Math.max(1, Math.round((outMs - startMs) / 60000));
-    const overlapMs = lunchOverlapMs(isoDate, startMs, outMs);
-    const shouldDeductLunch = overlapMs >= LUNCH_OVERLAP_THRESHOLD_MS && !last.hasLunchEntry;
-    const durationMins = shouldDeductLunch ? Math.max(0, rawDurationMins - LUNCH_DEDUCT_MINS) : rawDurationMins;
+    for (const gap of dayGaps) {
+      const gapMins = Math.round((gap.endMs - gap.startMs) / 60000);
+      if (gapMins <= MIN_FILLABLE_GAP_MINS) {
+        ignoredGaps.push({ startTime: toHHMM(gap.startMs), endTime: toHHMM(gap.endMs), gapMins });
+        continue;
+      }
 
-    const carryForward = last.lastDoc || {};
-    const entry = {
-      id: `gapfill-${userId}-${isoDate}-${toHHMM(startMs).replace(':', '')}`,
-      userId,
-      date: isoDate,
-      projectId: carryForward.projectId ?? null,
-      projectName: carryForward.projectName || 'Unlogged',
-      phase: carryForward.phase || '',
-      typology: carryForward.typology || '',
-      activity: '',
-      productive: true,
-      inProgress: false,
-      sessionStartMs: startMs,
-      ts: startMs,
-      startTime: toHHMM(startMs),
-      endTime: toHHMM(outMs), // always OUTTime, unaffected by the lunch deduction
-      durationMins,
-      desc: `${carryForward.desc || carryForward.projectName || 'Work on project'} (auto-filled from biometric OUT ${rec.OUTTime})`,
-      gapfill: true,
-      gapfillSource: `biometric-${isoDate}`,
-      ...(shouldDeductLunch ? { lunchDeducted: true, lunchDeductedMins: LUNCH_DEDUCT_MINS } : {}),
-    };
+      const overlapMs = lunchOverlapMs(isoDate, gap.startMs, gap.endMs);
+      const shouldDeductLunch = overlapMs >= LUNCH_OVERLAP_THRESHOLD_MS && !lunchAccountedFor;
+      const durationMins = shouldDeductLunch ? Math.max(0, gapMins - LUNCH_DEDUCT_MINS) : gapMins;
+      if (shouldDeductLunch) lunchAccountedFor = true;
 
-    plan.push({ empcode, userId, name: rec.Name, skipped: false, outTime: rec.OUTTime, entries: [entry] });
+      const isTailGap = gap.afterSeg === null;
+      const carryFrom = (gap.beforeSeg || gap.afterSeg || {}).data || {};
+      const desc = isTailGap
+        ? `${carryFrom.desc || carryFrom.projectName || 'Work on project'} (auto-filled from biometric OUT ${rec.OUTTime})`
+        : `${carryFrom.desc || carryFrom.projectName || 'Work on project'} (auto-filled from biometric gap ${toHHMM(gap.startMs)}-${toHHMM(gap.endMs)})`;
+
+      const knownFault = isKnownFaultNeighbor(gap.beforeSeg) || isKnownFaultNeighbor(gap.afterSeg);
+
+      const entry = {
+        id: `gapfill-${userId}-${isoDate}-${toHHMM(gap.startMs).replace(':', '')}`,
+        userId,
+        date: isoDate,
+        projectId: carryFrom.projectId ?? null,
+        projectName: carryFrom.projectName || 'Unlogged',
+        phase: carryFrom.phase || '',
+        typology: carryFrom.typology || '',
+        activity: '',
+        productive: true,
+        inProgress: false,
+        sessionStartMs: gap.startMs,
+        ts: gap.startMs,
+        startTime: toHHMM(gap.startMs),
+        endTime: toHHMM(gap.endMs),
+        durationMins,
+        desc,
+        gapfill: true,
+        gapfillSource: `biometric-${isoDate}`,
+        ...(shouldDeductLunch ? { lunchDeducted: true, lunchDeductedMins: LUNCH_DEDUCT_MINS } : {}),
+        ...(!knownFault ? { flag: ANOMALY_CLEAN_GAP_FLAG, anomalyWindow: `${toHHMM(gap.startMs)}-${toHHMM(gap.endMs)}` } : {}),
+      };
+      entries.push(entry);
+    }
+
+    if (entries.length === 0) {
+      plan.push({
+        empcode, userId, name: rec.Name, skipped: true,
+        reason: dayGaps.length ? 'only sub-5min gaps, nothing to fill' : 'already fully logged, nothing to fill',
+        ...(ignoredGaps.length ? { ignoredGaps } : {}),
+      });
+      continue;
+    }
+
+    plan.push({
+      empcode, userId, name: rec.Name, skipped: false, outTime: rec.OUTTime, entries,
+      ...(ignoredGaps.length ? { ignoredGaps } : {}),
+    });
   }
 
   return plan;
