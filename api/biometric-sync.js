@@ -6,6 +6,8 @@
 //
 // STATUS: writes are live behind the confirm=true query param (dry-run by
 // default). Lunch handling is resolved -- see LUNCH_WINDOW_START below.
+// V14.3.45: now wired to a daily cron (see vercel.json) -- DRY-RUN ONLY,
+// confirm=true is deliberately NOT baked into the cron path yet.
 //
 // Firestore auth: same public client SDK config already embedded in
 // index.html, matching api/finalize-stale.js exactly (verified by reading
@@ -73,6 +75,28 @@ const RECONCILED_DATES = new Set([
 function ddmmyyyy(isoDate) {
   const [y, m, d] = isoDate.split('-');
   return `${d}/${m}/${y}`;
+}
+
+// ═══════════════════════════════════════════════════════
+// V14.3.45: default date for cron invocations (Vercel Cron hits the bare
+// path, no query string -- a required `date` param with no fallback would
+// 400 on EVERY scheduled run and silently do nothing, forever).
+//
+// !!! COUPLING WARNING !!! This default is "today in IST," which is only
+// correct because vercel.json's cron for this endpoint is scheduled for
+// 16:30 UTC == 22:00 IST -- i.e. LATE ENOUGH in the IST evening that
+// "today" already IS the just-completed workday. If that schedule EVER
+// moves to fire after midnight IST, "today" will have already rolled over
+// to the NEXT calendar day and this default MUST change to "yesterday in
+// IST" instead, or every automated run will silently sync the wrong
+// (empty, not-yet-started) day. These two things -- this function and the
+// cron schedule's time-of-day -- must be changed together. Never one
+// without the other.
+function todayIsoDateIST() {
+  // en-CA formats as YYYY-MM-DD directly. Timezone-aware -- deliberately
+  // NOT new Date().toISOString().slice(0,10), which gives UTC's current
+  // date and would drift a day off right around the IST/UTC day boundary.
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
 function hhmmToEpoch(isoDate, hhmm) {
@@ -252,9 +276,11 @@ module.exports = async (req, res) => {
     return res.status(401).json({ status: 'unauthorized' });
   }
 
-  const isoDate = req.query?.date;
-  if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
-    return res.status(400).json({ status: 'bad-request', error: 'date query param is required, format YYYY-MM-DD' });
+  // No date param (a cron invocation) falls back to todayIsoDateIST() --
+  // see that function's coupling warning re: the cron schedule's time.
+  const isoDate = req.query?.date || todayIsoDateIST();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    return res.status(400).json({ status: 'bad-request', error: 'date must be format YYYY-MM-DD' });
   }
   const confirm = req.query?.confirm === 'true';
 
