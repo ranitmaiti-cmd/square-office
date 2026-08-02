@@ -3,7 +3,8 @@
     "api/version.js": { "includeFiles": "version.json" }
   },
   "crons": [
-    { "path": "/api/finalize-stale", "schedule": "30 22 * * *" }
+    { "path": "/api/finalize-stale", "schedule": "30 22 * * *" },
+    { "path": "/api/biometric-sync", "schedule": "30 16 * * *" }
   ],
   "headers": [
     {
