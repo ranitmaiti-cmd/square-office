@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-07-31.1'; // V14.3.42: same-day server-side stale-session finalizer (api/finalize-stale.js)
+const APP_VERSION = '2026-07-31.2'; // V14.3.44: fix finalizer endTime timezone bug (api/finalize-stale.js)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
