@@ -1,3 +1,6 @@
 index.local-backup-*.html
 node_modules/
+.env
+.env.*
+!.env.example
 
