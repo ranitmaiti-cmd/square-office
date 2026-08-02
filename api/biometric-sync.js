@@ -84,7 +84,16 @@ function hhmmToEpoch(isoDate, hhmm) {
 }
 
 function toHHMM(epochMs) {
-  return new Date(epochMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  // V14.3.44: explicit timeZone:'Asia/Kolkata' -- 'en-IN' is a LOCALE (digit
+  // style, formatting conventions), it does NOT force which timezone's
+  // wall-clock gets displayed. Without this, toLocaleTimeString falls back
+  // to the RUNTIME's system timezone -- on Vercel that's UTC, so this was
+  // silently producing a ~5.5h-wrong clock time on every real deploy.
+  // Verified directly: forcing TZ=UTC locally reproduced the bug (same
+  // epoch rendered as the wrong clock time without this option, correct
+  // with it) -- this exact same unpinned pattern is what's already live and
+  // corrupting endTime in api/finalize-stale.js; see that file's own fix.
+  return new Date(epochMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
 }
 
 async function fetchInOutPunchData(isoDate) {
