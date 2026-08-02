@@ -153,7 +153,17 @@ module.exports = async (req, res) => {
       // endTime comes from lastSeenMs (the last real heartbeat), never "now"
       // -- this runs unattended and must not invent extra duration just
       // because of when the cron happened to catch it.
-      const endTime = new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+      // V14.3.44: explicit timeZone:'Asia/Kolkata' -- 'en-IN' is a LOCALE
+      // (digit style, formatting conventions), it does NOT force which
+      // timezone's wall-clock gets displayed. Without this, toLocaleTimeString
+      // falls back to the RUNTIME's system timezone -- on Vercel that's UTC,
+      // so this was silently writing a ~5.5h-wrong endTime on every real
+      // finalize since this shipped. Verified directly: forcing TZ=UTC
+      // locally reproduced the exact bug (same epoch rendered as the wrong
+      // clock time without this option, correct with it). Found via a
+      // biometric-sync dry-run surfacing an implausible 06:29 "last logged
+      // end" for sessions this function had finalized.
+      const endTime = new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
 
       const updates = {
         inProgress: false,
