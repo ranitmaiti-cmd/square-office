@@ -4,8 +4,8 @@
 // the real biometric OUT time, so morning reconciliation from biometric
 // stops being a manual, next-day chore.
 //
-// STATUS: dry-run only. See "LUNCH HANDLING -- BLOCKED" below -- writes are
-// hard-refused (409) until that's resolved, regardless of the confirm flag.
+// STATUS: writes are live behind the confirm=true query param (dry-run by
+// default). Lunch handling is resolved -- see LUNCH_WINDOW_START below.
 //
 // Firestore auth: same public client SDK config already embedded in
 // index.html, matching api/finalize-stale.js exactly (verified by reading
@@ -20,9 +20,9 @@
 // committed code. The July reconciliation was an ephemeral admin console
 // script, never merged. The ID scheme/field names below come directly from
 // the brief (gapfill-{userId}-{date}-{HHMM}, merge:true, gapfill:true,
-// gapfillSource, sessionStartMs) since those WERE fully specified there;
-// only the lunch-carve rule was left as "read the existing code," which
-// doesn't exist to read -- see the blocked section below.
+// gapfillSource, sessionStartMs) since those WERE fully specified there.
+// The lunch rule (there was no existing code for it either) was resolved
+// directly by the user and is now canonical -- see LUNCH_WINDOW_START.
 const { initializeApp, getApps, getApp } = require('firebase/app');
 const {
   getFirestore, collection, query, where, getDocs, doc, setDoc,
@@ -108,11 +108,39 @@ async function fetchInOutPunchData(isoDate) {
   return body.InOutPunchData || [];
 }
 
+// ═══════════════════════════════════════════════════════
+// LUNCH HANDLING -- canonical rule, resolved directly by the user (no
+// shipped precedent existed anywhere in this repo to mirror). Flat 15-min
+// NON-PRODUCTIVE deduction from the single filled entry's durationMins --
+// deliberately NOT a separate lunch doc with invented start/end times.
+// Applied only when BOTH:
+//   (a) the computed gap overlaps the 13:00-15:00 IST lunch window by at
+//       least 15 minutes, AND
+//   (b) there is no EXISTING productive:false entry already overlapping
+//       13:00-15:00 for that userId/date (would double-deduct otherwise).
+// If either is false, deduct nothing. The deduction only ever touches the
+// reported durationMins -- startTime/endTime stay exactly where they were
+// (endTime always OUTTime, never shifted), and durationMins is floored at
+// 0, so it can never go negative or imply time past OUTTime.
+// ═══════════════════════════════════════════════════════
+const LUNCH_WINDOW_START = '13:00';
+const LUNCH_WINDOW_END = '15:00';
+const LUNCH_DEDUCT_MINS = 15;
+const LUNCH_OVERLAP_THRESHOLD_MS = LUNCH_DEDUCT_MINS * 60 * 1000;
+
+function lunchOverlapMs(isoDate, startMs, endMs) {
+  const lunchStartMs = hhmmToEpoch(isoDate, LUNCH_WINDOW_START);
+  const lunchEndMs = hhmmToEpoch(isoDate, LUNCH_WINDOW_END);
+  return Math.max(0, Math.min(endMs, lunchEndMs) - Math.max(startMs, lunchStartMs));
+}
+
 // Reads existing timeLogs for one user+date and returns the latest endTime
-// (as an epoch), or null if nothing finished yet. Returns { blocked: true }
-// instead if ANY entry for that user+date is still inProgress:true --
-// gap-filling around a live/unresolved session is api/finalize-stale.js's
-// job, not this one's; colliding with it isn't this endpoint's call to make.
+// (as an epoch), or null if nothing finished yet, plus whether an existing
+// productive:false entry already overlaps the lunch window (condition (b)
+// above). Returns { blocked: true } instead if ANY entry for that
+// user+date is still inProgress:true -- gap-filling around a live/
+// unresolved session is api/finalize-stale.js's job, not this one's;
+// colliding with it isn't this endpoint's call to make.
 async function getLastLoggedEnd(db, userId, isoDate) {
   const snap = await getDocs(query(
     collection(db, 'timeLogs'),
@@ -120,35 +148,19 @@ async function getLastLoggedEnd(db, userId, isoDate) {
     where('date', '==', isoDate),
   ));
   let latestEndMs = null;
+  let hasLunchEntry = false;
   for (const d of snap.docs) {
     const data = d.data();
     if (data.inProgress === true) return { blocked: true, reason: 'has an inProgress entry for this date -- leave it to the finalizer' };
     if (!data.endTime) continue;
     const endMs = hhmmToEpoch(isoDate, data.endTime);
     if (latestEndMs === null || endMs > latestEndMs) latestEndMs = endMs;
+    if (data.productive === false && data.startTime) {
+      const startMs = hhmmToEpoch(isoDate, data.startTime);
+      if (lunchOverlapMs(isoDate, startMs, endMs) > 0) hasLunchEntry = true;
+    }
   }
-  return { blocked: false, latestEndMs, lastDoc: snap.docs.length ? snap.docs[snap.docs.length - 1].data() : null };
-}
-
-// ═══════════════════════════════════════════════════════
-// LUNCH HANDLING -- BLOCKED, see the module-level comment above.
-// The brief says "mirror however the existing gap-fill path handles it
-// (carve or 15-min fallback) -- read that code, don't invent a new rule,"
-// but that code doesn't exist anywhere in this repo to read. Rather than
-// guess between "carve the actual lunch punch out of the gap" and "flat
-// 15-min deduction," this currently does NEITHER -- it returns the whole
-// last-end-to-OUTTime span as one unbroken block, and the plan/response
-// marks every entry with lunchHandling:'NOT_YET_IMPLEMENTED' so it's
-// impossible to miss in dry-run output. writeGapFill() below hard-refuses
-// (409) regardless of the confirm flag until this is resolved, since
-// writing an unbroken span could silently pay someone for their own lunch
-// break.
-// ═══════════════════════════════════════════════════════
-const LUNCH_HANDLING_IMPLEMENTED = false;
-
-function computeGapFillSegments(startMs, endMs) {
-  // Placeholder pass-through -- one unbroken segment, no lunch carve.
-  return [{ startMs, endMs, lunchHandling: 'NOT_YET_IMPLEMENTED' }];
+  return { blocked: false, latestEndMs, hasLunchEntry, lastDoc: snap.docs.length ? snap.docs[snap.docs.length - 1].data() : null };
 }
 
 async function computePlanForDate(db, isoDate, punchRecords) {
@@ -170,43 +182,41 @@ async function computePlanForDate(db, isoDate, punchRecords) {
     const startMs = last.latestEndMs !== null ? last.latestEndMs : hhmmToEpoch(isoDate, rec.INTime);
     if (startMs >= outMs) { plan.push({ empcode, userId, name: rec.Name, skipped: true, reason: 'already logged through OUTTime, nothing to fill' }); continue; }
 
-    const segments = computeGapFillSegments(startMs, outMs);
-    const carryForward = last.lastDoc || {};
-    const entries = segments.map((seg) => {
-      const durationMins = Math.max(1, Math.round((seg.endMs - seg.startMs) / 60000));
-      return {
-        id: `gapfill-${userId}-${isoDate}-${toHHMM(seg.startMs).replace(':', '')}`,
-        userId,
-        date: isoDate,
-        projectId: carryForward.projectId ?? null,
-        projectName: carryForward.projectName || 'Unlogged',
-        phase: carryForward.phase || '',
-        typology: carryForward.typology || '',
-        activity: '',
-        productive: true,
-        inProgress: false,
-        sessionStartMs: seg.startMs,
-        ts: seg.startMs,
-        startTime: toHHMM(seg.startMs),
-        endTime: toHHMM(seg.endMs),
-        durationMins,
-        desc: `${carryForward.desc || carryForward.projectName || 'Work on project'} (auto-filled from biometric OUT ${rec.OUTTime})`,
-        gapfill: true,
-        gapfillSource: `biometric-${isoDate}`,
-        lunchHandling: seg.lunchHandling,
-      };
-    });
+    const rawDurationMins = Math.max(1, Math.round((outMs - startMs) / 60000));
+    const overlapMs = lunchOverlapMs(isoDate, startMs, outMs);
+    const shouldDeductLunch = overlapMs >= LUNCH_OVERLAP_THRESHOLD_MS && !last.hasLunchEntry;
+    const durationMins = shouldDeductLunch ? Math.max(0, rawDurationMins - LUNCH_DEDUCT_MINS) : rawDurationMins;
 
-    plan.push({ empcode, userId, name: rec.Name, skipped: false, outTime: rec.OUTTime, entries });
+    const carryForward = last.lastDoc || {};
+    const entry = {
+      id: `gapfill-${userId}-${isoDate}-${toHHMM(startMs).replace(':', '')}`,
+      userId,
+      date: isoDate,
+      projectId: carryForward.projectId ?? null,
+      projectName: carryForward.projectName || 'Unlogged',
+      phase: carryForward.phase || '',
+      typology: carryForward.typology || '',
+      activity: '',
+      productive: true,
+      inProgress: false,
+      sessionStartMs: startMs,
+      ts: startMs,
+      startTime: toHHMM(startMs),
+      endTime: toHHMM(outMs), // always OUTTime, unaffected by the lunch deduction
+      durationMins,
+      desc: `${carryForward.desc || carryForward.projectName || 'Work on project'} (auto-filled from biometric OUT ${rec.OUTTime})`,
+      gapfill: true,
+      gapfillSource: `biometric-${isoDate}`,
+      ...(shouldDeductLunch ? { lunchDeducted: true, lunchDeductedMins: LUNCH_DEDUCT_MINS } : {}),
+    };
+
+    plan.push({ empcode, userId, name: rec.Name, skipped: false, outTime: rec.OUTTime, entries: [entry] });
   }
 
   return plan;
 }
 
 async function writeGapFillPlan(db, plan) {
-  if (!LUNCH_HANDLING_IMPLEMENTED) {
-    throw Object.assign(new Error('Lunch handling is not yet implemented -- writes are blocked until resolved (see LUNCH HANDLING comment in this file)'), { httpStatus: 409 });
-  }
   const results = [];
   for (const item of plan) {
     if (item.skipped) continue;
