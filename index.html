@@ -1956,22 +1956,63 @@ function upsertTimeLog(log) {
 // inProgress back to true after the flag was already set.
 let sessionCloseListenerUnsub = null;
 let sessionExternallyClosed = false;
+// V14.3.49: tracks which doc THIS listener instance is authoritative for --
+// deliberately separate from currentSessionLogId. Real browser testing found
+// that gating the callback on currentSessionLogId === sessionId broke the
+// corrective re-close entirely: the moment external closure is detected and
+// the local session is torn down (currentSessionLogId cleared to null, see
+// below), every SUBSEQUENT snapshot -- including the one meant to catch and
+// correct a later stale reopen -- would immediately no-op against a guard
+// that can now never be true again. watchedSessionId only changes when a
+// NEW attachSessionCloseListener() call happens (a genuinely new session
+// starting), not when this one gets torn down out from under it.
+let watchedSessionId = null;
 
 function attachSessionCloseListener(sessionId) {
   detachSessionCloseListener(); // never double-attach across a fast switch/restore
   sessionExternallyClosed = false;
+  watchedSessionId = sessionId;
   sessionCloseListenerUnsub = db.collection('timeLogs').doc(sessionId).onSnapshot(
     (snap) => {
-      // Stale callback from an already-superseded listener (a switch/stop
-      // happened between this snapshot firing and now) -- ignore.
-      if (currentSessionLogId !== sessionId) return;
+      // Stale callback from an already-superseded listener (a NEW session
+      // started via attachSessionCloseListener() since this one was set up)
+      // -- ignore. NOT gated on currentSessionLogId -- see watchedSessionId above.
+      if (watchedSessionId !== sessionId) return;
       if (!snap.exists) return; // brand-new id, doc not written yet -- nothing to react to
       const data = snap.data();
       if (data.inProgress === false) {
         if (!sessionExternallyClosed) {
           sessionExternallyClosed = true;
-          console.warn(`[reopen-guard] session ${sessionId} was finalized externally (recovered:${!!data.recovered}) -- heartbeat stopping, notifying user`);
+          console.warn(`[reopen-guard] session ${sessionId} was finalized externally (recovered:${!!data.recovered}) -- stopping locally, notifying user`);
           showNotificationToast('⏸ Timer auto-closed', 'Your session went stale and was closed automatically. Please start a new timer to keep tracking.', 'warning');
+          // V14.3.49: ROOT CAUSE of the whack-a-mole found via real browser
+          // testing -- setting the flag alone doesn't stop two other things:
+          // (1) every OTHER writer (finalizeCurrentSession, and any future
+          // one) that gates on timerRunning/currentSessionLogId rather than
+          // this flag keeps running, because those never got cleared; (2)
+          // the generic bulk autosave (saveData()->commitInChunks, NOT
+          // touched here) does a bare batch.set() of this app's ENTIRE
+          // in-memory timeLogs array on its own ~30s timer -- upsertTimeLog()
+          // only refreshes THIS session's array entry when a write is
+          // actually attempted, so once the guard stops those writes the
+          // array entry freezes at whatever it last was (inProgress:true,
+          // since that's all a heartbeat ever writes), and the next
+          // autosave cycle blindly overwrites the server doc back to that
+          // frozen stale snapshot -- reopening it, which this listener then
+          // "corrects" via .update(), only for the NEXT autosave cycle
+          // (~30s later) to reopen it again from the same still-stale
+          // array entry. Fixing both closes the loop instead of just
+          // reacting to it:
+          const idx = timeLogs.findIndex((l) => l.id === sessionId);
+          if (idx >= 0) timeLogs[idx] = { ...timeLogs[idx], ...data };
+          // Actually stop the session locally -- clears timerRunning/
+          // currentSessionLogId/heartbeat intervals/localStorage/widget UI,
+          // so every EXISTING timerRunning-or-currentSessionLogId-gated
+          // writer (heartbeatSession, finalizeCurrentSession, any future
+          // one) naturally stops too, with no need to hunt down and patch
+          // each one individually. keepCloseListener:true -- this SAME
+          // listener must stay alive to catch/correct a later stale reopen.
+          resetTimer({ keepCloseListener: true, statusText: 'Auto-closed — start a new timer' });
         }
       } else if (data.inProgress === true && sessionExternallyClosed) {
         // A write already sitting in the offline queue before we knew this
@@ -1982,6 +2023,12 @@ function attachSessionCloseListener(sessionId) {
           inProgress: false,
           reopenCorrected: true,
           reopenCorrectedAt: new Date().toISOString(),
+        }).then(() => {
+          // Same stale-array fix as above, every time this fires -- without
+          // it, the SAME frozen array entry re-triggers this correction
+          // again on the next autosave cycle, forever.
+          const idx = timeLogs.findIndex((l) => l.id === sessionId);
+          if (idx >= 0) timeLogs[idx] = { ...timeLogs[idx], inProgress: false, reopenCorrected: true };
         }).catch((e) => console.error('[reopen-guard] corrective re-close failed (will retry via the same listener if it fires again):', e.message));
       }
     },
@@ -1997,6 +2044,7 @@ function attachSessionCloseListener(sessionId) {
 function detachSessionCloseListener() {
   if (sessionCloseListenerUnsub) { sessionCloseListenerUnsub(); sessionCloseListenerUnsub = null; }
   sessionExternallyClosed = false;
+  watchedSessionId = null;
 }
 
 function heartbeatSession() {
@@ -6581,6 +6629,7 @@ function switchTaskTo(newPlan) {
 // directly and had no way to know a checkpoint had silently rewound it.)
 function finalizeCurrentSession(reason) {
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
+  if (sessionExternallyClosed) return; // V14.3.49: reopen guard -- don't write a fresh checkpoint onto a session the server already finalized
   const now         = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
   if (sessionSecs < 30) return; // too short to be worth a checkpoint write
@@ -7555,7 +7604,14 @@ function startEndOfDayMonitor() {
   endOfDayInterval = setInterval(runEndOfDayCheck, 60000);
 }
 
-async function resetTimer() {
+// V14.3.49: keepCloseListener/statusText are optional and default to the
+// exact behavior every existing call site already relies on (detach +
+// "Ready to track") -- added ONLY so the reopen-guard can reuse this
+// instead of duplicating its ~15 lines of UI-reset logic. keepCloseListener
+// skips detaching the session-close listener (it must stay alive after an
+// external-close teardown, to catch/correct a later stale reopen); statusText
+// overrides the default "Ready to track" label for that same case.
+async function resetTimer({ keepCloseListener = false, statusText = 'Ready to track' } = {}) {
   const lastPlan = timerLinkedPlan;
 
   timerRunning = false; timerStartedAt = null; timerPausedMs = 0; timerLinkedPlan = null;
@@ -7563,7 +7619,7 @@ async function resetTimer() {
   if (timerInterval) clearInterval(timerInterval);
   // V14.3.3: stop heartbeat — session already finalised by the caller
   if (sessionHeartbeatInterval) { clearInterval(sessionHeartbeatInterval); sessionHeartbeatInterval = null; }
-  detachSessionCloseListener(); // V14.3.48: session is genuinely done, stop watching it
+  if (!keepCloseListener) detachSessionCloseListener(); // V14.3.48: session is genuinely done, stop watching it
   currentSessionLogId = null;
   localStorage.removeItem('timerState');
   document.title = 'SQUARE - Office Management'; // V14.2.25: restore title on stop
@@ -7579,7 +7635,7 @@ async function resetTimer() {
   const display = document.getElementById('timerDisplay');
   if (display) { display.textContent = '00:00:00'; display.classList.remove('running'); }
   const status = document.getElementById('timerStatus');
-  if (status) status.textContent = 'Ready to track';
+  if (status) status.textContent = statusText;
   const projBadge = document.getElementById('timerProject');
   if (projBadge) projBadge.style.display = 'none';
   const runningDiv = document.getElementById('timerRunning');
