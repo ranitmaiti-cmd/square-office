@@ -1176,6 +1176,54 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 // V14.2.9: Cache bypassed via {source:'server'} on all reads — see loadData()
 
+// ═══════════════════════════════════════════════════════
+// V14.3.48: OFFLINE WRITE PERSISTENCE
+// Spike-confirmed root cause (throwaway Node test against real Firestore,
+// not assumed): a network drop within one continuous page session already
+// self-heals -- the SDK holds the write in memory and auto-flushes on
+// reconnect. What's NOT survivable today is a RELOAD while offline: the
+// in-memory pending write has nowhere durable to live, so it's silently and
+// completely gone the instant the JS context is torn down -- no error, no
+// trace, nothing. That's a real, not hypothetical, combination: this app's
+// own version gate force-reloads tabs on deploy, and laptops sleep/wake and
+// tabs get closed/reopened routinely in a real office.
+//
+// enablePersistence({synchronizeTabs:true}) backs the write queue with
+// IndexedDB so a pending mutation survives a reload and flushes once back
+// online. synchronizeTabs:true is required, not optional -- without it,
+// enablePersistence() throws failed-precondition the moment a SECOND tab
+// tries to enable it (one tab holds an exclusive lock by default), which
+// this team's own "MULTIPLE TABS DETECTED" warning further down confirms is
+// a real occurrence, not just a theoretical one. With synchronizeTabs, one
+// tab becomes the coordinating primary and every tab shares one consistent
+// cache instead of the second tab silently losing persistence outright.
+//
+// This MUST be the very first Firestore call after firebase.firestore() --
+// the compat SDK throws failed-precondition ("already started") if
+// enablePersistence() runs after any other Firestore operation, and this
+// file makes its first other call (loadData(), much further down) well
+// after this point, so the ordering here is safe.
+//
+// Fail-open, unconditionally: persistence unavailable (no IndexedDB
+// support -- rare, but real in some restricted/private-browsing contexts)
+// must never block app load. Falls back to exactly today's behavior --
+// same in-memory-only queue, same resilience-to-brief-blips, same
+// vulnerability to reload-during-outage that this is meant to close, but
+// nothing worse than what already ships today.
+db.enablePersistence({ synchronizeTabs: true }).then(() => {
+  console.log('✅ Offline persistence enabled (multi-tab synchronized)');
+}).catch((err) => {
+  if (err.code === 'failed-precondition') {
+    // Should not happen with synchronizeTabs:true except in genuinely
+    // unusual states (e.g. persistence already enabled once this session).
+    console.warn('⚠️ Offline persistence unavailable (failed-precondition) -- continuing without it:', err.message);
+  } else if (err.code === 'unimplemented') {
+    console.warn('⚠️ Offline persistence unavailable (browser lacks required IndexedDB support) -- continuing without it:', err.message);
+  } else {
+    console.warn('⚠️ Offline persistence failed to enable -- continuing without it:', err.message);
+  }
+});
+
 // V14.3.19: bump this alongside version.json on every meaningful deploy --
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
@@ -1880,8 +1928,80 @@ function upsertTimeLog(log) {
   try { saveTimeLog(log); } catch (e) { console.error('heartbeat save failed', e); }
 }
 
+// ═══════════════════════════════════════════════════════
+// V14.3.48: inProgress-REOPEN GUARD
+// Offline persistence (above) means a heartbeat write made while offline
+// now durably queues and WILL flush automatically the instant connectivity
+// returns -- no matter how long the outage was, no matter whether a
+// finalizer (client sweep or api/finalize-stale.js) already closed the
+// session in the meantime. heartbeatSession() always writes
+// inProgress:true unconditionally based on this tab's own belief that it's
+// still running; it never checks server state first. Without a guard, a
+// stale queued write landing after external finalization would silently
+// resurrect ("reopen") a session the system already decided was dead --
+// and persistence makes this MORE likely to happen, not less, since
+// outages that previously just lost data now instead queue and replay.
+//
+// Design: a live onSnapshot listener on the session doc, not a per-tick
+// read-before-write. A plain read-before-write can't help here anyway --
+// it can only guard writes this tab is ABOUT to issue, but the dangerous
+// write is one that was ALREADY enqueued into the offline queue before
+// this tab had any way of knowing the session got closed elsewhere; no
+// check performed at write time can intercept a mutation that already
+// exists in the queue. The listener instead reacts the moment true current
+// state becomes known (working from cache while offline, updating live
+// the instant real server data arrives), sets a flag that stops all FUTURE
+// heartbeat attempts at the source, and separately corrects the one race
+// that genuinely can't be prevented: a stale queued write flipping
+// inProgress back to true after the flag was already set.
+let sessionCloseListenerUnsub = null;
+let sessionExternallyClosed = false;
+
+function attachSessionCloseListener(sessionId) {
+  detachSessionCloseListener(); // never double-attach across a fast switch/restore
+  sessionExternallyClosed = false;
+  sessionCloseListenerUnsub = db.collection('timeLogs').doc(sessionId).onSnapshot(
+    (snap) => {
+      // Stale callback from an already-superseded listener (a switch/stop
+      // happened between this snapshot firing and now) -- ignore.
+      if (currentSessionLogId !== sessionId) return;
+      if (!snap.exists) return; // brand-new id, doc not written yet -- nothing to react to
+      const data = snap.data();
+      if (data.inProgress === false) {
+        if (!sessionExternallyClosed) {
+          sessionExternallyClosed = true;
+          console.warn(`[reopen-guard] session ${sessionId} was finalized externally (recovered:${!!data.recovered}) -- heartbeat stopping, notifying user`);
+          showNotificationToast('⏸ Timer auto-closed', 'Your session went stale and was closed automatically. Please start a new timer to keep tracking.', 'warning');
+        }
+      } else if (data.inProgress === true && sessionExternallyClosed) {
+        // A write already sitting in the offline queue before we knew this
+        // session was closed just flushed and flipped it back open --
+        // correct it immediately. Tagged, not silent, so it's auditable.
+        console.warn(`[reopen-guard] CORRECTING accidental reopen of ${sessionId} (a stale queued write landed after external finalize)`);
+        db.collection('timeLogs').doc(sessionId).update({
+          inProgress: false,
+          reopenCorrected: true,
+          reopenCorrectedAt: new Date().toISOString(),
+        }).catch((e) => console.error('[reopen-guard] corrective re-close failed (will retry via the same listener if it fires again):', e.message));
+      }
+    },
+    (err) => {
+      // Fail open -- a listener error must never block heartbeats from a
+      // genuinely-still-running session; it only means this specific extra
+      // protection is temporarily unavailable, same risk as before this feature.
+      console.warn('[reopen-guard] session listener error (heartbeat unaffected):', err.message);
+    },
+  );
+}
+
+function detachSessionCloseListener() {
+  if (sessionCloseListenerUnsub) { sessionCloseListenerUnsub(); sessionCloseListenerUnsub = null; }
+  sessionExternallyClosed = false;
+}
+
 function heartbeatSession() {
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
+  if (sessionExternallyClosed) return; // V14.3.48: reopen guard -- don't resurrect a session the server already finalized
   const now  = Date.now();
   const mins = Math.max(1, Math.floor((now - timerStartedAt) / 1000 / 60));
   upsertTimeLog({
@@ -6438,6 +6558,7 @@ function switchTaskTo(newPlan) {
   }
   clearInterval(timerInterval);
   if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
+  detachSessionCloseListener(); // V14.3.48: stop watching the OLD session before startTimerWithPlan attaches to the new one
   currentSessionLogId = null;
   startTimerWithPlan(newPlan);
 }
@@ -6513,6 +6634,7 @@ function startTimerWithPlan(plan) {
   // the SAME heartbeat doc (see restoreTimerState) instead of losing track of
   // it and orphaning it at whatever durationMins it had at last heartbeat.
   currentSessionLogId = genId();
+  attachSessionCloseListener(currentSessionLogId); // V14.3.48: reopen guard -- watch this session for an external finalize
   localStorage.setItem('timerState', JSON.stringify({
     startedAt: timerStartedAt, lastSessionStartedAt: window.lastSessionStartedAt,
     pausedMs: timerPausedMs, running: true, linkedPlan: timerLinkedPlan,
@@ -7178,6 +7300,7 @@ async function restoreTimerState() {
     // genId() only for sessions already in flight when this fix ships (their
     // saved state predates the sessionLogId field).
     currentSessionLogId = state.sessionLogId || genId();
+    attachSessionCloseListener(currentSessionLogId); // V14.3.48: reopen guard -- resumed session, watch for an external finalize too
     // V14.3.18: prefer the reliable tick worker, same as startTimerWithPlan.
     if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
     initReliableTickWorker();
@@ -7440,6 +7563,7 @@ async function resetTimer() {
   if (timerInterval) clearInterval(timerInterval);
   // V14.3.3: stop heartbeat — session already finalised by the caller
   if (sessionHeartbeatInterval) { clearInterval(sessionHeartbeatInterval); sessionHeartbeatInterval = null; }
+  detachSessionCloseListener(); // V14.3.48: session is genuinely done, stop watching it
   currentSessionLogId = null;
   localStorage.removeItem('timerState');
   document.title = 'SQUARE - Office Management'; // V14.2.25: restore title on stop
