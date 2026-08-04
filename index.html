@@ -6586,28 +6586,16 @@ function capSessionDuration(sessionSecs) {
 
 // V14.2.24: Switch task — auto-saves current, starts new immediately
 function switchTaskTo(newPlan) {
-  if (!timerRunning || !timerStartedAt) { startTimerWithPlan(newPlan); return; }
-  const now         = Date.now();
-  const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
-  const { durationMins: mins, capped } = capSessionDuration(sessionSecs);
-  const today       = fmt(new Date());
-  const clockStart  = new Date(timerStartedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  const clockEnd    = new Date(now).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  if (sessionSecs >= 30 && timerLinkedPlan && currentSessionLogId) {
-    const desc = `${timerLinkedPlan.typology||timerLinkedPlan.phase||'Work on project'} (switched to ${newPlan.project})` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
-    // V14.3.3: finalise the heartbeat log under the SAME id — no duplicate, no loss
-    upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:false,ts:Date.now(),...(capped?{autoCapped:true}:{})});
-    autoSave(); renderTimeLog(); renderProjectsBudget();
-    if (capped) {
-      showNotificationToast('⚠️ Session auto-capped', `${timerLinkedPlan.project} hit the ${MAX_SESSION_HOURS}h cap — please verify this entry in Time Report.`, 'warning');
-    } else {
-      showNotificationToast(`✓ ${minsToHM(mins)} saved`, `${timerLinkedPlan.project} → ${newPlan.project}`, 'info');
-    }
-  }
-  clearInterval(timerInterval);
-  if (sessionHeartbeatInterval) clearInterval(sessionHeartbeatInterval);
-  detachSessionCloseListener(); // V14.3.48: stop watching the OLD session before startTimerWithPlan attaches to the new one
-  currentSessionLogId = null;
+  // V15: startTimerWithPlan() now closes any existing session internally --
+  // detach-then-write, correctly ordered against the reopen-guard -- before
+  // opening the new one. This function used to duplicate that close logic
+  // here (and, on closer inspection, had the SAME detach-after-write
+  // ordering bug this fix closes: detachSessionCloseListener() ran after
+  // the close write below, not before it -- a latent race, not something
+  // introduced by this change). Deleting the duplicate removes the bug
+  // instead of patching it in two places. Kept as a named wrapper for
+  // call-site clarity (task-switch cards / lunch button) rather than
+  // pointing those callers at startTimerWithPlan directly.
   startTimerWithPlan(newPlan);
 }
 
@@ -6658,6 +6646,85 @@ function finalizeCurrentSession(reason) {
 
 // Core function: start the timer with a linked plan
 function startTimerWithPlan(plan) {
+  // V15: close any still-open OLD session before touching ANY shared state
+  // below. Every "start a session" call site funnels through this one
+  // function -- switchTaskTo(), the "+Unplanned task" bypass, the Task
+  // Select modal, openNewTaskPicker's single-plan auto-start -- so fixing
+  // it HERE protects all of them (including ones added later) instead of
+  // patching each call site individually. This is the root-cause fix for
+  // the task-switch orphan bug: previously only switchTaskTo() closed the
+  // old session explicitly, so the other entry points left it inProgress:true,
+  // undetected until the 5-minute stale-sweep (often much later in practice).
+  //
+  // Captured into LOCALS first, strictly before any reassignment below --
+  // currentSessionLogId/timerStartedAt/timerLinkedPlan are read by BOTH this
+  // close step and the open step that follows and share the same global
+  // variables, so reading stale values here (or reading them AFTER the open
+  // step reassigns them) would corrupt whichever write runs second: either
+  // the close would target the wrong doc, or use the wrong start time.
+  if (timerRunning && currentSessionLogId && timerStartedAt && timerLinkedPlan) {
+    const oldSessionId = currentSessionLogId;
+    const oldStartedAt = timerStartedAt;
+    const oldPlan = timerLinkedPlan;
+    const closeNow = Date.now();
+    const oldSessionSecs = Math.floor((closeNow - oldStartedAt) / 1000);
+    const { durationMins: oldMins, capped: oldCapped } = capSessionDuration(oldSessionSecs);
+    const oldEndTime = new Date(closeNow).toLocaleTimeString('en-IN', {
+      hour: '2-digit', minute: '2-digit', hour12: false,
+      timeZone: 'Asia/Kolkata', // pinned explicitly, not implicit-from-browser-clock
+    });
+    const oldDesc = `${oldPlan.typology || oldPlan.phase || 'Work on project'} (switched to ${plan.project})` +
+      (oldCapped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
+
+    // Detach the reopen-guard listener BEFORE dispatching the close-write.
+    // Firestore can echo a same-client write back to a still-active listener
+    // almost immediately (local cache), and if that listener is still
+    // watching THIS session when it observes inProgress flip to false, it
+    // has no way to know WE just did that intentionally -- it fires the full
+    // "externally finalized" response (toast + resetTimer) against state
+    // that, by the time the callback actually runs, may already belong to
+    // the NEW session being started below. Detaching first removes the
+    // listener (and resets watchedSessionId/sessionExternallyClosed)
+    // entirely before the write that would trigger it even goes out.
+    detachSessionCloseListener();
+
+    // Immediate, targeted write -- NOT deferred to the next autosave/diff
+    // cycle. Task switches are discrete and rare (~10/day/person); a single
+    // targeted .update() is trivial cost, and deferring would couple this
+    // fix's correctness to autosave timing (a tab closed/reloaded/crashed
+    // before the next tick would leave the old session inProgress:true
+    // forever -- a WORSE orphan than the one being fixed here).
+    db.collection('timeLogs').doc(oldSessionId).update({
+      inProgress: false,
+      endTime: oldEndTime,
+      durationMins: oldMins,
+      desc: oldDesc,
+      ts: closeNow,
+      ...(oldCapped ? { autoCapped: true } : {}),
+    }).catch((e) => console.error('[task-switch] old session close failed (stale-sweep will still catch it eventually):', e.message));
+
+    // Mirror the close into the local array synchronously -- the write above
+    // is async and fire-and-forget, but anything reading `timeLogs` right
+    // after this call (renderTimeLog, renderProjectsBudget, any periodic
+    // save/diff sweep) should see the closed state immediately, same as
+    // every other close path in this file already does.
+    const oldIdx = timeLogs.findIndex((l) => l.id === oldSessionId);
+    if (oldIdx >= 0) {
+      timeLogs[oldIdx] = {
+        ...timeLogs[oldIdx], inProgress: false, endTime: oldEndTime,
+        durationMins: oldMins, desc: oldDesc, ts: closeNow,
+        ...(oldCapped ? { autoCapped: true } : {}),
+      };
+    }
+    renderTimeLog(); renderProjectsBudget();
+
+    if (oldCapped) {
+      showNotificationToast('⚠️ Session auto-capped', `${oldPlan.project} hit the ${MAX_SESSION_HOURS}h cap — please verify this entry in Time Report.`, 'warning');
+    } else {
+      showNotificationToast(`✓ ${minsToHM(oldMins)} saved`, `${oldPlan.project} → ${plan.project}`, 'info');
+    }
+  }
+
   // V14.2.26: Clear any existing interval first — prevents compound ticks
   if (timerInterval) clearInterval(timerInterval);
   timerLinkedPlan = plan;
