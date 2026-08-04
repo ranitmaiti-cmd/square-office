@@ -1281,6 +1281,19 @@ let onlineUsers = [];
 // differs from what's on the server, the diff finds it on the next tick.
 let docSnapshots = { timeLogs: new Map(), planEntries: new Map(), projects: new Map() };
 
+// Rollout gate: 'shadow' (default) keeps the ORIGINAL full-array commitInChunks()
+// write as the actual (PRIMARY) persistence path -- zero write-path risk --
+// while the diff engine runs in parallel purely to compute and log what it
+// WOULD have written/deleted, letting production usage validate the diff
+// against reality before it's ever trusted to actually write anything.
+// 'primary' flips the diff to be the real write path (syncChangedDocs()),
+// which is where the bill savings actually land. Deliberately a plain
+// top-level `let`, not wrapped in any object -- this is a classic (non-module)
+// script, so it's live-flippable from the DevTools console on a running tab
+// (`diffMode = 'primary'`) the same way useGranularSaves/DEBUG already are
+// elsewhere in this file, with no extra plumbing needed.
+let diffMode = 'shadow';
+
 // Small, fast, non-cryptographic string hash (FNV-1a, 32-bit) -- this is
 // change-detection, not security, so collision resistance just needs to be
 // "good enough not to mask a real edit," which FNV-1a comfortably is at this
@@ -1406,7 +1419,7 @@ async function syncChangedDocs(diffs) {
 // self-heals within this interval instead of silently persisting forever.
 // Deliberately reuses the ORIGINAL commitInChunks() unchanged for the write
 // part -- this is exactly the unconditional full-array write saveData()
-// used to do on every tick; here it just runs on a 15-minute cadence.
+// used to do on every tick; here it just runs on a 5-minute cadence.
 let backstopFullSaveInterval = null;
 async function backstopFullSave() {
   if (!dataLoaded || !currentUser) return;
@@ -2195,16 +2208,27 @@ async function saveData() {
   window._saveInProgress = true;
 
   try {
-  // V15: diff FIRST, before any network call at all -- periodicSaveInterval
-  // now calls saveData() unconditionally every 30s (see its definition), so
-  // an idle tick with nothing changed must cost zero Firestore reads/writes,
-  // not just skip the big collection rewrite. hasUnsavedChanges still gates
-  // the small companyData doc below (unchanged from before); it's checked
-  // here too so a companyData-only change (e.g. a typology edit) still
-  // reaches the connection check and gets saved.
+  // V15: diff FIRST, before any network call at all -- this is cheap
+  // in-memory hashing, safe to always compute regardless of diffMode.
   const _diffs = computeCollectionDiffs();
-  if (diffsAreEmpty(_diffs) && !hasUnsavedChanges) {
-    return;
+
+  if (diffMode === 'primary') {
+    // The diff IS the persistence mechanism here, so it's safe to skip the
+    // whole cycle -- including the connection check -- when there's
+    // nothing to do at all. periodicSaveInterval now calls saveData()
+    // unconditionally every 30s (see its definition); this is what keeps
+    // an idle tick at zero Firestore reads/writes.
+    if (diffsAreEmpty(_diffs) && !hasUnsavedChanges) {
+      return;
+    }
+  } else {
+    // Shadow mode: the diff is observation-only. The REAL write below must
+    // be gated EXACTLY the way it was before this diff engine existed --
+    // on hasUnsavedChanges alone -- so a bug in the diff logic can never
+    // suppress a real save while shadow mode is proving the diff out.
+    if (!hasUnsavedChanges) {
+      return;
+    }
   }
 
   // V11: Check connection before saving
@@ -2284,21 +2308,53 @@ async function saveData() {
     
     const saveTimestamp = new Date().toISOString();
 
-    // V15: write only what the diff computed at the top of this call found
-    // changed/deleted, instead of rewriting every doc in all three
-    // collections on every cycle. _diffs was computed before the connection
-    // check above, from the array state at that moment -- fine even though
-    // a few ms have passed, since diffCollection() re-hashes off the SAME
-    // array reference and any edit that lands in that gap just shows up as
-    // still-dirty on the NEXT tick (nothing is lost, only possibly deferred
-    // one cycle).
-    console.log('💾 Starting diff sync:', {
-      timeLogs: `${_diffs.timeLogs.toWrite.length} changed, ${_diffs.timeLogs.toDelete.length} deleted`,
-      planEntries: `${_diffs.planEntries.toWrite.length} changed, ${_diffs.planEntries.toDelete.length} deleted`,
-      projects: `${_diffs.projects.toWrite.length} changed, ${_diffs.projects.toDelete.length} deleted`,
-    });
-    await syncChangedDocs(_diffs);
-    console.log('✅ Diff sync complete');
+    if (diffMode === 'shadow') {
+      // PRIMARY write path in shadow mode: the ORIGINAL unconditional
+      // full-array rewrite, byte-for-byte the same mechanism that shipped
+      // before this diff engine existed. This is what makes shadow mode
+      // zero write-path risk -- the diff below never touches Firestore.
+      console.log('💾 [shadow] full-save starting (primary path, diff observing only)');
+      await commitInChunks('projects', projectsData, project => COLLECTION_BUILD_DOC_DATA.projects(project, saveTimestamp));
+      await commitInChunks('timeLogs', timeLogs, log => COLLECTION_BUILD_DOC_DATA.timeLogs(log, saveTimestamp));
+      await commitInChunks('planEntries', planEntries, entry => COLLECTION_BUILD_DOC_DATA.planEntries(entry, saveTimestamp));
+      console.log('✅ [shadow] full-save complete (primary path)');
+
+      // Observation only -- never calls syncChangedDocs(), so this can
+      // never affect what actually got persisted above. Logs exactly the
+      // doc ids the diff engine would have written/deleted this cycle, for
+      // production validation against the full-save's known-good result.
+      console.log('🔍 [shadow] diff would-write/would-delete this cycle:', {
+        timeLogs: { wouldWrite: _diffs.timeLogs.toWrite.map(w => w.item.id), wouldDelete: _diffs.timeLogs.toDelete },
+        planEntries: { wouldWrite: _diffs.planEntries.toWrite.map(w => w.item.id), wouldDelete: _diffs.planEntries.toDelete },
+        projects: { wouldWrite: _diffs.projects.toWrite.map(w => w.item.id), wouldDelete: _diffs.projects.toDelete },
+      });
+
+      // Advance the baseline to match what the full-save just wrote, so
+      // NEXT cycle's shadow diff reflects genuine deltas since THIS cycle
+      // -- without this, every doc would look "changed" forever (nothing
+      // else updates docSnapshots while shadow mode is primary), and the
+      // would-write log would balloon to the whole collection every time
+      // instead of showing real edits.
+      snapshotCollection('timeLogs', timeLogs);
+      snapshotCollection('planEntries', planEntries);
+      snapshotCollection('projects', projectsData);
+    } else {
+      // V15: write only what the diff computed at the top of this call found
+      // changed/deleted, instead of rewriting every doc in all three
+      // collections on every cycle. _diffs was computed before the connection
+      // check above, from the array state at that moment -- fine even though
+      // a few ms have passed, since diffCollection() re-hashes off the SAME
+      // array reference and any edit that lands in that gap just shows up as
+      // still-dirty on the NEXT tick (nothing is lost, only possibly deferred
+      // one cycle).
+      console.log('💾 Starting diff sync:', {
+        timeLogs: `${_diffs.timeLogs.toWrite.length} changed, ${_diffs.timeLogs.toDelete.length} deleted`,
+        planEntries: `${_diffs.planEntries.toWrite.length} changed, ${_diffs.planEntries.toDelete.length} deleted`,
+        projects: `${_diffs.projects.toWrite.length} changed, ${_diffs.projects.toDelete.length} deleted`,
+      });
+      await syncChangedDocs(_diffs);
+      console.log('✅ Diff sync complete');
+    }
 
     // V14.2.6: leaveRequests are EXCLUDED from batch save entirely.
     // They are always written granularly (per-document) to prevent
@@ -8028,7 +8084,8 @@ periodicSaveInterval = setInterval(() => {
 // diff engine is comprehensive by construction.
 backstopFullSaveInterval = setInterval(() => {
   backstopFullSave();
-}, 15 * 60 * 1000); // Every 15 minutes
+}, 5 * 60 * 1000); // Every 5 minutes -- tighter risk floor; cost is trivial
+// once diffMode is 'primary' since this is the only bulk write left.
 
 // Save before page unload
 window.addEventListener('beforeunload', (e) => {
