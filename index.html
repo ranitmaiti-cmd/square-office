@@ -1265,6 +1265,197 @@ let skipNextConflictCheck = false; // V12.1: Skip conflicts when adding new data
 let presenceInterval = null;
 let onlineUsers = [];
 
+// V15 Granular-Write Diff Engine — content-hash snapshots for timeLogs/
+// planEntries/projects, so saveData() writes only docs that actually changed
+// instead of rewriting the entire in-memory array every cycle. Deliberately
+// NOT users/leaveRequests -- both are already fully granular at every call
+// site (see saveUser()/saveLeaveRequest() and their callers), so a snapshot
+// for them would add bookkeeping with nothing to diff against.
+//
+// "Robust to missed mutation paths by construction": the diff never asks
+// "did the code that changed this doc remember to mark it dirty?" -- it
+// re-hashes the CURRENT in-memory array against the last-synced snapshot
+// every cycle, so it doesn't matter how a doc got mutated (a call site that
+// forgot to save it, a future code path nobody's audited yet, or one of the
+// existing already-granular paths short-circuiting it) -- if the content
+// differs from what's on the server, the diff finds it on the next tick.
+let docSnapshots = { timeLogs: new Map(), planEntries: new Map(), projects: new Map() };
+
+// Rollout gate: 'shadow' (default) keeps the ORIGINAL full-array commitInChunks()
+// write as the actual (PRIMARY) persistence path -- zero write-path risk --
+// while the diff engine runs in parallel purely to compute and log what it
+// WOULD have written/deleted, letting production usage validate the diff
+// against reality before it's ever trusted to actually write anything.
+// 'primary' flips the diff to be the real write path (syncChangedDocs()),
+// which is where the bill savings actually land. Deliberately a plain
+// top-level `let`, not wrapped in any object -- this is a classic (non-module)
+// script, so it's live-flippable from the DevTools console on a running tab
+// (`diffMode = 'primary'`) the same way useGranularSaves/DEBUG already are
+// elsewhere in this file, with no extra plumbing needed.
+let diffMode = 'shadow';
+
+// Small, fast, non-cryptographic string hash (FNV-1a, 32-bit) -- this is
+// change-detection, not security, so collision resistance just needs to be
+// "good enough not to mask a real edit," which FNV-1a comfortably is at this
+// document count. Object keys are sorted before stringifying so two
+// differently-constructed-but-equal objects (e.g. spread order varying
+// between call sites) hash identically instead of registering a spurious
+// "changed" write.
+function stableStringify(obj) {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return '[' + obj.map(stableStringify).join(',') + ']';
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}';
+}
+function fnv1aHash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+function computeDocHash(item) {
+  return fnv1aHash(stableStringify(item));
+}
+
+// Rebuilds a collection's snapshot from scratch to match `array` exactly --
+// call this whenever the array was just wholesale-replaced from server truth
+// (initial loadData(), or the dashboard's periodic full timeLogs re-read),
+// so the NEXT diff baselines against what the server actually holds instead
+// of comparing fresh server data against a stale pre-refresh snapshot (which
+// would look like everything changed and trigger a spurious full rewrite).
+function snapshotCollection(name, array) {
+  const snap = new Map();
+  array.forEach(item => { if (item && item.id) snap.set(item.id, computeDocHash(item)); });
+  docSnapshots[name] = snap;
+}
+
+// Diffs `array` against docSnapshots[name]: items whose hash differs (or is
+// new) go in toWrite; ids present in the snapshot but missing from `array`
+// go in toDelete (this is the ID-set deletion detection -- it doesn't matter
+// WHY an id disappeared from the array, filter/splice/reassignment all look
+// identical here, which is what closes the meeting-cancel/meeting-edit
+// orphaned-doc gap found during the design review, for free).
+function diffCollection(name, array) {
+  const snap = docSnapshots[name];
+  const toWrite = [];
+  const seenIds = new Set();
+  array.forEach(item => {
+    if (!item || !item.id) return; // mirrors commitInChunks' existing no-id guard
+    seenIds.add(item.id);
+    const hash = computeDocHash(item);
+    if (snap.get(item.id) !== hash) toWrite.push({ item, hash });
+  });
+  const toDelete = [];
+  snap.forEach((_hash, id) => { if (!seenIds.has(id)) toDelete.push(id); });
+  return { toWrite, toDelete };
+}
+
+function computeCollectionDiffs() {
+  return {
+    timeLogs: diffCollection('timeLogs', timeLogs),
+    planEntries: diffCollection('planEntries', planEntries),
+    projects: diffCollection('projects', projectsData),
+  };
+}
+
+function diffsAreEmpty(diffs) {
+  return Object.values(diffs).every(d => d.toWrite.length === 0 && d.toDelete.length === 0);
+}
+
+const COLLECTION_BUILD_DOC_DATA = {
+  projects: (project, saveTimestamp) => ({ ...project, updatedAt: saveTimestamp, updatedBy: currentUser?.name || 'Unknown' }),
+  timeLogs: (log, saveTimestamp) => ({ ...log, updatedAt: saveTimestamp }),
+  planEntries: (entry, saveTimestamp) => ({ ...entry, updatedAt: saveTimestamp }),
+};
+const COLLECTION_FIRESTORE_NAME = { projects: 'projects', timeLogs: 'timeLogs', planEntries: 'planEntries' };
+
+// Writes ONLY the docs computeCollectionDiffs() found changed/deleted, then
+// advances the snapshot for exactly what succeeded -- a chunk that fails
+// leaves its docs' snapshot entries untouched, so they still look "dirty"
+// next cycle and get retried automatically without any separate retry queue.
+async function syncChangedDocs(diffs) {
+  const saveTimestamp = new Date().toISOString();
+  const CHUNK_SIZE = 450; // mirrors commitInChunks' existing batch-limit headroom
+  for (const name of Object.keys(diffs)) {
+    const { toWrite, toDelete } = diffs[name];
+    if (toWrite.length === 0 && toDelete.length === 0) continue;
+    const collectionName = COLLECTION_FIRESTORE_NAME[name];
+    const buildDocData = COLLECTION_BUILD_DOC_DATA[name];
+
+    // Deletes first, chunked the same way -- independent of the toWrite
+    // chunking below so a delete failure can't block writes or vice versa.
+    for (let i = 0; i < toDelete.length; i += CHUNK_SIZE) {
+      const chunk = toDelete.slice(i, i + CHUNK_SIZE);
+      const batch = db.batch();
+      chunk.forEach(id => batch.delete(db.collection(collectionName).doc(id)));
+      try {
+        await batch.commit();
+        chunk.forEach(id => docSnapshots[name].delete(id));
+      } catch (e) {
+        console.error(`❌ ${name} delete chunk failed (${chunk.length} doc(s)) -- will retry next cycle:`, e);
+      }
+    }
+
+    for (let i = 0; i < toWrite.length; i += CHUNK_SIZE) {
+      const chunk = toWrite.slice(i, i + CHUNK_SIZE);
+      const batch = db.batch();
+      chunk.forEach(({ item }) => batch.set(db.collection(collectionName).doc(item.id), buildDocData(item, saveTimestamp)));
+      try {
+        await batch.commit();
+        chunk.forEach(({ item, hash }) => docSnapshots[name].set(item.id, hash));
+      } catch (e) {
+        console.error(`❌ ${name} write chunk failed (items ${i}-${i + chunk.length - 1} of ${toWrite.length}) -- will retry next cycle:`, e);
+      }
+    }
+  }
+}
+
+// Low-frequency safety net, independent of the diff logic above: forces a
+// COMPLETE rewrite of all three collections (bypassing hash comparison
+// entirely) and rebuilds every snapshot from that write, so any bug in the
+// diff engine itself, or any snapshot drift from a source nobody's audited,
+// self-heals within this interval instead of silently persisting forever.
+// Deliberately reuses the ORIGINAL commitInChunks() unchanged for the write
+// part -- this is exactly the unconditional full-array write saveData()
+// used to do on every tick; here it just runs on a 5-minute cadence.
+let backstopFullSaveInterval = null;
+async function backstopFullSave() {
+  if (!dataLoaded || !currentUser) return;
+  if (window._saveInProgress) return; // don't race a normal save cycle
+  window._saveInProgress = true;
+  try {
+    console.log('🛟 [backstop] full-save sweep starting');
+    const names = ['timeLogs', 'planEntries', 'projects'];
+    const arrays = { timeLogs, planEntries, projects: projectsData };
+    for (const name of names) {
+      const seenIds = new Set(arrays[name].filter(i => i && i.id).map(i => i.id));
+      const toDelete = [];
+      docSnapshots[name].forEach((_hash, id) => { if (!seenIds.has(id)) toDelete.push(id); });
+      const collectionName = COLLECTION_FIRESTORE_NAME[name];
+      for (let i = 0; i < toDelete.length; i += 450) {
+        const chunk = toDelete.slice(i, i + 450);
+        const batch = db.batch();
+        chunk.forEach(id => batch.delete(db.collection(collectionName).doc(id)));
+        try { await batch.commit(); } catch (e) { console.error(`❌ [backstop] ${name} delete chunk failed:`, e); }
+      }
+    }
+    const saveTimestamp = new Date().toISOString();
+    await commitInChunks('projects', projectsData, p => COLLECTION_BUILD_DOC_DATA.projects(p, saveTimestamp));
+    await commitInChunks('timeLogs', timeLogs, l => COLLECTION_BUILD_DOC_DATA.timeLogs(l, saveTimestamp));
+    await commitInChunks('planEntries', planEntries, e => COLLECTION_BUILD_DOC_DATA.planEntries(e, saveTimestamp));
+    snapshotCollection('timeLogs', timeLogs);
+    snapshotCollection('planEntries', planEntries);
+    snapshotCollection('projects', projectsData);
+    console.log('🛟 [backstop] full-save sweep complete -- snapshots rebuilt');
+  } catch (e) {
+    console.error('❌ [backstop] full-save sweep failed:', e);
+  } finally {
+    window._saveInProgress = false;
+  }
+}
+
 // V12 Granular Save Functions
 async function saveTimeLog(log) {
   if (!useGranularSaves) return saveData();
@@ -2017,6 +2208,29 @@ async function saveData() {
   window._saveInProgress = true;
 
   try {
+  // V15: diff FIRST, before any network call at all -- this is cheap
+  // in-memory hashing, safe to always compute regardless of diffMode.
+  const _diffs = computeCollectionDiffs();
+
+  if (diffMode === 'primary') {
+    // The diff IS the persistence mechanism here, so it's safe to skip the
+    // whole cycle -- including the connection check -- when there's
+    // nothing to do at all. periodicSaveInterval now calls saveData()
+    // unconditionally every 30s (see its definition); this is what keeps
+    // an idle tick at zero Firestore reads/writes.
+    if (diffsAreEmpty(_diffs) && !hasUnsavedChanges) {
+      return;
+    }
+  } else {
+    // Shadow mode: the diff is observation-only. The REAL write below must
+    // be gated EXACTLY the way it was before this diff engine existed --
+    // on hasUnsavedChanges alone -- so a bug in the diff logic can never
+    // suppress a real save while shadow mode is proving the diff out.
+    if (!hasUnsavedChanges) {
+      return;
+    }
+  }
+
   // V11: Check connection before saving
   if (!navigator.onLine) {
     console.warn('🔴 SAVE SKIPPED - Browser is offline (will retry on next auto-save tick)');
@@ -2093,64 +2307,85 @@ async function saveData() {
     }
     
     const saveTimestamp = new Date().toISOString();
-    
-    // V13.2.1: Save each collection separately to avoid 500-operation batch limit
-    // and ensure all data is saved reliably
-    
-    console.log('💾 Starting save to Firebase:', {
-      projects: projectsData.length,
-      timeLogs: timeLogs.length,
-      planEntries: planEntries.length,
-      leaveRequests: leaveRequests.length,
-      users: users.length,
-      clients: clients.length
-    });
-    
-    // Save projects
-    await commitInChunks('projects', projectsData, project => ({
-      ...project,
-      updatedAt: saveTimestamp,
-      updatedBy: currentUser?.name || 'Unknown'
-    }));
-    console.log('✅ Projects saved:', projectsData.length);
 
-    // Save time logs
-    await commitInChunks('timeLogs', timeLogs, log => ({
-      ...log,
-      updatedAt: saveTimestamp
-    }));
-    console.log('✅ Time logs saved:', timeLogs.length);
+    if (diffMode === 'shadow') {
+      // PRIMARY write path in shadow mode: the ORIGINAL unconditional
+      // full-array rewrite, byte-for-byte the same mechanism that shipped
+      // before this diff engine existed. This is what makes shadow mode
+      // zero write-path risk -- the diff below never touches Firestore.
+      console.log('💾 [shadow] full-save starting (primary path, diff observing only)');
+      await commitInChunks('projects', projectsData, project => COLLECTION_BUILD_DOC_DATA.projects(project, saveTimestamp));
+      await commitInChunks('timeLogs', timeLogs, log => COLLECTION_BUILD_DOC_DATA.timeLogs(log, saveTimestamp));
+      await commitInChunks('planEntries', planEntries, entry => COLLECTION_BUILD_DOC_DATA.planEntries(entry, saveTimestamp));
+      console.log('✅ [shadow] full-save complete (primary path)');
 
-    // Save plan entries
-    await commitInChunks('planEntries', planEntries, entry => ({
-      ...entry,
-      updatedAt: saveTimestamp
-    }));
-    console.log('✅ Plan entries saved:', planEntries.length);
-    
+      // Observation only -- never calls syncChangedDocs(), so this can
+      // never affect what actually got persisted above. Logs exactly the
+      // doc ids the diff engine would have written/deleted this cycle, for
+      // production validation against the full-save's known-good result.
+      console.log('🔍 [shadow] diff would-write/would-delete this cycle:', {
+        timeLogs: { wouldWrite: _diffs.timeLogs.toWrite.map(w => w.item.id), wouldDelete: _diffs.timeLogs.toDelete },
+        planEntries: { wouldWrite: _diffs.planEntries.toWrite.map(w => w.item.id), wouldDelete: _diffs.planEntries.toDelete },
+        projects: { wouldWrite: _diffs.projects.toWrite.map(w => w.item.id), wouldDelete: _diffs.projects.toDelete },
+      });
+
+      // Advance the baseline to match what the full-save just wrote, so
+      // NEXT cycle's shadow diff reflects genuine deltas since THIS cycle
+      // -- without this, every doc would look "changed" forever (nothing
+      // else updates docSnapshots while shadow mode is primary), and the
+      // would-write log would balloon to the whole collection every time
+      // instead of showing real edits.
+      snapshotCollection('timeLogs', timeLogs);
+      snapshotCollection('planEntries', planEntries);
+      snapshotCollection('projects', projectsData);
+    } else {
+      // V15: write only what the diff computed at the top of this call found
+      // changed/deleted, instead of rewriting every doc in all three
+      // collections on every cycle. _diffs was computed before the connection
+      // check above, from the array state at that moment -- fine even though
+      // a few ms have passed, since diffCollection() re-hashes off the SAME
+      // array reference and any edit that lands in that gap just shows up as
+      // still-dirty on the NEXT tick (nothing is lost, only possibly deferred
+      // one cycle).
+      console.log('💾 Starting diff sync:', {
+        timeLogs: `${_diffs.timeLogs.toWrite.length} changed, ${_diffs.timeLogs.toDelete.length} deleted`,
+        planEntries: `${_diffs.planEntries.toWrite.length} changed, ${_diffs.planEntries.toDelete.length} deleted`,
+        projects: `${_diffs.projects.toWrite.length} changed, ${_diffs.projects.toDelete.length} deleted`,
+      });
+      await syncChangedDocs(_diffs);
+      console.log('✅ Diff sync complete');
+    }
+
     // V14.2.6: leaveRequests are EXCLUDED from batch save entirely.
     // They are always written granularly (per-document) to prevent
     // batch overwrites from resetting approved/rejected status back to pending.
     // See: saveLeaveRequest(), approve handler, reject handler, submitLeaveBtn
     console.log('✅ Leave requests handled granularly — skipping batch save');
-    
-    // V14.2.40c FIX: Save main data using update() not set() so casLeft/medLeft
-    // are NOT overwritten by auto-save. Leave balances only written by deduction logic.
-    const dataToSave = {
-      clients, typologies, changeRequests, holidays,
-      timestamp: saveTimestamp,
-      instanceId: instanceId,
-      savedBy: currentUser?.name || 'Unknown',
-      projectCount: projectsData.length,
-      timeLogCount: timeLogs.length,
-      planEntryCount: planEntries.length,
-      leaveRequestCount: leaveRequests.length
-    };
-    
-    // Save main document — use update() to preserve casLeft/medLeft not in dataToSave
-    await db.collection("companyData").doc("squareDB").update(dataToSave);
-    console.log('✅ Main document saved');
-    
+
+    // V15: companyData is a single small doc -- keep its EXACT prior
+    // behavior (gated on hasUnsavedChanges, unrelated to the collection
+    // diff above) rather than folding it into the diff engine. Since
+    // periodicSaveInterval now calls saveData() every 30s unconditionally,
+    // this guard is what keeps an idle tick from touching this doc too.
+    if (hasUnsavedChanges) {
+      // V14.2.40c FIX: Save main data using update() not set() so casLeft/medLeft
+      // are NOT overwritten by auto-save. Leave balances only written by deduction logic.
+      const dataToSave = {
+        clients, typologies, changeRequests, holidays,
+        timestamp: saveTimestamp,
+        instanceId: instanceId,
+        savedBy: currentUser?.name || 'Unknown',
+        projectCount: projectsData.length,
+        timeLogCount: timeLogs.length,
+        planEntryCount: planEntries.length,
+        leaveRequestCount: leaveRequests.length
+      };
+
+      // Save main document — use update() to preserve casLeft/medLeft not in dataToSave
+      await db.collection("companyData").doc("squareDB").update(dataToSave);
+      console.log('✅ Main document saved');
+    }
+
     console.log('🎉 ALL DATA SAVED SUCCESSFULLY:', {
       projects: projectsData.length,
       timeLogs: timeLogs.length,
@@ -2288,7 +2523,16 @@ async function loadData() {
         timeLogs: timeLogs.length,
         leaveRequests: leaveRequests.length
       });
-      
+
+      // V15: baseline the diff snapshot AFTER data is fully loaded (including
+      // the old-structure migration fallback above, in case that path fired
+      // instead of the normal collection reads) -- so the first saveData()
+      // tick diffs against what the server actually holds, not an empty
+      // snapshot that would look like every doc just got created.
+      snapshotCollection('timeLogs', timeLogs);
+      snapshotCollection('planEntries', planEntries);
+      snapshotCollection('projects', projectsData);
+
       console.log('📋 Plan Entries Detail:', planEntries);
       
       // Store timestamp for conflict detection
@@ -4380,6 +4624,13 @@ function startDashboardAutoRefresh() {
       snapshot.forEach(doc => {
         timeLogs.push({ id: doc.id, ...doc.data() });
       });
+      // V15: this just wholesale-replaced timeLogs with server truth -- rebaseline
+      // the diff snapshot to match, or the NEXT saveData() tick would compare fresh
+      // server data against the stale pre-refresh snapshot and see every doc as
+      // "changed" (a spurious full rewrite, exactly what this diff engine exists
+      // to avoid). Guarded by the same !timerRunning check this whole block is
+      // already under, so a live in-progress entry's snapshot is never touched here.
+      snapshotCollection('timeLogs', timeLogs);
       if (DEBUG) console.log('✅ Time logs refreshed:', timeLogs.length);
       // Only clear unsaved flag if we are sure there's nothing pending
       if (!timerRunning) hasUnsavedChanges = false;
@@ -7818,14 +8069,23 @@ setInterval(() => {
 // Periodic Auto-Save (every 30 seconds) — only if real changes exist
 periodicSaveInterval = setInterval(() => {
   if (!dataLoaded || !currentUser) return;
-  // V14.2.6: Only save if there are actual unsaved changes
-  // Removed unconditional timeSinceLastSave trigger — it was overwriting
-  // leave approval status on every 30s tick with stale in-memory data
-  if (hasUnsavedChanges) {
-    console.log('⏰ Periodic auto-save triggered (has unsaved changes)');
-    saveData();
-  }
+  // V15: call saveData() unconditionally every tick instead of gating on
+  // hasUnsavedChanges -- saveData() itself now computes the collection diff
+  // FIRST and bails out with zero Firestore calls when there's nothing to
+  // write, so this stays free on an idle tick. The unconditional call is
+  // what makes the diff engine "robust to missed mutation paths by
+  // construction": a call site that forgot to set hasUnsavedChanges no
+  // longer prevents the sweep from ever running and catching it.
+  saveData();
 }, 30000); // Every 30 seconds
+
+// V15: low-frequency full-save safety net, independent of the 30s diff
+// cycle above -- see backstopFullSave() for why this stays even though the
+// diff engine is comprehensive by construction.
+backstopFullSaveInterval = setInterval(() => {
+  backstopFullSave();
+}, 5 * 60 * 1000); // Every 5 minutes -- tighter risk floor; cost is trivial
+// once diffMode is 'primary' since this is the only bulk write left.
 
 // Save before page unload
 window.addEventListener('beforeunload', (e) => {
