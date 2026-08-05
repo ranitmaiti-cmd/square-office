@@ -6632,7 +6632,20 @@ function finalizeCurrentSession(reason) {
   // it as a real stop, not a "still running" checkpoint -- continuing to
   // track an already-12h+ session just re-triggers the cap on every future
   // tick. Below the cap, behavior is unchanged: write and keep running.
-  upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:false,ts:Date.now(),...(capped?{autoCapped:true}:{})});
+  //
+  // V15: inProgress must be !capped, not a hardcoded false. This function's
+  // whole point below the cap is "durability write for a session that's
+  // STILL running" (see the comment block above) -- writing inProgress:false
+  // on every checkpoint (reconnect, tab-resume, watchdog restart) contradicted
+  // that on the very next line, and once this branch also started attaching a
+  // reopen-guard listener to the live session (see attachSessionCloseListener
+  // in startTimerWithPlan), that self-contradiction became directly visible:
+  // the listener has no way to tell "we just wrote inProgress:false as a
+  // checkpoint" apart from "the server genuinely finalized this," so it fired
+  // the full external-finalize response (toast + resetTimer) against a
+  // session that was never actually over. Only the capped branch below is a
+  // real end -- that one still correctly writes inProgress:false.
+  upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:!capped,ts:Date.now(),...(capped?{autoCapped:true}:{})});
 
   if (capped) {
     console.log(`⚠️ Session auto-capped at ${MAX_SESSION_HOURS}h (${reason}) -- stopping, was likely left running`);
