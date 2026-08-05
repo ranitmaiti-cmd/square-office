@@ -1180,7 +1180,7 @@ const db = firebase.firestore();
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-02.2'; // V14.3.45: wire biometric-sync to daily cron (22:00 IST) -- dry-run only, confirm=true not baked in
+const APP_VERSION = '2026-08-05.1'; // V15: granular-save hash-diff bill fix, shadow mode default (full-save stays primary, diff observes only)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
