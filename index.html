@@ -1228,7 +1228,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-05.1'; // V15: granular-save hash-diff bill fix, shadow mode default (full-save stays primary, diff observes only)
+const APP_VERSION = '2026-08-05.2'; // V15: + offline persistence, inProgress-reopen guard, and task-switch orphan fix
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
