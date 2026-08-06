@@ -6376,30 +6376,32 @@ function renderManage(){
         // touched the REAL record, so a user deleted mid-session left their
         // timeLogs doc orphaned at inProgress:true forever -- invisible to
         // every report, since nothing looks for it once the user is gone.
-        // Same finalize math as the sweep (extractLastSeenMs/
-        // capSessionDuration), not the sweep functions themselves.
+        // V16 (flag-don't-truncate, writer #5): TRUE close at deletion time,
+        // not a truncation to last heartbeat, and NOT flagged
+        // reconciliationNeeded -- deleting the account IS the explicit
+        // boundary event, same family as Complete/Switch/logout. There's no
+        // "wait for the tab to wake up and self-heal" scenario once the
+        // account is gone, so this must resolve to inProgress:false right
+        // here, not sit flagged waiting for a backstop that will never
+        // matter again for this user.
         try {
           const inProgSnap = await db.collection('timeLogs')
             .where('userId', '==', u.id)
             .where('inProgress', '==', true)
             .get({ source: 'server' });
+          const deletedAtMs = Date.now();
           for (const doc of inProgSnap.docs) {
             const data = doc.data();
-            const lastSeenMs = extractLastSeenMs(data);
             const startMs = data.sessionStartMs != null ? data.sessionStartMs
-              : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00+05:30`).getTime() : lastSeenMs);
-            const effectiveEndMs = lastSeenMs || startMs || Date.now();
-            const { durationMins, capped } = startMs
-              ? capSessionDuration(Math.max(0, Math.round((effectiveEndMs - startMs) / 1000)))
-              : { durationMins: data.durationMins || 0, capped: false };
-            const endTime = new Date(effectiveEndMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+              : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00+05:30`).getTime() : (data.ts || deletedAtMs));
+            const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((deletedAtMs - startMs) / 1000)));
+            const endTime = new Date(deletedAtMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
             await db.collection('timeLogs').doc(doc.id).update({
               inProgress: false,
-              recovered: true,
               durationMins,
               endTime,
-              desc: `${data.desc || 'Work on project'} (recovered — user account deleted)`,
-              recoveredAt: new Date().toISOString(),
+              desc: `${data.desc || 'Work on project'} (closed — user account deleted)`,
+              ts: deletedAtMs,
               ...(capped ? { autoCapped: true } : {})
             });
           }
