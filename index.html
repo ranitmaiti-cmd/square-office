@@ -3483,8 +3483,14 @@ document.getElementById('resetPasswordBtn').addEventListener('click', () => {
 });
 
 document.getElementById('logoutBtn').addEventListener('click',async ()=>{
+  // V16 (flag-don't-truncate): logout used to abandon a running session
+  // inProgress:true with no endTime/durationMins ever written for it,
+  // relying entirely on a later stale-sweep to truncate it to last
+  // heartbeat. This is an explicit user-initiated boundary, same as
+  // Complete/Switch -- close it here at true now-duration instead.
+  closeCurrentSessionNow('closed at logout');
   localStorage.removeItem('timerState');
-  
+
   await markOffline(); // V13: Mark user as offline
   currentUser=null;
   localStorage.removeItem('currentSession');
@@ -6908,6 +6914,72 @@ function finalizeCurrentSession(reason) {
   console.log(`✅ Session checkpoint written (${reason}): ${minsToHM(mins)} for ${timerLinkedPlan.project} -- still running, timerStartedAt unchanged`);
 }
 
+// V16 (flag-don't-truncate): extracted from startTimerWithPlan()'s old-session
+// -close block so logout can reuse the exact same true-duration close instead
+// of abandoning the session inProgress:true (which is what logout used to do
+// -- see the removed comment on logoutBtn). Returns {mins, capped, project}
+// on a real close, or null if nothing was running. Caller decides what (if
+// anything) to show the user -- this function's job is only the write.
+function closeCurrentSessionNow(descSuffix) {
+  if (!(timerRunning && currentSessionLogId && timerStartedAt && timerLinkedPlan)) return null;
+  const oldSessionId = currentSessionLogId;
+  const oldStartedAt = timerStartedAt;
+  const oldPlan = timerLinkedPlan;
+  const closeNow = Date.now();
+  const oldSessionSecs = Math.floor((closeNow - oldStartedAt) / 1000);
+  const { durationMins: oldMins, capped: oldCapped } = capSessionDuration(oldSessionSecs);
+  const oldEndTime = new Date(closeNow).toLocaleTimeString('en-IN', {
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: 'Asia/Kolkata', // pinned explicitly, not implicit-from-browser-clock
+  });
+  const oldDesc = `${oldPlan.typology || oldPlan.phase || 'Work on project'} (${descSuffix})` +
+    (oldCapped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
+
+  // Detach the reopen-guard listener BEFORE dispatching the close-write.
+  // Firestore can echo a same-client write back to a still-active listener
+  // almost immediately (local cache), and if that listener is still
+  // watching THIS session when it observes inProgress flip to false, it
+  // has no way to know WE just did that intentionally -- it fires the full
+  // "externally finalized" response (toast + resetTimer) against state
+  // that, by the time the callback actually runs, may already belong to
+  // a NEW session (task-switch) or no session at all (logout). Detaching
+  // first removes the listener (and resets watchedSessionId/
+  // sessionExternallyClosed) entirely before the write that would trigger
+  // it even goes out.
+  detachSessionCloseListener();
+
+  // Immediate, targeted write -- NOT deferred to the next autosave/diff
+  // cycle. A single targeted .update() is trivial cost, and deferring would
+  // couple this fix's correctness to autosave timing (a tab closed/reloaded/
+  // crashed before the next tick would leave the old session inProgress:true
+  // forever -- a WORSE orphan than the one being fixed here).
+  db.collection('timeLogs').doc(oldSessionId).update({
+    inProgress: false,
+    endTime: oldEndTime,
+    durationMins: oldMins,
+    desc: oldDesc,
+    ts: closeNow,
+    ...(oldCapped ? { autoCapped: true } : {}),
+  }).catch((e) => console.error('[closeCurrentSessionNow] close failed (EOD-close will still catch it eventually):', e.message));
+
+  // Mirror the close into the local array synchronously -- the write above
+  // is async and fire-and-forget, but anything reading `timeLogs` right
+  // after this call (renderTimeLog, renderProjectsBudget, any periodic
+  // save/diff sweep) should see the closed state immediately, same as
+  // every other close path in this file already does.
+  const oldIdx = timeLogs.findIndex((l) => l.id === oldSessionId);
+  if (oldIdx >= 0) {
+    timeLogs[oldIdx] = {
+      ...timeLogs[oldIdx], inProgress: false, endTime: oldEndTime,
+      durationMins: oldMins, desc: oldDesc, ts: closeNow,
+      ...(oldCapped ? { autoCapped: true } : {}),
+    };
+  }
+  renderTimeLog(); renderProjectsBudget();
+
+  return { mins: oldMins, capped: oldCapped, project: oldPlan.project };
+}
+
 // Core function: start the timer with a linked plan
 function startTimerWithPlan(plan) {
   // V15: close any still-open OLD session before touching ANY shared state
@@ -6919,73 +6991,12 @@ function startTimerWithPlan(plan) {
   // the task-switch orphan bug: previously only switchTaskTo() closed the
   // old session explicitly, so the other entry points left it inProgress:true,
   // undetected until the 5-minute stale-sweep (often much later in practice).
-  //
-  // Captured into LOCALS first, strictly before any reassignment below --
-  // currentSessionLogId/timerStartedAt/timerLinkedPlan are read by BOTH this
-  // close step and the open step that follows and share the same global
-  // variables, so reading stale values here (or reading them AFTER the open
-  // step reassigns them) would corrupt whichever write runs second: either
-  // the close would target the wrong doc, or use the wrong start time.
-  if (timerRunning && currentSessionLogId && timerStartedAt && timerLinkedPlan) {
-    const oldSessionId = currentSessionLogId;
-    const oldStartedAt = timerStartedAt;
-    const oldPlan = timerLinkedPlan;
-    const closeNow = Date.now();
-    const oldSessionSecs = Math.floor((closeNow - oldStartedAt) / 1000);
-    const { durationMins: oldMins, capped: oldCapped } = capSessionDuration(oldSessionSecs);
-    const oldEndTime = new Date(closeNow).toLocaleTimeString('en-IN', {
-      hour: '2-digit', minute: '2-digit', hour12: false,
-      timeZone: 'Asia/Kolkata', // pinned explicitly, not implicit-from-browser-clock
-    });
-    const oldDesc = `${oldPlan.typology || oldPlan.phase || 'Work on project'} (switched to ${plan.project})` +
-      (oldCapped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
-
-    // Detach the reopen-guard listener BEFORE dispatching the close-write.
-    // Firestore can echo a same-client write back to a still-active listener
-    // almost immediately (local cache), and if that listener is still
-    // watching THIS session when it observes inProgress flip to false, it
-    // has no way to know WE just did that intentionally -- it fires the full
-    // "externally finalized" response (toast + resetTimer) against state
-    // that, by the time the callback actually runs, may already belong to
-    // the NEW session being started below. Detaching first removes the
-    // listener (and resets watchedSessionId/sessionExternallyClosed)
-    // entirely before the write that would trigger it even goes out.
-    detachSessionCloseListener();
-
-    // Immediate, targeted write -- NOT deferred to the next autosave/diff
-    // cycle. Task switches are discrete and rare (~10/day/person); a single
-    // targeted .update() is trivial cost, and deferring would couple this
-    // fix's correctness to autosave timing (a tab closed/reloaded/crashed
-    // before the next tick would leave the old session inProgress:true
-    // forever -- a WORSE orphan than the one being fixed here).
-    db.collection('timeLogs').doc(oldSessionId).update({
-      inProgress: false,
-      endTime: oldEndTime,
-      durationMins: oldMins,
-      desc: oldDesc,
-      ts: closeNow,
-      ...(oldCapped ? { autoCapped: true } : {}),
-    }).catch((e) => console.error('[task-switch] old session close failed (stale-sweep will still catch it eventually):', e.message));
-
-    // Mirror the close into the local array synchronously -- the write above
-    // is async and fire-and-forget, but anything reading `timeLogs` right
-    // after this call (renderTimeLog, renderProjectsBudget, any periodic
-    // save/diff sweep) should see the closed state immediately, same as
-    // every other close path in this file already does.
-    const oldIdx = timeLogs.findIndex((l) => l.id === oldSessionId);
-    if (oldIdx >= 0) {
-      timeLogs[oldIdx] = {
-        ...timeLogs[oldIdx], inProgress: false, endTime: oldEndTime,
-        durationMins: oldMins, desc: oldDesc, ts: closeNow,
-        ...(oldCapped ? { autoCapped: true } : {}),
-      };
-    }
-    renderTimeLog(); renderProjectsBudget();
-
-    if (oldCapped) {
-      showNotificationToast('⚠️ Session auto-capped', `${oldPlan.project} hit the ${MAX_SESSION_HOURS}h cap — please verify this entry in Time Report.`, 'warning');
+  const closedOld = closeCurrentSessionNow(`switched to ${plan.project}`);
+  if (closedOld) {
+    if (closedOld.capped) {
+      showNotificationToast('⚠️ Session auto-capped', `${closedOld.project} hit the ${MAX_SESSION_HOURS}h cap — please verify this entry in Time Report.`, 'warning');
     } else {
-      showNotificationToast(`✓ ${minsToHM(oldMins)} saved`, `${oldPlan.project} → ${plan.project}`, 'info');
+      showNotificationToast(`✓ ${minsToHM(closedOld.mins)} saved`, `${closedOld.project} → ${plan.project}`, 'info');
     }
   }
 
