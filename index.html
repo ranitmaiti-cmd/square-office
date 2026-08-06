@@ -1710,6 +1710,15 @@ function checkTimerHealth() {
   const newStage = gapMs >= WD_ALERT_MS ? 2 : 1;
   const escalated = newStage > wdStage;
   if (escalated) wdStage = newStage;
+  // V16 (flag-don't-truncate, clobber guard): WD_ALERT_MS is the same 5min
+  // threshold a server sweep uses to flag this session -- once we've been
+  // silent that long, a close (EOD-close, fallback-close, cap-finalize) may
+  // already have happened server-side while nothing here could know it. Trip
+  // this so the next wake event verifies server truth BEFORE trusting
+  // sessionExternallyClosed==false and writing a heartbeat that could
+  // clobber an already-closed doc back open. See reArmHeartbeat() /
+  // verifySessionStillOpenOnWake().
+  if (gapMs >= WD_ALERT_MS) awaitingWakeVerification = true;
   if (wdSavedTitle === null) wdSavedTitle = document.title;
 
   if (wdStage === 1) {
@@ -1915,10 +1924,66 @@ function initReliableTickWorker() {
 const WORKER_STALE_MS = 90 * 1000; // generous margin over the 60s tick interval
 let reArmInFlight = false; // laptop wake fires focus+visibilitychange+online near-simultaneously
 
-function reArmHeartbeat() {
+// V16 (flag-don't-truncate, clobber guard): tripped by checkTimerHealth()
+// once heartbeat silence crosses WD_ALERT_MS (5min) -- the same window a
+// server sweep uses to flag this session. Blocks heartbeatSession() and
+// finalizeCurrentSession() from writing until verifySessionStillOpenOnWake()
+// has confirmed server truth. Without this, a tab frozen (not just
+// throttled) across a close can wake with a BURST of queued worker ticks
+// firing before the async reopen-guard listener has had a chance to
+// observe/process the close -- sessionExternallyClosed would still read
+// false at that instant, and the first queued heartbeat would clobber the
+// already-closed doc's inProgress/endTime/durationMins straight back open.
+let awaitingWakeVerification = false;
+
+// One forced-server read of this tab's own live session, run only when
+// awaitingWakeVerification is true (i.e. only after a real >=5min silence,
+// never on routine tab-switching) -- so the steady-state cost is zero.
+async function verifySessionStillOpenOnWake() {
+  if (!currentSessionLogId) { awaitingWakeVerification = false; return; }
+  try {
+    const snap = await db.collection('timeLogs').doc(currentSessionLogId).get({ source: 'server' });
+    const data = snap.exists ? snap.data() : null;
+    if (!data || data.inProgress === false) {
+      // Closed while this tab was away -- EOD-close, fallback-close, the
+      // 12h cap, or any other true-close. Same reaction as the reopen-guard
+      // listener's "externally closed" branch, triggered here directly
+      // since we can't wait for that listener to catch up on its own.
+      if (!sessionExternallyClosed) {
+        sessionExternallyClosed = true;
+        console.warn(`[wake-verify] session ${currentSessionLogId} was closed while this tab was away -- stopping locally`);
+        showNotificationToast('⏸ Timer auto-closed', 'Your session was closed while this tab was away. Please start a new timer to keep tracking.', 'warning');
+        resetTimer({ keepCloseListener: true, statusText: 'Auto-closed — start a new timer' });
+      }
+    } else if (data.reconciliationNeeded === true) {
+      // Still genuinely open, and demonstrably alive again -- self-heal the
+      // flag now rather than leaving a stale reconciliation-queue entry for
+      // a session that's actually fine. Best-effort: a failure here just
+      // means the flag lingers until the next sweep re-evaluates it, which
+      // is harmless (the doc is still open either way).
+      db.collection('timeLogs').doc(currentSessionLogId).update({ reconciliationNeeded: false })
+        .catch((e) => console.warn('[wake-verify] failed to clear reconciliationNeeded (harmless, doc stays open):', e.message));
+    }
+  } catch (e) {
+    // Fail open -- can't confirm server truth this time, but don't
+    // manufacture a false "closed" reaction either. Worst case this one
+    // wake reverts to the pre-hardening race, not a new failure mode.
+    console.warn('[wake-verify] forced-server check failed, resuming unverified:', e.message);
+  } finally {
+    awaitingWakeVerification = false;
+  }
+}
+
+async function reArmHeartbeat() {
   if (!timerRunning || reArmInFlight) return;
   reArmInFlight = true;
   try {
+    if (awaitingWakeVerification) {
+      // Resolve the clobber race BEFORE touching the worker or writing a
+      // heartbeat -- see verifySessionStillOpenOnWake() and the flag's
+      // declaration above.
+      await verifySessionStillOpenOnWake();
+    }
     const workerLooksDead = !reliableTickWorkerActive;
     const workerLooksWedged = reliableTickWorkerActive && lastWorkerTickAt && (Date.now() - lastWorkerTickAt > WORKER_STALE_MS);
     if (workerLooksDead || workerLooksWedged) {
@@ -1931,8 +1996,10 @@ function reArmHeartbeat() {
       initReliableTickWorker();
     }
     // Fire a heartbeat right now regardless -- cheap, guarded internally by
-    // timerRunning/currentSessionLogId, and means coverage resumes the instant
-    // the interruption ends rather than waiting for the next tick.
+    // timerRunning/currentSessionLogId (and, if verification above found the
+    // session closed, by sessionExternallyClosed), and means coverage
+    // resumes the instant the interruption ends rather than waiting for the
+    // next tick.
     heartbeatSession();
   } finally {
     reArmInFlight = false;
@@ -2241,6 +2308,7 @@ function detachSessionCloseListener() {
 function heartbeatSession() {
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
   if (sessionExternallyClosed) return; // V14.3.48: reopen guard -- don't resurrect a session the server already finalized
+  if (awaitingWakeVerification) return; // V16: clobber guard -- in-memory state is unverified after a >=5min silence, don't trust it yet
   const now  = Date.now();
   const mins = Math.max(1, Math.floor((now - timerStartedAt) / 1000 / 60));
   upsertTimeLog({
@@ -2792,9 +2860,14 @@ function startInactivityMonitor() {
       // the heartbeat interval missed ticks -- reattaches under the same id.
       try { finalizeCurrentSession('tab resumed'); } catch(e) { console.error('resume checkpoint failed', e); }
       // V14.3.21: re-arm BEFORE checkTimerHealth() -- reArmHeartbeat() fires
-      // a fresh heartbeat synchronously, which is what moves
-      // lastHeartbeatSuccessAt forward and lets checkTimerHealth() report
-      // "healthy" instead of just displaying the stale-since-backgrounding gap.
+      // a fresh heartbeat, which is what moves lastHeartbeatSuccessAt
+      // forward and lets checkTimerHealth() report "healthy" instead of
+      // just displaying the stale-since-backgrounding gap. V16: after a
+      // genuine >=5min silence this is no longer instant -- reArmHeartbeat()
+      // first awaits verifySessionStillOpenOnWake() (the clobber guard), so
+      // checkTimerHealth() on the very next line may still report stale for
+      // one more tick until that resolves. Deliberate: correctness over one
+      // extra render cycle before the "reconnected" toast.
       reArmHeartbeat();
       checkTimerHealth(); // V14.3.17: catch a stale/recovered state the instant the user looks back
     }
@@ -6877,6 +6950,7 @@ function switchTaskTo(newPlan) {
 function finalizeCurrentSession(reason) {
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
   if (sessionExternallyClosed) return; // V14.3.49: reopen guard -- don't write a fresh checkpoint onto a session the server already finalized
+  if (awaitingWakeVerification) return; // V16: clobber guard -- same reasoning as heartbeatSession()
   const now         = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
   if (sessionSecs < 30) return; // too short to be worth a checkpoint write
