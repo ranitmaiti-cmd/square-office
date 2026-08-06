@@ -495,6 +495,17 @@ textarea.form-control{min-height:70px;resize:vertical;}
           </div>
         </div>
         
+        <!-- V16 (flag-don't-truncate): reconciliation queue, admin-only. -->
+        <div class="card" id="reconciliationQueueCard" style="margin-bottom:20px;display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;font-size:16px;font-weight:700;color:#3D332A;">🚩 Needs Reconciliation</h3>
+            <span id="reconciliationQueueCount" style="font-size:12px;color:#8A7E74;font-weight:600;">0 flagged</span>
+          </div>
+          <div id="reconciliationQueueFeed" style="display:flex;flex-direction:column;gap:8px;">
+            <div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">Nothing flagged</div>
+          </div>
+        </div>
+
         <!-- V13.3: Live Time Log Feed -->
         <div class="card" style="margin-bottom:20px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -4814,6 +4825,7 @@ function startLiveTimerUpdates() {
 
   // Fetch from Firebase immediately, then every 30 seconds
   fetchActiveTimersFromFirebase();
+  loadReconciliationQueue(); // V16: same immediate-then-30s cadence as "Who's Working Now"
 
   // Display update every second (no Firebase — uses cache)
   liveTimerInterval = setInterval(() => {
@@ -4824,10 +4836,81 @@ function startLiveTimerUpdates() {
   if (!window._timerFetchInterval) {
     window._timerFetchInterval = setInterval(() => {
       fetchActiveTimersFromFirebase();
+      loadReconciliationQueue();
     }, 30000);
   }
 
   startDashboardAutoRefresh();
+}
+
+// V16 (flag-don't-truncate): admin-only reconciliation queue -- a
+// queryable "who's mid-flight right now across the whole team" surface
+// that Time Report / "Who's Working Now" don't provide on their own (both
+// only show a stale-but-open row wherever it happens to already be
+// rendered, for whatever date range is currently filtered). Same refresh
+// cadence as "Who's Working Now," reusing window._timerFetchInterval
+// rather than a second interval.
+async function loadReconciliationQueue() {
+  const cardEl = document.getElementById('reconciliationQueueCard');
+  if (!cardEl) return;
+  if (!currentUser?.isAdmin) { cardEl.style.display = 'none'; return; }
+  cardEl.style.display = 'block';
+
+  try {
+    // {source:'server'} -- same reasoning as fetchActiveTimersFromFirebase:
+    // a stale local cache must never hide a flag an admin needs to see.
+    const snap = await db.collection('timeLogs').where('reconciliationNeeded', '==', true).get({ source: 'server' });
+    const items = [];
+    snap.forEach(doc => {
+      const data = doc.data();
+      items.push({ id: doc.id, ...data, userName: data.userName || users.find(u => u.id === data.userId)?.name || data.userId });
+    });
+    renderReconciliationQueue(items);
+  } catch (e) {
+    console.error('[reconciliation-queue] load failed:', e.message);
+  }
+}
+
+function renderReconciliationQueue(items) {
+  const feedEl = document.getElementById('reconciliationQueueFeed');
+  const countEl = document.getElementById('reconciliationQueueCount');
+  if (!feedEl) return;
+
+  if (countEl) {
+    countEl.textContent = items.length === 0 ? '0 flagged' : items.length === 1 ? '1 flagged' : `${items.length} flagged`;
+  }
+
+  if (items.length === 0) {
+    feedEl.innerHTML = '<div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">Nothing flagged</div>';
+    return;
+  }
+
+  // Oldest flag first -- the longest-unresolved session is the most urgent.
+  const sorted = items.slice().sort((a, b) => new Date(a.reconciliationNeededSince || 0) - new Date(b.reconciliationNeededSince || 0));
+
+  feedEl.innerHTML = sorted.map(item => {
+    const sinceMin = item.reconciliationNeededSince ? Math.round((Date.now() - new Date(item.reconciliationNeededSince).getTime()) / 60000) : null;
+    // estimatedClose:true surfaces prominently, distinct from a plain flag
+    // still open (still inProgress:true, awaiting EOD-close or self-heal)
+    // and distinct from a biometric-anchored close (recovered:true only) --
+    // an estimated close is a guess with no biometric ground truth and
+    // needs a human look, the other two don't.
+    const badge = item.estimatedClose
+      ? ' <span style="background:#8B2E24;color:#fff;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">⚠ ESTIMATED CLOSE — VERIFY</span>'
+      : (item.inProgress ? ' <span style="background:#F5E0C8;color:#8B6914;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">STILL OPEN</span>'
+        : ' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">CLOSED</span>');
+    return `
+      <div style="background:${item.estimatedClose ? '#FBEAEA' : '#FFF8EE'};padding:10px;border-radius:6px;border-left:3px solid ${item.estimatedClose ? '#C0554A' : '#DEB98A'};">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px;">
+          <div style="font-weight:600;font-size:13px;color:#3D332A;">🚩 ${item.userName}${badge}</div>
+          <div style="font-size:11px;color:#8A7E74;">${sinceMin != null ? `flagged ${sinceMin}m ago` : ''}</div>
+        </div>
+        <div style="font-size:12px;color:#5C4F42;">
+          📁 ${item.projectName || item.activity || '-'} · ${item.date || ''}${item.inProgress ? '' : ` · closed ${item.endTime || ''}`}
+        </div>
+      </div>
+    `;
+  }).join('');
 }
   
 function stopLiveTimerUpdates() {
