@@ -1,11 +1,26 @@
 // V14.3.43: biometric IN/OUT sync -- auto-fills missing timelog tails from
 // eTimeOffice biometric attendance data. Companion to api/finalize-stale.js:
-// that closes dead sessions same-day; this fills the resulting gap up to
-// the real biometric OUT time, so morning reconciliation from biometric
-// stops being a manual, next-day chore.
+// that FLAGS a stale-heartbeat session same-day (V16: flags, no longer
+// closes it -- see that file's own header); this is what actually CLOSES a
+// still-flagged session, capped at the user's real biometric OUT time
+// instead of a heartbeat guess, then fills the resulting tail gap up to
+// that same OUT time -- so morning reconciliation from biometric stops
+// being a manual, next-day chore.
+//
+// V16 (flag-don't-truncate): two phases per run now, in order --
+// (1) closeReconciliationNeededSessions(): resolves every still-open,
+//     flagged session up to and including isoDate (with a 30-day catch-up
+//     floor for a missed cron run), closed against that user's OWN day's
+//     biometric OUT, or an honest estimated close if no biometric data
+//     exists for them. See that function's own header for the full design.
+// (2) computePlanForDate()/writeGapFillPlan(): unchanged tail gap-fill,
+//     now running against a day where phase (1) has already resolved
+//     anything that would otherwise block getLastLoggedEnd()'s
+//     inProgress:true guard.
 //
 // STATUS: writes are live behind the confirm=true query param (dry-run by
-// default). Lunch handling is resolved -- see LUNCH_WINDOW_START below.
+// default) -- this gates BOTH phases identically. Lunch handling is
+// resolved -- see LUNCH_WINDOW_START below.
 // V14.3.45: now wired to a daily cron (see vercel.json) -- DRY-RUN ONLY,
 // confirm=true is deliberately NOT baked into the cron path yet.
 //
@@ -27,7 +42,7 @@
 // directly by the user and is now canonical -- see LUNCH_WINDOW_START.
 const { initializeApp, getApps, getApp } = require('firebase/app');
 const {
-  getFirestore, collection, query, where, getDocs, doc, setDoc,
+  getFirestore, collection, query, where, getDocs, doc, setDoc, updateDoc,
 } = require('firebase/firestore');
 
 const firebaseConfig = {
@@ -67,9 +82,21 @@ const EMPCODE_TO_USERID = {
 // not just an operator-discipline note, consistent with how the rest of
 // this codebase prefers a structural guard over a remembered convention
 // (e.g. the sweep's own-session exclusion, deterministic IDs generally).
+//
+// MAINTENANCE: append-only, by hand, the same day a date's manual
+// reconciliation is finished -- add it here BEFORE the next cron/manual run
+// of this endpoint could otherwise touch it (this file's own EOD-close
+// catch-up sweep looks back up to CATCHUP_FLOOR_DAYS days, so a freshly
+// reconciled date is still in that window and must be protected
+// immediately, not "sometime later"). Never remove a date once added --
+// there's no scenario where a manually reconciled day should become
+// writable again. 2026-08-05 covers the Aug-5 mid-day reconciliation done
+// by hand this session (Neha/Suravi malformed-doc repairs + all 8 staff's
+// gap-fills) -- EOD-close and the tail gap-fill below must never touch it.
 const RECONCILED_DATES = new Set([
   '2026-07-24', '2026-07-25', '2026-07-26', '2026-07-27',
   '2026-07-28', '2026-07-29', '2026-07-30', '2026-07-31',
+  '2026-08-05',
 ]);
 
 function ddmmyyyy(isoDate) {
@@ -196,6 +223,202 @@ async function getLastLoggedEnd(db, userId, isoDate) {
   return { blocked: false, latestEndMs, hasLunchEntry, lastDoc: snap.docs.length ? snap.docs[snap.docs.length - 1].data() : null };
 }
 
+// V16 (flag-don't-truncate): the real closer for a reconciliationNeeded
+// session. index.html's stale sweeps and api/finalize-stale.js no longer
+// close a stale-heartbeat session -- they only flag it and leave it
+// inProgress:true so a tab that wakes and heartbeats again self-heals with
+// no gap. A session that never comes back needs an ACTUAL close eventually,
+// or it (a) never shows up in any report, and (b) permanently blocks the
+// tail gap-fill below via getLastLoggedEnd()'s inProgress:true guard. This
+// function is that close, capped at the user's real biometric OUT instead
+// of a heartbeat guess -- and it runs FIRST, before computePlanForDate is
+// called for any date, so by the time the tail gap-fill runs, every doc it
+// might otherwise block on has already been resolved one way or another.
+//
+// MAX_SESSION_HOURS/capSessionDuration are a verbatim port of index.html's
+// -- same reasoning as api/finalize-stale.js's own port: this runs as a
+// separate Vercel function, no shared runtime with the client.
+const MAX_SESSION_HOURS = 12;
+function capSessionDuration(sessionSecs) {
+  const maxSecs = MAX_SESSION_HOURS * 3600;
+  if (sessionSecs <= maxSecs) {
+    return { durationMins: Math.max(1, Math.floor(sessionSecs / 60)), capped: false };
+  }
+  return { durationMins: MAX_SESSION_HOURS * 60, capped: true };
+}
+
+// Catch-up sweep floor (hardening 2): bounds how far back a recovered/
+// missed cron run will look for still-flagged, still-open sessions. Without
+// a floor, a single outage lasting months would make every subsequent run
+// re-scan the entire collection's history; 30 days comfortably covers any
+// realistic missed-run window (this cron is meant to fire nightly) while
+// keeping the query bounded. A session older than the floor that's somehow
+// still reconciliationNeeded:true + inProgress:true is a sign something is
+// structurally wrong (not just "cron missed a night") and belongs in manual
+// review, not an ever-widening automatic sweep.
+const CATCHUP_FLOOR_DAYS = 30;
+function subtractDaysISO(isoDate, days) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function resolveStartMsStrict(data) {
+  // Hardening 3: unlike writer #5 in index.html (a one-off synchronous
+  // admin action with no repeat backstop), this function runs repeatedly
+  // (nightly, with catch-up) -- so an unresolvable start time is safe to
+  // defer to a LATER, more-informed manual pass rather than guessing at a
+  // number. Returns null (never a fallback timestamp) when both signals are
+  // unusable; the caller must skip and report, not write a garbage duration.
+  if (typeof data.sessionStartMs === 'number') return data.sessionStartMs;
+  if (data.date && data.startTime) return new Date(`${data.date}T${data.startTime}:00+05:30`).getTime();
+  return null;
+}
+
+// REQUIRES a Firestore composite index on timeLogs for
+// (inProgress ASC, reconciliationNeeded ASC, date ASC) -- two equality
+// filters plus a range filter on a third field needs one. Firestore will
+// throw failed-precondition with a console link to create it the first time
+// this query runs without it; see the deploy runbook for creating it ahead
+// of time instead of discovering this live.
+async function closeReconciliationNeededSessions(db, isoDate, confirm) {
+  const startedAt = Date.now();
+  const floorDate = subtractDaysISO(isoDate, CATCHUP_FLOOR_DAYS);
+
+  let snap;
+  try {
+    snap = await getDocs(query(
+      collection(db, 'timeLogs'),
+      where('inProgress', '==', true),
+      where('reconciliationNeeded', '==', true),
+      where('date', '>=', floorDate),
+      where('date', '<=', isoDate),
+    ));
+  } catch (e) {
+    return {
+      status: 'read-failed', error: e.message, scanned: 0,
+      closedBiometric: 0, closedFallback: 0, needsManualReview: [],
+      skippedReconciledDate: 0, failed: 0, durationMs: Date.now() - startedAt,
+    };
+  }
+
+  const byDate = new Map();
+  snap.forEach((d) => {
+    const data = d.data();
+    if (!byDate.has(data.date)) byDate.set(data.date, []);
+    byDate.get(data.date).push({ id: d.id, data });
+  });
+
+  const userIdToEmpcode = new Map(Object.entries(EMPCODE_TO_USERID).map(([e, u]) => [u, e]));
+  const nowAtJobRun = Date.now(); // one shared close-point for every fallback entry THIS run produces
+
+  let closedBiometric = 0, closedFallback = 0, failed = 0, skippedReconciledDate = 0;
+  const needsManualReview = [];
+
+  for (const [date, docs] of byDate) {
+    if (RECONCILED_DATES.has(date)) {
+      skippedReconciledDate += docs.length;
+      needsManualReview.push(...docs.map((d) => ({ id: d.id, userId: d.data.userId, date, reason: 'date is in RECONCILED_DATES -- never auto-write' })));
+      continue;
+    }
+
+    let punchByEmpcode = null;
+    try {
+      const records = await fetchInOutPunchData(date);
+      punchByEmpcode = new Map(records.map((r) => [r.Empcode, r]));
+    } catch (e) {
+      // eTimeOffice unreachable for this date -- every doc in this date's
+      // group falls to the fallback path below rather than blocking the
+      // whole run; the docs stay flagged (not written to at all if
+      // confirm=false) and will be retried the next time this runs.
+      needsManualReview.push(...docs.map((d) => ({ id: d.id, userId: d.data.userId, date, reason: `eTimeOffice fetch failed for ${date}: ${e.message} -- treated as no-biometric this run` })));
+    }
+
+    for (const { id, data } of docs) {
+      const startMs = resolveStartMsStrict(data);
+      if (startMs === null) {
+        needsManualReview.push({ id, userId: data.userId, date, reason: 'both sessionStartMs and date+startTime are unusable -- cannot compute a duration' });
+        continue;
+      }
+
+      const empcode = userIdToEmpcode.get(data.userId);
+      const rec = empcode && punchByEmpcode ? punchByEmpcode.get(empcode) : null;
+      const hasBiometricOut = rec && rec.OUTTime && rec.OUTTime !== '--:--';
+
+      if (hasBiometricOut) {
+        const outMs = hhmmToEpoch(date, rec.OUTTime);
+        if (outMs <= startMs) {
+          needsManualReview.push({ id, userId: data.userId, date, reason: `biometric OUT (${rec.OUTTime}) is at/before session start -- bad punch data` });
+          continue;
+        }
+        const { durationMins, capped } = capSessionDuration(Math.round((outMs - startMs) / 1000));
+        const updates = {
+          inProgress: false,
+          recovered: true,
+          durationMins,
+          endTime: toHHMM(outMs),
+          desc: `${data.desc || 'Work on project'} (closed end-of-day — capped at biometric OUT ${rec.OUTTime})`,
+          recoveredAt: new Date().toISOString(),
+          reconciliationNeeded: false,
+          ...(capped ? { autoCapped: true } : {}),
+        };
+        if (confirm) {
+          try {
+            await updateDoc(doc(db, 'timeLogs', id), updates);
+            closedBiometric++;
+          } catch (e) {
+            failed++;
+            needsManualReview.push({ id, userId: data.userId, date, reason: `write failed: ${e.message}` });
+          }
+        } else {
+          closedBiometric++; // dry-run: counted as "would close," nothing written
+        }
+      } else {
+        // Fallback-close: no biometric OUT for this user/date (unmapped
+        // Empcode, or mapped but no/blank punch). Close at this job run's
+        // own timestamp -- an honest real boundary, not an invented one --
+        // capped by the same 12h ceiling, explicitly flagged estimatedClose
+        // so it's never confused with a biometric-anchored close.
+        const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((nowAtJobRun - startMs) / 1000)));
+        const updates = {
+          inProgress: false,
+          recovered: true,
+          estimatedClose: true,
+          durationMins,
+          endTime: toHHMM(nowAtJobRun),
+          desc: `${data.desc || 'Work on project'} (closed end-of-day — no biometric data, estimated)`,
+          recoveredAt: new Date().toISOString(),
+          reconciliationNeeded: false,
+          ...(capped ? { autoCapped: true } : {}),
+        };
+        if (confirm) {
+          try {
+            await updateDoc(doc(db, 'timeLogs', id), updates);
+            closedFallback++;
+          } catch (e) {
+            failed++;
+            needsManualReview.push({ id, userId: data.userId, date, reason: `write failed: ${e.message}` });
+          }
+        } else {
+          closedFallback++; // dry-run: counted as "would close," nothing written
+        }
+      }
+    }
+  }
+
+  return {
+    status: 'ok',
+    mode: confirm ? 'write' : 'dry-run',
+    scanned: snap.size,
+    closedBiometric,
+    closedFallback,
+    needsManualReview,
+    skippedReconciledDate,
+    failed,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
 async function computePlanForDate(db, isoDate, punchRecords) {
   const plan = [];
   const byEmpcode = new Map(punchRecords.map((r) => [r.Empcode, r]));
@@ -288,31 +511,47 @@ module.exports = async (req, res) => {
     return res.status(409).json({ status: 'refused', error: `${isoDate} is already manually reconciled -- refusing to write` });
   }
 
+  const db = getDb();
+
+  // V16 (flag-don't-truncate): phase 0, BEFORE the tail gap-fill below.
+  // Resolves every reconciliationNeeded session up to and including
+  // isoDate (with the catch-up floor) first, so getLastLoggedEnd()'s
+  // inProgress:true guard is never blocking on something this run could
+  // have already closed. Runs unconditionally (even in dry-run) so its
+  // report is always visible; it only WRITES when confirm=true, same gate
+  // as the gap-fill below.
+  let eodClose;
+  try {
+    eodClose = await closeReconciliationNeededSessions(db, isoDate, confirm);
+  } catch (e) {
+    console.error('[biometric-sync] EOD-close phase failed:', e.message);
+    return res.status(500).json({ status: 'eod-close-failed', error: e.message });
+  }
+
   let punchRecords;
   try {
     punchRecords = await fetchInOutPunchData(isoDate);
   } catch (e) {
     console.error('[biometric-sync] eTimeOffice fetch failed:', e.message);
-    return res.status(502).json({ status: 'etime-fetch-failed', error: e.message });
+    return res.status(502).json({ status: 'etime-fetch-failed', error: e.message, eodClose });
   }
 
-  const db = getDb();
   let plan;
   try {
     plan = await computePlanForDate(db, isoDate, punchRecords);
   } catch (e) {
     console.error('[biometric-sync] plan computation failed:', e.message);
-    return res.status(500).json({ status: 'plan-failed', error: e.message });
+    return res.status(500).json({ status: 'plan-failed', error: e.message, eodClose });
   }
 
   if (!confirm) {
-    return res.status(200).json({ status: 'ok', mode: 'dry-run', date: isoDate, plan });
+    return res.status(200).json({ status: 'ok', mode: 'dry-run', date: isoDate, eodClose, plan });
   }
 
   try {
     const results = await writeGapFillPlan(db, plan);
-    return res.status(200).json({ status: 'ok', mode: 'write', date: isoDate, results });
+    return res.status(200).json({ status: 'ok', mode: 'write', date: isoDate, eodClose, results });
   } catch (e) {
-    return res.status(e.httpStatus || 500).json({ status: 'write-blocked', error: e.message });
+    return res.status(e.httpStatus || 500).json({ status: 'write-blocked', error: e.message, eodClose });
   }
 };

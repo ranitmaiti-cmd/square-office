@@ -495,6 +495,17 @@ textarea.form-control{min-height:70px;resize:vertical;}
           </div>
         </div>
         
+        <!-- V16 (flag-don't-truncate): reconciliation queue, admin-only. -->
+        <div class="card" id="reconciliationQueueCard" style="margin-bottom:20px;display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;font-size:16px;font-weight:700;color:#3D332A;">🚩 Needs Reconciliation</h3>
+            <span id="reconciliationQueueCount" style="font-size:12px;color:#8A7E74;font-weight:600;">0 flagged</span>
+          </div>
+          <div id="reconciliationQueueFeed" style="display:flex;flex-direction:column;gap:8px;">
+            <div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">Nothing flagged</div>
+          </div>
+        </div>
+
         <!-- V13.3: Live Time Log Feed -->
         <div class="card" style="margin-bottom:20px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -1710,6 +1721,15 @@ function checkTimerHealth() {
   const newStage = gapMs >= WD_ALERT_MS ? 2 : 1;
   const escalated = newStage > wdStage;
   if (escalated) wdStage = newStage;
+  // V16 (flag-don't-truncate, clobber guard): WD_ALERT_MS is the same 5min
+  // threshold a server sweep uses to flag this session -- once we've been
+  // silent that long, a close (EOD-close, fallback-close, cap-finalize) may
+  // already have happened server-side while nothing here could know it. Trip
+  // this so the next wake event verifies server truth BEFORE trusting
+  // sessionExternallyClosed==false and writing a heartbeat that could
+  // clobber an already-closed doc back open. See reArmHeartbeat() /
+  // verifySessionStillOpenOnWake().
+  if (gapMs >= WD_ALERT_MS) awaitingWakeVerification = true;
   if (wdSavedTitle === null) wdSavedTitle = document.title;
 
   if (wdStage === 1) {
@@ -1915,10 +1935,66 @@ function initReliableTickWorker() {
 const WORKER_STALE_MS = 90 * 1000; // generous margin over the 60s tick interval
 let reArmInFlight = false; // laptop wake fires focus+visibilitychange+online near-simultaneously
 
-function reArmHeartbeat() {
+// V16 (flag-don't-truncate, clobber guard): tripped by checkTimerHealth()
+// once heartbeat silence crosses WD_ALERT_MS (5min) -- the same window a
+// server sweep uses to flag this session. Blocks heartbeatSession() and
+// finalizeCurrentSession() from writing until verifySessionStillOpenOnWake()
+// has confirmed server truth. Without this, a tab frozen (not just
+// throttled) across a close can wake with a BURST of queued worker ticks
+// firing before the async reopen-guard listener has had a chance to
+// observe/process the close -- sessionExternallyClosed would still read
+// false at that instant, and the first queued heartbeat would clobber the
+// already-closed doc's inProgress/endTime/durationMins straight back open.
+let awaitingWakeVerification = false;
+
+// One forced-server read of this tab's own live session, run only when
+// awaitingWakeVerification is true (i.e. only after a real >=5min silence,
+// never on routine tab-switching) -- so the steady-state cost is zero.
+async function verifySessionStillOpenOnWake() {
+  if (!currentSessionLogId) { awaitingWakeVerification = false; return; }
+  try {
+    const snap = await db.collection('timeLogs').doc(currentSessionLogId).get({ source: 'server' });
+    const data = snap.exists ? snap.data() : null;
+    if (!data || data.inProgress === false) {
+      // Closed while this tab was away -- EOD-close, fallback-close, the
+      // 12h cap, or any other true-close. Same reaction as the reopen-guard
+      // listener's "externally closed" branch, triggered here directly
+      // since we can't wait for that listener to catch up on its own.
+      if (!sessionExternallyClosed) {
+        sessionExternallyClosed = true;
+        console.warn(`[wake-verify] session ${currentSessionLogId} was closed while this tab was away -- stopping locally`);
+        showNotificationToast('⏸ Timer auto-closed', 'Your session was closed while this tab was away. Please start a new timer to keep tracking.', 'warning');
+        resetTimer({ keepCloseListener: true, statusText: 'Auto-closed — start a new timer' });
+      }
+    } else if (data.reconciliationNeeded === true) {
+      // Still genuinely open, and demonstrably alive again -- self-heal the
+      // flag now rather than leaving a stale reconciliation-queue entry for
+      // a session that's actually fine. Best-effort: a failure here just
+      // means the flag lingers until the next sweep re-evaluates it, which
+      // is harmless (the doc is still open either way).
+      db.collection('timeLogs').doc(currentSessionLogId).update({ reconciliationNeeded: false })
+        .catch((e) => console.warn('[wake-verify] failed to clear reconciliationNeeded (harmless, doc stays open):', e.message));
+    }
+  } catch (e) {
+    // Fail open -- can't confirm server truth this time, but don't
+    // manufacture a false "closed" reaction either. Worst case this one
+    // wake reverts to the pre-hardening race, not a new failure mode.
+    console.warn('[wake-verify] forced-server check failed, resuming unverified:', e.message);
+  } finally {
+    awaitingWakeVerification = false;
+  }
+}
+
+async function reArmHeartbeat() {
   if (!timerRunning || reArmInFlight) return;
   reArmInFlight = true;
   try {
+    if (awaitingWakeVerification) {
+      // Resolve the clobber race BEFORE touching the worker or writing a
+      // heartbeat -- see verifySessionStillOpenOnWake() and the flag's
+      // declaration above.
+      await verifySessionStillOpenOnWake();
+    }
     const workerLooksDead = !reliableTickWorkerActive;
     const workerLooksWedged = reliableTickWorkerActive && lastWorkerTickAt && (Date.now() - lastWorkerTickAt > WORKER_STALE_MS);
     if (workerLooksDead || workerLooksWedged) {
@@ -1931,8 +2007,10 @@ function reArmHeartbeat() {
       initReliableTickWorker();
     }
     // Fire a heartbeat right now regardless -- cheap, guarded internally by
-    // timerRunning/currentSessionLogId, and means coverage resumes the instant
-    // the interruption ends rather than waiting for the next tick.
+    // timerRunning/currentSessionLogId (and, if verification above found the
+    // session closed, by sessionExternallyClosed), and means coverage
+    // resumes the instant the interruption ends rather than waiting for the
+    // next tick.
     heartbeatSession();
   } finally {
     reArmInFlight = false;
@@ -2241,6 +2319,7 @@ function detachSessionCloseListener() {
 function heartbeatSession() {
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
   if (sessionExternallyClosed) return; // V14.3.48: reopen guard -- don't resurrect a session the server already finalized
+  if (awaitingWakeVerification) return; // V16: clobber guard -- in-memory state is unverified after a >=5min silence, don't trust it yet
   const now  = Date.now();
   const mins = Math.max(1, Math.floor((now - timerStartedAt) / 1000 / 60));
   upsertTimeLog({
@@ -2792,9 +2871,14 @@ function startInactivityMonitor() {
       // the heartbeat interval missed ticks -- reattaches under the same id.
       try { finalizeCurrentSession('tab resumed'); } catch(e) { console.error('resume checkpoint failed', e); }
       // V14.3.21: re-arm BEFORE checkTimerHealth() -- reArmHeartbeat() fires
-      // a fresh heartbeat synchronously, which is what moves
-      // lastHeartbeatSuccessAt forward and lets checkTimerHealth() report
-      // "healthy" instead of just displaying the stale-since-backgrounding gap.
+      // a fresh heartbeat, which is what moves lastHeartbeatSuccessAt
+      // forward and lets checkTimerHealth() report "healthy" instead of
+      // just displaying the stale-since-backgrounding gap. V16: after a
+      // genuine >=5min silence this is no longer instant -- reArmHeartbeat()
+      // first awaits verifySessionStillOpenOnWake() (the clobber guard), so
+      // checkTimerHealth() on the very next line may still report stale for
+      // one more tick until that resolves. Deliberate: correctness over one
+      // extra render cycle before the "reconnected" toast.
       reArmHeartbeat();
       checkTimerHealth(); // V14.3.17: catch a stale/recovered state the instant the user looks back
     }
@@ -3483,8 +3567,14 @@ document.getElementById('resetPasswordBtn').addEventListener('click', () => {
 });
 
 document.getElementById('logoutBtn').addEventListener('click',async ()=>{
+  // V16 (flag-don't-truncate): logout used to abandon a running session
+  // inProgress:true with no endTime/durationMins ever written for it,
+  // relying entirely on a later stale-sweep to truncate it to last
+  // heartbeat. This is an explicit user-initiated boundary, same as
+  // Complete/Switch -- close it here at true now-duration instead.
+  closeCurrentSessionNow('closed at logout');
   localStorage.removeItem('timerState');
-  
+
   await markOffline(); // V13: Mark user as offline
   currentUser=null;
   localStorage.removeItem('currentSession');
@@ -4735,6 +4825,7 @@ function startLiveTimerUpdates() {
 
   // Fetch from Firebase immediately, then every 30 seconds
   fetchActiveTimersFromFirebase();
+  loadReconciliationQueue(); // V16: same immediate-then-30s cadence as "Who's Working Now"
 
   // Display update every second (no Firebase — uses cache)
   liveTimerInterval = setInterval(() => {
@@ -4745,10 +4836,81 @@ function startLiveTimerUpdates() {
   if (!window._timerFetchInterval) {
     window._timerFetchInterval = setInterval(() => {
       fetchActiveTimersFromFirebase();
+      loadReconciliationQueue();
     }, 30000);
   }
 
   startDashboardAutoRefresh();
+}
+
+// V16 (flag-don't-truncate): admin-only reconciliation queue -- a
+// queryable "who's mid-flight right now across the whole team" surface
+// that Time Report / "Who's Working Now" don't provide on their own (both
+// only show a stale-but-open row wherever it happens to already be
+// rendered, for whatever date range is currently filtered). Same refresh
+// cadence as "Who's Working Now," reusing window._timerFetchInterval
+// rather than a second interval.
+async function loadReconciliationQueue() {
+  const cardEl = document.getElementById('reconciliationQueueCard');
+  if (!cardEl) return;
+  if (!currentUser?.isAdmin) { cardEl.style.display = 'none'; return; }
+  cardEl.style.display = 'block';
+
+  try {
+    // {source:'server'} -- same reasoning as fetchActiveTimersFromFirebase:
+    // a stale local cache must never hide a flag an admin needs to see.
+    const snap = await db.collection('timeLogs').where('reconciliationNeeded', '==', true).get({ source: 'server' });
+    const items = [];
+    snap.forEach(doc => {
+      const data = doc.data();
+      items.push({ id: doc.id, ...data, userName: data.userName || users.find(u => u.id === data.userId)?.name || data.userId });
+    });
+    renderReconciliationQueue(items);
+  } catch (e) {
+    console.error('[reconciliation-queue] load failed:', e.message);
+  }
+}
+
+function renderReconciliationQueue(items) {
+  const feedEl = document.getElementById('reconciliationQueueFeed');
+  const countEl = document.getElementById('reconciliationQueueCount');
+  if (!feedEl) return;
+
+  if (countEl) {
+    countEl.textContent = items.length === 0 ? '0 flagged' : items.length === 1 ? '1 flagged' : `${items.length} flagged`;
+  }
+
+  if (items.length === 0) {
+    feedEl.innerHTML = '<div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">Nothing flagged</div>';
+    return;
+  }
+
+  // Oldest flag first -- the longest-unresolved session is the most urgent.
+  const sorted = items.slice().sort((a, b) => new Date(a.reconciliationNeededSince || 0) - new Date(b.reconciliationNeededSince || 0));
+
+  feedEl.innerHTML = sorted.map(item => {
+    const sinceMin = item.reconciliationNeededSince ? Math.round((Date.now() - new Date(item.reconciliationNeededSince).getTime()) / 60000) : null;
+    // estimatedClose:true surfaces prominently, distinct from a plain flag
+    // still open (still inProgress:true, awaiting EOD-close or self-heal)
+    // and distinct from a biometric-anchored close (recovered:true only) --
+    // an estimated close is a guess with no biometric ground truth and
+    // needs a human look, the other two don't.
+    const badge = item.estimatedClose
+      ? ' <span style="background:#8B2E24;color:#fff;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">⚠ ESTIMATED CLOSE — VERIFY</span>'
+      : (item.inProgress ? ' <span style="background:#F5E0C8;color:#8B6914;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">STILL OPEN</span>'
+        : ' <span style="background:#DCE8CC;color:#2E4A1E;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.3px;">CLOSED</span>');
+    return `
+      <div style="background:${item.estimatedClose ? '#FBEAEA' : '#FFF8EE'};padding:10px;border-radius:6px;border-left:3px solid ${item.estimatedClose ? '#C0554A' : '#DEB98A'};">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px;">
+          <div style="font-weight:600;font-size:13px;color:#3D332A;">🚩 ${item.userName}${badge}</div>
+          <div style="font-size:11px;color:#8A7E74;">${sinceMin != null ? `flagged ${sinceMin}m ago` : ''}</div>
+        </div>
+        <div style="font-size:12px;color:#5C4F42;">
+          📁 ${item.projectName || item.activity || '-'} · ${item.date || ''}${item.inProgress ? '' : ` · closed ${item.endTime || ''}`}
+        </div>
+      </div>
+    `;
+  }).join('');
 }
   
 function stopLiveTimerUpdates() {
@@ -6370,30 +6532,32 @@ function renderManage(){
         // touched the REAL record, so a user deleted mid-session left their
         // timeLogs doc orphaned at inProgress:true forever -- invisible to
         // every report, since nothing looks for it once the user is gone.
-        // Same finalize math as the sweep (extractLastSeenMs/
-        // capSessionDuration), not the sweep functions themselves.
+        // V16 (flag-don't-truncate, writer #5): TRUE close at deletion time,
+        // not a truncation to last heartbeat, and NOT flagged
+        // reconciliationNeeded -- deleting the account IS the explicit
+        // boundary event, same family as Complete/Switch/logout. There's no
+        // "wait for the tab to wake up and self-heal" scenario once the
+        // account is gone, so this must resolve to inProgress:false right
+        // here, not sit flagged waiting for a backstop that will never
+        // matter again for this user.
         try {
           const inProgSnap = await db.collection('timeLogs')
             .where('userId', '==', u.id)
             .where('inProgress', '==', true)
             .get({ source: 'server' });
+          const deletedAtMs = Date.now();
           for (const doc of inProgSnap.docs) {
             const data = doc.data();
-            const lastSeenMs = extractLastSeenMs(data);
             const startMs = data.sessionStartMs != null ? data.sessionStartMs
-              : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00+05:30`).getTime() : lastSeenMs);
-            const effectiveEndMs = lastSeenMs || startMs || Date.now();
-            const { durationMins, capped } = startMs
-              ? capSessionDuration(Math.max(0, Math.round((effectiveEndMs - startMs) / 1000)))
-              : { durationMins: data.durationMins || 0, capped: false };
-            const endTime = new Date(effectiveEndMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+              : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00+05:30`).getTime() : (data.ts || deletedAtMs));
+            const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((deletedAtMs - startMs) / 1000)));
+            const endTime = new Date(deletedAtMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
             await db.collection('timeLogs').doc(doc.id).update({
               inProgress: false,
-              recovered: true,
               durationMins,
               endTime,
-              desc: `${data.desc || 'Work on project'} (recovered — user account deleted)`,
-              recoveredAt: new Date().toISOString(),
+              desc: `${data.desc || 'Work on project'} (closed — user account deleted)`,
+              ts: deletedAtMs,
               ...(capped ? { autoCapped: true } : {})
             });
           }
@@ -6869,6 +7033,7 @@ function switchTaskTo(newPlan) {
 function finalizeCurrentSession(reason) {
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
   if (sessionExternallyClosed) return; // V14.3.49: reopen guard -- don't write a fresh checkpoint onto a session the server already finalized
+  if (awaitingWakeVerification) return; // V16: clobber guard -- same reasoning as heartbeatSession()
   const now         = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
   if (sessionSecs < 30) return; // too short to be worth a checkpoint write
@@ -6908,6 +7073,72 @@ function finalizeCurrentSession(reason) {
   console.log(`✅ Session checkpoint written (${reason}): ${minsToHM(mins)} for ${timerLinkedPlan.project} -- still running, timerStartedAt unchanged`);
 }
 
+// V16 (flag-don't-truncate): extracted from startTimerWithPlan()'s old-session
+// -close block so logout can reuse the exact same true-duration close instead
+// of abandoning the session inProgress:true (which is what logout used to do
+// -- see the removed comment on logoutBtn). Returns {mins, capped, project}
+// on a real close, or null if nothing was running. Caller decides what (if
+// anything) to show the user -- this function's job is only the write.
+function closeCurrentSessionNow(descSuffix) {
+  if (!(timerRunning && currentSessionLogId && timerStartedAt && timerLinkedPlan)) return null;
+  const oldSessionId = currentSessionLogId;
+  const oldStartedAt = timerStartedAt;
+  const oldPlan = timerLinkedPlan;
+  const closeNow = Date.now();
+  const oldSessionSecs = Math.floor((closeNow - oldStartedAt) / 1000);
+  const { durationMins: oldMins, capped: oldCapped } = capSessionDuration(oldSessionSecs);
+  const oldEndTime = new Date(closeNow).toLocaleTimeString('en-IN', {
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: 'Asia/Kolkata', // pinned explicitly, not implicit-from-browser-clock
+  });
+  const oldDesc = `${oldPlan.typology || oldPlan.phase || 'Work on project'} (${descSuffix})` +
+    (oldCapped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
+
+  // Detach the reopen-guard listener BEFORE dispatching the close-write.
+  // Firestore can echo a same-client write back to a still-active listener
+  // almost immediately (local cache), and if that listener is still
+  // watching THIS session when it observes inProgress flip to false, it
+  // has no way to know WE just did that intentionally -- it fires the full
+  // "externally finalized" response (toast + resetTimer) against state
+  // that, by the time the callback actually runs, may already belong to
+  // a NEW session (task-switch) or no session at all (logout). Detaching
+  // first removes the listener (and resets watchedSessionId/
+  // sessionExternallyClosed) entirely before the write that would trigger
+  // it even goes out.
+  detachSessionCloseListener();
+
+  // Immediate, targeted write -- NOT deferred to the next autosave/diff
+  // cycle. A single targeted .update() is trivial cost, and deferring would
+  // couple this fix's correctness to autosave timing (a tab closed/reloaded/
+  // crashed before the next tick would leave the old session inProgress:true
+  // forever -- a WORSE orphan than the one being fixed here).
+  db.collection('timeLogs').doc(oldSessionId).update({
+    inProgress: false,
+    endTime: oldEndTime,
+    durationMins: oldMins,
+    desc: oldDesc,
+    ts: closeNow,
+    ...(oldCapped ? { autoCapped: true } : {}),
+  }).catch((e) => console.error('[closeCurrentSessionNow] close failed (EOD-close will still catch it eventually):', e.message));
+
+  // Mirror the close into the local array synchronously -- the write above
+  // is async and fire-and-forget, but anything reading `timeLogs` right
+  // after this call (renderTimeLog, renderProjectsBudget, any periodic
+  // save/diff sweep) should see the closed state immediately, same as
+  // every other close path in this file already does.
+  const oldIdx = timeLogs.findIndex((l) => l.id === oldSessionId);
+  if (oldIdx >= 0) {
+    timeLogs[oldIdx] = {
+      ...timeLogs[oldIdx], inProgress: false, endTime: oldEndTime,
+      durationMins: oldMins, desc: oldDesc, ts: closeNow,
+      ...(oldCapped ? { autoCapped: true } : {}),
+    };
+  }
+  renderTimeLog(); renderProjectsBudget();
+
+  return { mins: oldMins, capped: oldCapped, project: oldPlan.project };
+}
+
 // Core function: start the timer with a linked plan
 function startTimerWithPlan(plan) {
   // V15: close any still-open OLD session before touching ANY shared state
@@ -6919,73 +7150,12 @@ function startTimerWithPlan(plan) {
   // the task-switch orphan bug: previously only switchTaskTo() closed the
   // old session explicitly, so the other entry points left it inProgress:true,
   // undetected until the 5-minute stale-sweep (often much later in practice).
-  //
-  // Captured into LOCALS first, strictly before any reassignment below --
-  // currentSessionLogId/timerStartedAt/timerLinkedPlan are read by BOTH this
-  // close step and the open step that follows and share the same global
-  // variables, so reading stale values here (or reading them AFTER the open
-  // step reassigns them) would corrupt whichever write runs second: either
-  // the close would target the wrong doc, or use the wrong start time.
-  if (timerRunning && currentSessionLogId && timerStartedAt && timerLinkedPlan) {
-    const oldSessionId = currentSessionLogId;
-    const oldStartedAt = timerStartedAt;
-    const oldPlan = timerLinkedPlan;
-    const closeNow = Date.now();
-    const oldSessionSecs = Math.floor((closeNow - oldStartedAt) / 1000);
-    const { durationMins: oldMins, capped: oldCapped } = capSessionDuration(oldSessionSecs);
-    const oldEndTime = new Date(closeNow).toLocaleTimeString('en-IN', {
-      hour: '2-digit', minute: '2-digit', hour12: false,
-      timeZone: 'Asia/Kolkata', // pinned explicitly, not implicit-from-browser-clock
-    });
-    const oldDesc = `${oldPlan.typology || oldPlan.phase || 'Work on project'} (switched to ${plan.project})` +
-      (oldCapped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : '');
-
-    // Detach the reopen-guard listener BEFORE dispatching the close-write.
-    // Firestore can echo a same-client write back to a still-active listener
-    // almost immediately (local cache), and if that listener is still
-    // watching THIS session when it observes inProgress flip to false, it
-    // has no way to know WE just did that intentionally -- it fires the full
-    // "externally finalized" response (toast + resetTimer) against state
-    // that, by the time the callback actually runs, may already belong to
-    // the NEW session being started below. Detaching first removes the
-    // listener (and resets watchedSessionId/sessionExternallyClosed)
-    // entirely before the write that would trigger it even goes out.
-    detachSessionCloseListener();
-
-    // Immediate, targeted write -- NOT deferred to the next autosave/diff
-    // cycle. Task switches are discrete and rare (~10/day/person); a single
-    // targeted .update() is trivial cost, and deferring would couple this
-    // fix's correctness to autosave timing (a tab closed/reloaded/crashed
-    // before the next tick would leave the old session inProgress:true
-    // forever -- a WORSE orphan than the one being fixed here).
-    db.collection('timeLogs').doc(oldSessionId).update({
-      inProgress: false,
-      endTime: oldEndTime,
-      durationMins: oldMins,
-      desc: oldDesc,
-      ts: closeNow,
-      ...(oldCapped ? { autoCapped: true } : {}),
-    }).catch((e) => console.error('[task-switch] old session close failed (stale-sweep will still catch it eventually):', e.message));
-
-    // Mirror the close into the local array synchronously -- the write above
-    // is async and fire-and-forget, but anything reading `timeLogs` right
-    // after this call (renderTimeLog, renderProjectsBudget, any periodic
-    // save/diff sweep) should see the closed state immediately, same as
-    // every other close path in this file already does.
-    const oldIdx = timeLogs.findIndex((l) => l.id === oldSessionId);
-    if (oldIdx >= 0) {
-      timeLogs[oldIdx] = {
-        ...timeLogs[oldIdx], inProgress: false, endTime: oldEndTime,
-        durationMins: oldMins, desc: oldDesc, ts: closeNow,
-        ...(oldCapped ? { autoCapped: true } : {}),
-      };
-    }
-    renderTimeLog(); renderProjectsBudget();
-
-    if (oldCapped) {
-      showNotificationToast('⚠️ Session auto-capped', `${oldPlan.project} hit the ${MAX_SESSION_HOURS}h cap — please verify this entry in Time Report.`, 'warning');
+  const closedOld = closeCurrentSessionNow(`switched to ${plan.project}`);
+  if (closedOld) {
+    if (closedOld.capped) {
+      showNotificationToast('⚠️ Session auto-capped', `${closedOld.project} hit the ${MAX_SESSION_HOURS}h cap — please verify this entry in Time Report.`, 'warning');
     } else {
-      showNotificationToast(`✓ ${minsToHM(oldMins)} saved`, `${oldPlan.project} → ${plan.project}`, 'info');
+      showNotificationToast(`✓ ${minsToHM(closedOld.mins)} saved`, `${closedOld.project} → ${plan.project}`, 'info');
     }
   }
 
@@ -7237,6 +7407,18 @@ document.getElementById('timerCompletePausedBtn').addEventListener('click', asyn
 // previous day (a real overnight session), and never touches this tab's
 // own currentSessionLogId.
 // ═══════════════════════════════════════════════════════
+// V16 (flag-don't-truncate): this and the two functions below it no longer
+// CLOSE a stale session -- they FLAG it (reconciliationNeeded:true +
+// reconciliationNeededSince) and leave inProgress/endTime/durationMins
+// exactly as the last successful heartbeat wrote them. Truncating to
+// lastSeenMs was itself the bug: a tab frozen/backgrounded for hours (Chrome
+// tab-freezing, not a dead session) is indistinguishable from a genuinely
+// abandoned one by heartbeat alone, and closing it at lastSeenMs silently
+// ate every minute past that point. If the tab wakes and heartbeats again,
+// the flagged session self-heals with no gap (see the wake-verification
+// guard on heartbeatSession()). A session that never comes back gets
+// actually closed later by api/biometric-sync.js's EOD-close phase, capped
+// at that user's real biometric OUT time.
 async function cleanupStaleTimers() {
   try {
     const today = fmt(new Date());
@@ -7247,14 +7429,15 @@ async function cleanupStaleTimers() {
     snapshot.forEach(doc => {
       if (doc.id === currentSessionLogId) return; // never touch this tab's own live session
       const data = doc.data();
+      if (data.reconciliationNeeded === true) return; // already flagged -- one-time transition, don't rewrite reconciliationNeededSince
       if (data.date && data.date < today) stale.push({ id: doc.id, data });
     });
 
     if (stale.length === 0) return;
 
-    console.log(`🧹 Found ${stale.length} stale timer(s) from previous day(s) — finalizing...`);
+    console.log(`🧹 Found ${stale.length} stale timer(s) from previous day(s) — flagging for reconciliation...`);
 
-    const finalized = [];
+    const flagged = [];
     const skipped = [];
     const now = Date.now();
 
@@ -7269,42 +7452,27 @@ async function cleanupStaleTimers() {
         continue;
       }
 
-      const startMs = data.sessionStartMs != null ? data.sessionStartMs
-        : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00+05:30`).getTime() : lastSeenMs);
-      const effectiveEndMs = lastSeenMs || startMs || now;
-      const { durationMins, capped } = startMs
-        ? capSessionDuration(Math.max(0, Math.round((effectiveEndMs - startMs) / 1000)))
-        : { durationMins: data.durationMins || 0, capped: false };
-      const endTime = new Date(effectiveEndMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
-      const ageMin = lastSeenMs ? Math.round((now - lastSeenMs) / 60000) : null;
-
       const updates = {
-        inProgress: false,
-        recovered: true,
-        durationMins,
-        endTime,
-        desc: `${data.desc || 'Work on project'} (recovered — previous-day cleanup${ageMin != null ? `, heartbeat stale for ${ageMin}m` : ''})`,
-        recoveredAt: new Date().toISOString(),
-        ...(capped ? { autoCapped: true } : {})
+        reconciliationNeeded: true,
+        reconciliationNeededSince: new Date().toISOString(),
       };
 
       try {
         await db.collection('timeLogs').doc(id).update(updates);
         const localIdx = timeLogs.findIndex(l => l.id === id);
         if (localIdx >= 0) timeLogs[localIdx] = { ...timeLogs[localIdx], ...updates };
-        finalized.push({ name: data.userName || users.find(u => u.id === data.userId)?.name || data.userId || id, mins: durationMins });
-        console.log(`✅ Finalized ${data.userName || data.userId || id}: ${minsToHM(durationMins)}`);
+        flagged.push(data.userName || users.find(u => u.id === data.userId)?.name || data.userId || id);
+        console.log(`🚩 Flagged for reconciliation: ${data.userName || data.userId || id}`);
       } catch (e) {
-        console.error(`❌ Failed to finalize stale timer ${id}:`, e.message);
+        console.error(`❌ Failed to flag stale timer ${id}:`, e.message);
       }
     }
 
-    if (finalized.length > 0) {
+    if (flagged.length > 0) {
       renderDashboard();
       renderTimeLog();
       if (currentUser?.isAdmin) {
-        const details = finalized.map(f => `${f.name}: ${minsToHM(f.mins)}`).join(', ');
-        showNotificationToast('🧹 Stale Timers Finalized', details, 'warning');
+        showNotificationToast('🚩 Sessions Flagged', `${flagged.length} previous-day session(s) need reconciliation: ${flagged.join(', ')}`, 'warning');
       }
     }
     if (skipped.length > 0) console.log(`⏭️ Left alone (still fresh): ${skipped.join(', ')}`);
@@ -7313,7 +7481,7 @@ async function cleanupStaleTimers() {
   }
 }
 
-// V14.3.10: finalize this user's own inProgress:true sessions whose heartbeat
+// V14.3.10: flag this user's own inProgress:true sessions whose heartbeat
 // has gone stale (no lastHeartbeat update in STALE_HEARTBEAT_MS). This is the
 // piece the 79c820f heartbeat-only fix was missing -- it wrote lastHeartbeat
 // every 60s but nothing ever acted on one that stopped updating. Supersedes
@@ -7322,7 +7490,7 @@ async function cleanupStaleTimers() {
 // previous-day orphans instead of missing same-day ones entirely.
 // Safety: scoped to userId == currentUser.id by the query itself, so it is
 // structurally unable to touch another user's docs. Explicitly skips
-// currentSessionLogId so it can never finalize the session THIS tab is
+// currentSessionLogId so it can never flag the session THIS tab is
 // actively tracking. A session with a heartbeat inside the threshold is left
 // completely untouched, whether it's this tab's or (in principle) another
 // device's for the same user.
@@ -7367,52 +7535,36 @@ async function finalizeStaleHeartbeatSessions() {
       .get();
     if (snap.empty) return;
 
-    let recoveredCount = 0;
+    let flaggedCount = 0;
     for (const doc of snap.docs) {
       if (doc.id === currentSessionLogId) continue; // this tab's own live session -- never touch
 
       const data = doc.data();
+      if (data.reconciliationNeeded === true) continue; // already flagged -- one-time transition
+
       const lastSeenMs = extractLastSeenMs(data);
       if (!lastSeenMs) continue;
       if (now - lastSeenMs < STALE_HEARTBEAT_MS) continue; // fresh -- leave it alone
 
-      const startMs = (data.date && data.startTime)
-        ? new Date(`${data.date}T${data.startTime}:00`).getTime()
-        : lastSeenMs;
-      // V14.3.18: same cap as every live finalize path. No human is present
-      // to ask here (this runs unattended, on login/interval/new-session),
-      // so at/beyond the cap we write the capped value + autoCapped:true
-      // instead of either an unbounded number or a silent truncation.
-      const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((lastSeenMs - startMs) / 1000)));
-      const endTime = new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
-
+      // V16 (flag-don't-truncate): flag only -- inProgress/endTime/
+      // durationMins untouched. NOT clearing localStorage's timerState
+      // pointer either: the session is still open (just flagged), so if
+      // this IS the same browser reopening, restoreTimerState() resuming it
+      // and heartbeating again is exactly the self-heal we want, not
+      // something to prevent.
       await db.collection('timeLogs').doc(doc.id).update({
-        inProgress: false,
-        recovered: true,
-        durationMins,
-        endTime,
-        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${Math.round((now-lastSeenMs)/60000)}m)` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : ''),
-        recoveredAt: new Date().toISOString(),
-        ...(capped?{autoCapped:true}:{})
+        reconciliationNeeded: true,
+        reconciliationNeededSince: new Date().toISOString(),
       });
 
-      // If localStorage still points restoreTimerState() at this now-closed
-      // doc (e.g. the tab was reopened after the staleness threshold passed),
-      // clear it -- otherwise the next restore would resume a session this
-      // check just finalized, flipping it back to inProgress:true.
-      try {
-        const saved = JSON.parse(localStorage.getItem('timerState') || 'null');
-        if (saved && saved.sessionLogId === doc.id) localStorage.removeItem('timerState');
-      } catch(e) {}
-
-      recoveredCount++;
+      flaggedCount++;
     }
-    if (recoveredCount > 0) {
-      console.log(`✅ Finalized ${recoveredCount} stale-heartbeat session(s)`);
-      showNotificationToast('🔧 Sessions Recovered', `${recoveredCount} abandoned session(s) were closed out automatically.`, 'info');
+    if (flaggedCount > 0) {
+      console.log(`🚩 Flagged ${flaggedCount} stale-heartbeat session(s) for reconciliation`);
+      showNotificationToast('🚩 Sessions Flagged', `${flaggedCount} session(s) with a stale heartbeat were flagged for reconciliation.`, 'warning');
     }
   } catch (e) {
-    console.error('❌ Stale-heartbeat finalization failed:', e);
+    console.error('❌ Stale-heartbeat flagging failed:', e);
   }
 }
 
@@ -7441,10 +7593,13 @@ async function finalizeStaleHeartbeatSessions() {
 // healthy idle sweep and a blind/failing sweep looked identical in the
 // console -- this is why diagnosis took three days.
 //
-// Behaviour preserved exactly: admin gate, currentSessionLogId skip,
-// STALE_HEARTBEAT_MS threshold (Fix 1 may be re-arming a fresh session),
-// endTime derived from lastSeenMs never now(), capSessionDuration/
-// autoCapped, local timeLogs array patch after a successful write.
+// V16 (flag-don't-truncate): no longer closes anything -- flags only
+// (reconciliationNeeded/reconciliationNeededSince), skipping docs already
+// flagged so reconciliationNeededSince is a one-time "first detected"
+// stamp, not rewritten every sweep. Everything else preserved exactly:
+// admin gate, currentSessionLogId skip, STALE_HEARTBEAT_MS threshold (Fix 1
+// may be re-arming a fresh session), per-document try/catch, local
+// timeLogs array patch after a successful write.
 async function finalizeStaleHeartbeatSessionsAllUsers() {
   const startedAt = Date.now();
   if (!currentUser?.isAdmin) return { status: 'not-admin' };
@@ -7456,19 +7611,20 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
     // `if (snap.empty) return;` was a blind sweep that left no trace.
     snap = await db.collection('timeLogs').where('inProgress', '==', true).get({ source: 'server' });
   } catch (e) {
-    const result = { status: 'read-failed', scanned: 0, finalized: 0, failed: 0, fresh: 0, noHeartbeat: 0, durationMs: Date.now() - startedAt };
+    const result = { status: 'read-failed', scanned: 0, flagged: 0, alreadyFlagged: 0, failed: 0, fresh: 0, noHeartbeat: 0, durationMs: Date.now() - startedAt };
     console.error(`❌ [sweep] read failed (${e.message}) -- connection likely down, nothing scanned this run`, result);
     return result;
   }
 
   const now = Date.now();
-  let finalized = 0, failed = 0, fresh = 0, noHeartbeat = 0;
+  let flagged = 0, failed = 0, fresh = 0, noHeartbeat = 0, alreadyFlagged = 0;
   const failures = [];
 
   for (const doc of snap.docs) {
     if (doc.id === currentSessionLogId) continue; // never touch the viewing admin's own live session
 
     const data = doc.data();
+    if (data.reconciliationNeeded === true) { alreadyFlagged++; continue; }
     const lastSeenMs = extractLastSeenMs(data);
     if (!lastSeenMs) { noHeartbeat++; continue; }
     if (now - lastSeenMs < STALE_HEARTBEAT_MS) { fresh++; continue; } // fresh -- leave it alone, Fix 1 may be re-arming it
@@ -7478,45 +7634,31 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
     // counted and logged, not silently dropped; they'll be retried on the
     // next sweep since the doc is still inProgress:true.
     try {
-      const startMs = (data.date && data.startTime)
-        ? new Date(`${data.date}T${data.startTime}:00`).getTime()
-        : lastSeenMs;
-      const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((lastSeenMs - startMs) / 1000)));
-      // endTime comes from lastSeenMs (the last real heartbeat), never "now"
-      // -- an admin sweeping other users' sessions must not invent extra
-      // duration just because they happened to be the one whose client caught it.
-      const endTime = new Date(lastSeenMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
-
       const updates = {
-        inProgress: false,
-        recovered: true,
-        durationMins,
-        endTime,
-        desc: `${data.desc || 'Work on project'} (recovered — heartbeat stale for ${Math.round((now-lastSeenMs)/60000)}m)` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : ''),
-        recoveredAt: new Date().toISOString(),
-        ...(capped?{autoCapped:true}:{})
+        reconciliationNeeded: true,
+        reconciliationNeededSince: new Date().toISOString(),
       };
       await db.collection('timeLogs').doc(doc.id).update(updates);
 
       // Patch the local array too, so a report generated right after this
-      // sweep reflects the fix immediately instead of needing a reload.
+      // sweep reflects the flag immediately instead of needing a reload.
       const localIdx = timeLogs.findIndex(l => l.id === doc.id);
       if (localIdx >= 0) timeLogs[localIdx] = { ...timeLogs[localIdx], ...updates };
 
-      finalized++;
+      flagged++;
     } catch (e) {
       failed++;
       failures.push({ id: doc.id, userId: data.userId, userName: data.userName, error: e.message });
-      console.error(`❌ [sweep] failed to finalize ${doc.id} (${data.userName || data.userId}): ${e.message} -- will retry next sweep`);
+      console.error(`❌ [sweep] failed to flag ${doc.id} (${data.userName || data.userId}): ${e.message} -- will retry next sweep`);
     }
   }
 
-  const result = { status: 'ok', scanned: snap.size, finalized, failed, fresh, noHeartbeat, durationMs: Date.now() - startedAt };
+  const result = { status: 'ok', scanned: snap.size, flagged, alreadyFlagged, failed, fresh, noHeartbeat, durationMs: Date.now() - startedAt };
   // V14.3.30: logs on EVERY run, unconditionally -- a healthy idle sweep
   // (nothing stale) and a sweep that never ran must never look the same.
-  console.log(`[sweep] ran -- scanned:${result.scanned} finalized:${finalized} failed:${failed} fresh:${fresh} noHeartbeat:${noHeartbeat} (${result.durationMs}ms)`);
+  console.log(`[sweep] ran -- scanned:${result.scanned} flagged:${flagged} alreadyFlagged:${alreadyFlagged} failed:${failed} fresh:${fresh} noHeartbeat:${noHeartbeat} (${result.durationMs}ms)`);
   if (failed > 0) console.error(`⚠️ [sweep] ${failed} document(s) failed this run, will retry next sweep:`, failures);
-  if (finalized > 0) showNotificationToast('🔧 Sessions Recovered', `${finalized} abandoned session(s) across the team were closed out automatically.`, 'info');
+  if (flagged > 0) showNotificationToast('🚩 Sessions Flagged', `${flagged} abandoned session(s) across the team were flagged for reconciliation.`, 'warning');
 
   return result;
 }
