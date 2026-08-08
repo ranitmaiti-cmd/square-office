@@ -100,11 +100,15 @@ const EMPCODE_TO_USERID = {
 // mid-day reconciliation (all 8 present, mid-day + tail gap-fills across
 // the board; Angana's and Souvik's totals trimmed to land exactly at
 // their biometric ceilings; Angana's malformed 16m lunch doc left
-// unrepaired, no clean anchor) -- same protection, same reason.
+// unrepaired, no clean anchor) -- same protection, same reason. 2026-08-07
+// covers the Aug-7 reconciliation (all 8 present; first day the morning-
+// window policy applied -- biometric IN to first-OMS-activity credited up
+// to 5min max; Suravi landed exactly at her biometric ceiling) -- same
+// protection, same reason.
 const RECONCILED_DATES = new Set([
   '2026-07-24', '2026-07-25', '2026-07-26', '2026-07-27',
   '2026-07-28', '2026-07-29', '2026-07-30', '2026-07-31',
-  '2026-08-04', '2026-08-05', '2026-08-06',
+  '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07',
 ]);
 
 function ddmmyyyy(isoDate) {
