@@ -93,10 +93,14 @@ const EMPCODE_TO_USERID = {
 // writable again. 2026-08-05 covers the Aug-5 mid-day reconciliation done
 // by hand this session (Neha/Suravi malformed-doc repairs + all 8 staff's
 // gap-fills) -- EOD-close and the tail gap-fill below must never touch it.
+// 2026-08-04 covers the Aug-4 mid-day reconciliation (Neha's malformed
+// lunch-doc repair, mid-day + tail gap-fills for Tasmin/Rai/Ridhi/Angana/
+// Taskiya, Souvik's unlogged-presence fill; Suravi excluded, absent that
+// day) -- same protection, same reason.
 const RECONCILED_DATES = new Set([
   '2026-07-24', '2026-07-25', '2026-07-26', '2026-07-27',
   '2026-07-28', '2026-07-29', '2026-07-30', '2026-07-31',
-  '2026-08-05',
+  '2026-08-04', '2026-08-05',
 ]);
 
 function ddmmyyyy(isoDate) {
