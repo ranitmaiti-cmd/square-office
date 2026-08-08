@@ -96,11 +96,15 @@ const EMPCODE_TO_USERID = {
 // 2026-08-04 covers the Aug-4 mid-day reconciliation (Neha's malformed
 // lunch-doc repair, mid-day + tail gap-fills for Tasmin/Rai/Ridhi/Angana/
 // Taskiya, Souvik's unlogged-presence fill; Suravi excluded, absent that
-// day) -- same protection, same reason.
+// day) -- same protection, same reason. 2026-08-06 covers the Aug-6
+// mid-day reconciliation (all 8 present, mid-day + tail gap-fills across
+// the board; Angana's and Souvik's totals trimmed to land exactly at
+// their biometric ceilings; Angana's malformed 16m lunch doc left
+// unrepaired, no clean anchor) -- same protection, same reason.
 const RECONCILED_DATES = new Set([
   '2026-07-24', '2026-07-25', '2026-07-26', '2026-07-27',
   '2026-07-28', '2026-07-29', '2026-07-30', '2026-07-31',
-  '2026-08-04', '2026-08-05',
+  '2026-08-04', '2026-08-05', '2026-08-06',
 ]);
 
 function ddmmyyyy(isoDate) {
