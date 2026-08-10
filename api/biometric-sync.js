@@ -293,6 +293,28 @@ function resolveStartMsStrict(data) {
 // throw failed-precondition with a console link to create it the first time
 // this query runs without it; see the deploy runbook for creating it ahead
 // of time instead of discovering this live.
+//
+// V16.1 (Bug C fix, 2026-08-11): the original version of this function
+// processed every flagged doc independently and closed each one at the
+// user's biometric OUT. That's correct when a user has exactly one flagged
+// doc for a given day (Ridhi/Taskiya on 2026-08-10) -- but when a user has
+// 2+ flagged docs the same day (a Bug-B reload/new-tab orphan plus their
+// real final session), the old code stretched ALL of them to the SAME OUT
+// time independently, producing overlapping ranges and double-counted
+// totals. Confirmed live against production on 2026-08-10 (Neha, Angana,
+// Souvik, Suravi) -- see FINDINGS-2026-08-10.md, "Bug C."
+//
+// Fix: for each user+date, look at that user's FULL day (every doc, not
+// just flagged ones -- Souvik's real case showed the true final segment can
+// already be a normally-closed, never-flagged doc that the original query
+// never even saw). Only the chronologically LAST thing that day is the
+// genuine final segment and gets closed at biometric OUT (or the honest
+// fallback) -- exactly the original single-doc logic, unchanged. Every
+// flagged doc that has something starting later the same day is an orphan;
+// it gets bounded to that later thing's start time instead, never
+// stretched past it. This naturally reduces to the original single-doc
+// behavior whenever nothing follows a user's one flagged doc that day --
+// see the fixture in test/bugc-de-overlap.test.js for both shapes.
 async function closeReconciliationNeededSessions(db, isoDate, confirm) {
   const startedAt = Date.now();
   const floorDate = subtractDaysISO(isoDate, CATCHUP_FLOOR_DAYS);
@@ -309,7 +331,7 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
   } catch (e) {
     return {
       status: 'read-failed', error: e.message, scanned: 0,
-      closedBiometric: 0, closedFallback: 0, needsManualReview: [],
+      closedBiometric: 0, closedFallback: 0, deoverlapped: 0, needsManualReview: [],
       skippedReconciledDate: 0, failed: 0, durationMs: Date.now() - startedAt,
     };
   }
@@ -324,8 +346,114 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
   const userIdToEmpcode = new Map(Object.entries(EMPCODE_TO_USERID).map(([e, u]) => [u, e]));
   const nowAtJobRun = Date.now(); // one shared close-point for every fallback entry THIS run produces
 
-  let closedBiometric = 0, closedFallback = 0, failed = 0, skippedReconciledDate = 0;
+  let closedBiometric = 0, closedFallback = 0, deoverlapped = 0, failed = 0, skippedReconciledDate = 0;
   const needsManualReview = [];
+  let punchByEmpcode = null; // set per date-group below; read by closeAtGenuineFinal via closure
+
+  // Closes ONE flagged doc at its true genuine-final boundary -- biometric
+  // OUT, or an honest fallback if no biometric data exists. This is the
+  // ORIGINAL single-doc-case logic verbatim, only factored out so it can be
+  // called from both "this user has exactly one flagged doc all day" and
+  // "this is the one flagged doc that turns out to be the day's actual
+  // latest session" -- both must behave identically, per the requirement
+  // that the single-flagged-doc case (Ridhi/Taskiya) never changes.
+  async function closeAtGenuineFinal(id, data, date, startMs) {
+    const empcode = userIdToEmpcode.get(data.userId);
+    const rec = empcode && punchByEmpcode ? punchByEmpcode.get(empcode) : null;
+    const hasBiometricOut = rec && rec.OUTTime && rec.OUTTime !== '--:--';
+
+    if (hasBiometricOut) {
+      const outMs = hhmmToEpoch(date, rec.OUTTime);
+      if (outMs <= startMs) {
+        needsManualReview.push({ id, userId: data.userId, date, reason: `biometric OUT (${rec.OUTTime}) is at/before session start -- bad punch data` });
+        return;
+      }
+      const { durationMins, capped } = capSessionDuration(Math.round((outMs - startMs) / 1000));
+      const updates = {
+        inProgress: false,
+        recovered: true,
+        durationMins,
+        endTime: toHHMM(outMs),
+        desc: `${data.desc || 'Work on project'} (closed end-of-day — capped at biometric OUT ${rec.OUTTime})`,
+        recoveredAt: new Date().toISOString(),
+        reconciliationNeeded: false,
+        ...(capped ? { autoCapped: true } : {}),
+      };
+      if (confirm) {
+        try {
+          await updateDoc(doc(db, 'timeLogs', id), updates);
+          closedBiometric++;
+        } catch (e) {
+          failed++;
+          needsManualReview.push({ id, userId: data.userId, date, reason: `write failed: ${e.message}` });
+        }
+      } else {
+        closedBiometric++; // dry-run: counted as "would close," nothing written
+      }
+    } else {
+      // Fallback-close: no biometric OUT for this user/date (unmapped
+      // Empcode, or mapped but no/blank punch). Close at this job run's
+      // own timestamp -- an honest real boundary, not an invented one --
+      // capped by the same 12h ceiling, explicitly flagged estimatedClose
+      // so it's never confused with a biometric-anchored close.
+      const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((nowAtJobRun - startMs) / 1000)));
+      const updates = {
+        inProgress: false,
+        recovered: true,
+        estimatedClose: true,
+        durationMins,
+        endTime: toHHMM(nowAtJobRun),
+        desc: `${data.desc || 'Work on project'} (closed end-of-day — no biometric data, estimated)`,
+        recoveredAt: new Date().toISOString(),
+        reconciliationNeeded: false,
+        ...(capped ? { autoCapped: true } : {}),
+      };
+      if (confirm) {
+        try {
+          await updateDoc(doc(db, 'timeLogs', id), updates);
+          closedFallback++;
+        } catch (e) {
+          failed++;
+          needsManualReview.push({ id, userId: data.userId, date, reason: `write failed: ${e.message}` });
+        }
+      } else {
+        closedFallback++; // dry-run: counted as "would close," nothing written
+      }
+    }
+  }
+
+  // Bounds ONE flagged doc (an orphan -- something else for this user
+  // genuinely starts later the same day) to that later thing's start time
+  // instead of stretching it to biometric OUT. This is the Bug C fix's
+  // core new case.
+  async function boundToNextSessionStart(id, data, date, startMs, nextStartMs) {
+    if (nextStartMs <= startMs) {
+      needsManualReview.push({ id, userId: data.userId, date, reason: `next session start (${toHHMM(nextStartMs)}) is at/before this session's own start -- bad ordering` });
+      return;
+    }
+    const { durationMins, capped } = capSessionDuration(Math.round((nextStartMs - startMs) / 1000));
+    const updates = {
+      inProgress: false,
+      recovered: true,
+      durationMins,
+      endTime: toHHMM(nextStartMs),
+      desc: `${data.desc || 'Work on project'} (closed end-of-day — bounded to next session start ${toHHMM(nextStartMs)}, de-overlapped)`,
+      recoveredAt: new Date().toISOString(),
+      reconciliationNeeded: false,
+      ...(capped ? { autoCapped: true } : {}),
+    };
+    if (confirm) {
+      try {
+        await updateDoc(doc(db, 'timeLogs', id), updates);
+        deoverlapped++;
+      } catch (e) {
+        failed++;
+        needsManualReview.push({ id, userId: data.userId, date, reason: `write failed: ${e.message}` });
+      }
+    } else {
+      deoverlapped++; // dry-run: counted as "would bound," nothing written
+    }
+  }
 
   for (const [date, docs] of byDate) {
     if (RECONCILED_DATES.has(date)) {
@@ -334,7 +462,7 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
       continue;
     }
 
-    let punchByEmpcode = null;
+    punchByEmpcode = null;
     try {
       const records = await fetchInOutPunchData(date);
       punchByEmpcode = new Map(records.map((r) => [r.Empcode, r]));
@@ -346,73 +474,70 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
       needsManualReview.push(...docs.map((d) => ({ id: d.id, userId: d.data.userId, date, reason: `eTimeOffice fetch failed for ${date}: ${e.message} -- treated as no-biometric this run` })));
     }
 
-    for (const { id, data } of docs) {
-      const startMs = resolveStartMsStrict(data);
-      if (startMs === null) {
-        needsManualReview.push({ id, userId: data.userId, date, reason: 'both sessionStartMs and date+startTime are unusable -- cannot compute a duration' });
+    // Group this date's flagged docs by userId -- an orphan must never be
+    // resolved independently of its own owner's other sessions the same
+    // day.
+    const byUser = new Map();
+    for (const item of docs) {
+      if (!byUser.has(item.data.userId)) byUser.set(item.data.userId, []);
+      byUser.get(item.data.userId).push(item);
+    }
+
+    for (const [userId, userDocs] of byUser) {
+      const flagged = [];
+      for (const { id, data } of userDocs) {
+        const startMs = resolveStartMsStrict(data);
+        if (startMs === null) {
+          needsManualReview.push({ id, userId, date, reason: 'both sessionStartMs and date+startTime are unusable -- cannot compute a duration' });
+          continue;
+        }
+        flagged.push({ id, data, startMs });
+      }
+      if (flagged.length === 0) continue;
+
+      // Read this user's OTHER same-day docs too -- a later, already
+      // normally-closed doc (never flagged) can still be the day's true
+      // final segment, invisible to the original flagged-only query. Same
+      // query shape as getLastLoggedEnd() elsewhere in this file, so it
+      // needs no new composite index.
+      let otherDocs = [];
+      try {
+        const otherSnap = await getDocs(query(
+          collection(db, 'timeLogs'),
+          where('userId', '==', userId),
+          where('date', '==', date),
+        ));
+        const flaggedIds = new Set(flagged.map((f) => f.id));
+        otherDocs = otherSnap.docs
+          .filter((d) => !flaggedIds.has(d.id))
+          .map((d) => {
+            const odata = d.data();
+            if (!odata.startTime) return null;
+            const startMs = typeof odata.sessionStartMs === 'number' ? odata.sessionStartMs : hhmmToEpoch(date, odata.startTime);
+            return { id: d.id, data: odata, startMs };
+          })
+          .filter(Boolean);
+      } catch (e) {
+        // Can't safely order this user's day without it -- every flagged
+        // doc for them this date defers to manual review rather than risk
+        // re-stretching an orphan to OUT blind.
+        needsManualReview.push(...flagged.map((f) => ({ id: f.id, userId, date, reason: `could not read this user's other same-day docs to de-overlap: ${e.message}` })));
         continue;
       }
 
-      const empcode = userIdToEmpcode.get(data.userId);
-      const rec = empcode && punchByEmpcode ? punchByEmpcode.get(empcode) : null;
-      const hasBiometricOut = rec && rec.OUTTime && rec.OUTTime !== '--:--';
+      const combined = [
+        ...flagged.map((f) => ({ ...f, isFlagged: true })),
+        ...otherDocs.map((o) => ({ ...o, isFlagged: false })),
+      ].sort((a, b) => a.startMs - b.startMs);
 
-      if (hasBiometricOut) {
-        const outMs = hhmmToEpoch(date, rec.OUTTime);
-        if (outMs <= startMs) {
-          needsManualReview.push({ id, userId: data.userId, date, reason: `biometric OUT (${rec.OUTTime}) is at/before session start -- bad punch data` });
-          continue;
-        }
-        const { durationMins, capped } = capSessionDuration(Math.round((outMs - startMs) / 1000));
-        const updates = {
-          inProgress: false,
-          recovered: true,
-          durationMins,
-          endTime: toHHMM(outMs),
-          desc: `${data.desc || 'Work on project'} (closed end-of-day — capped at biometric OUT ${rec.OUTTime})`,
-          recoveredAt: new Date().toISOString(),
-          reconciliationNeeded: false,
-          ...(capped ? { autoCapped: true } : {}),
-        };
-        if (confirm) {
-          try {
-            await updateDoc(doc(db, 'timeLogs', id), updates);
-            closedBiometric++;
-          } catch (e) {
-            failed++;
-            needsManualReview.push({ id, userId: data.userId, date, reason: `write failed: ${e.message}` });
-          }
+      for (let i = 0; i < combined.length; i++) {
+        const item = combined[i];
+        if (!item.isFlagged) continue; // only flagged docs are this function's to close
+        const next = combined[i + 1];
+        if (next) {
+          await boundToNextSessionStart(item.id, item.data, date, item.startMs, next.startMs);
         } else {
-          closedBiometric++; // dry-run: counted as "would close," nothing written
-        }
-      } else {
-        // Fallback-close: no biometric OUT for this user/date (unmapped
-        // Empcode, or mapped but no/blank punch). Close at this job run's
-        // own timestamp -- an honest real boundary, not an invented one --
-        // capped by the same 12h ceiling, explicitly flagged estimatedClose
-        // so it's never confused with a biometric-anchored close.
-        const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((nowAtJobRun - startMs) / 1000)));
-        const updates = {
-          inProgress: false,
-          recovered: true,
-          estimatedClose: true,
-          durationMins,
-          endTime: toHHMM(nowAtJobRun),
-          desc: `${data.desc || 'Work on project'} (closed end-of-day — no biometric data, estimated)`,
-          recoveredAt: new Date().toISOString(),
-          reconciliationNeeded: false,
-          ...(capped ? { autoCapped: true } : {}),
-        };
-        if (confirm) {
-          try {
-            await updateDoc(doc(db, 'timeLogs', id), updates);
-            closedFallback++;
-          } catch (e) {
-            failed++;
-            needsManualReview.push({ id, userId: data.userId, date, reason: `write failed: ${e.message}` });
-          }
-        } else {
-          closedFallback++; // dry-run: counted as "would close," nothing written
+          await closeAtGenuineFinal(item.id, item.data, date, item.startMs);
         }
       }
     }
@@ -424,6 +549,7 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
     scanned: snap.size,
     closedBiometric,
     closedFallback,
+    deoverlapped,
     needsManualReview,
     skippedReconciledDate,
     failed,
@@ -567,3 +693,12 @@ module.exports = async (req, res) => {
     return res.status(e.httpStatus || 500).json({ status: 'write-blocked', error: e.message, eodClose });
   }
 };
+
+// Test-only named exports (attached to the same function object Vercel
+// invokes -- does not change its callability as the default export).
+// Lets test/bugc-de-overlap.test.js exercise the EOD-close phase directly
+// against a fake Firestore, without going through the HTTP handler or real
+// eTimeOffice/Firestore.
+module.exports.closeReconciliationNeededSessions = closeReconciliationNeededSessions;
+module.exports.EMPCODE_TO_USERID = EMPCODE_TO_USERID;
+module.exports.capSessionDuration = capSessionDuration;
