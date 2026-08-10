@@ -18,10 +18,14 @@
 //      so the same fixture data can be run against both, proving (a) the
 //      fixture reproduces the real bug on old logic, and (b) the new code
 //      actually fixes it.
-//   3. Two fixture shapes: "Neha" (orphan + real final, same pattern as
-//      the actual 2026-08-10 incident) and "Souvik" (triple-overlap: two
+//   3. Four fixture shapes: "Neha" (orphan + real final, same pattern as
+//      the actual 2026-08-10 incident), "Souvik" (triple-overlap: two
 //      stretched orphans plus a normal, never-flagged doc that's the true
-//      final segment).
+//      final segment), "Ridhi/Taskiya" (single flagged doc, unchanged
+//      behavior), and "read-failure" (the per-user same-day read itself
+//      throws for one user -- proves that user's flagged docs fail safe
+//      to manual review, untouched, while an unrelated user in the same
+//      batch still closes normally).
 //
 // Run with: node test/bugc-de-overlap.test.js
 'use strict';
@@ -37,6 +41,13 @@ const projectRoot = path.join(__dirname, '..');
 // between cases.
 let currentStore = new Map(); // id -> plain data object
 
+// Set to a userId before a case to make the mock getDocs throw specifically
+// on that user's per-user "read this user's whole day" query (the one
+// closeReconciliationNeededSessions issues with a userId==+date== filter --
+// the only query in the function shaped that way, so this can't accidentally
+// intercept the top-level flagged-docs scan). Reset to null after use.
+let failGetDocsForUserId = null;
+
 function collection(_db, name) { return { name }; }
 function where(field, op, value) { return { field, op, value }; }
 function query(collRef, ...conditions) { return { collRef, conditions }; }
@@ -48,6 +59,10 @@ function matches(data, cond) {
   throw new Error(`mock getDocs: unsupported operator ${cond.op}`);
 }
 async function getDocs(q) {
+  const userIdCond = q.conditions.find((c) => c.field === 'userId' && c.op === '==');
+  if (failGetDocsForUserId && userIdCond && userIdCond.value === failGetDocsForUserId) {
+    throw new Error('simulated Firestore error (fixture): per-user same-day read failed');
+  }
   const docs = [];
   for (const [id, data] of currentStore) {
     if (q.conditions.every((c) => matches(data, c))) {
@@ -99,7 +114,9 @@ const NEHA_USER_ID = EMPCODE_TO_USERID['0015'];
 const NEHA_EMPCODE = '0015';
 const SOUVIK_USER_ID = EMPCODE_TO_USERID['011'];
 const SOUVIK_EMPCODE = '011';
-assert.ok(NEHA_USER_ID && SOUVIK_USER_ID, 'fixture depends on real EMPCODE_TO_USERID entries still existing');
+const RIDHI_USER_ID = EMPCODE_TO_USERID['0022'];
+const RIDHI_EMPCODE = '0022';
+assert.ok(NEHA_USER_ID && SOUVIK_USER_ID && RIDHI_USER_ID, 'fixture depends on real EMPCODE_TO_USERID entries still existing');
 
 const FIXTURE_DATE = '2099-01-01'; // never a real reconciled date, never colliding with RECONCILED_DATES
 
@@ -331,10 +348,74 @@ async function runSingleDocCase() {
   check('closedBiometric counts it, deoverlapped stays 0', result.closedBiometric === 1 && result.deoverlapped === 0);
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// CASE 4: the per-user "read this user's whole day" query itself throws
+// (a real Firestore error, not an eTimeOffice/punch-data failure) for ONE
+// user in the batch. Must fail safe: that user's flagged docs are left
+// completely untouched and routed to needsManualReview -- NOT closed
+// independently (which would silently reintroduce Bug C), NOT counted as
+// a write failure (nothing was ever attempted). A different, unrelated
+// user processed in the same run must be entirely unaffected.
+// ═══════════════════════════════════════════════════════════════════════
+async function runReadFailureCase() {
+  console.log('\n=== CASE 4: per-user same-day read fails for one user, others unaffected ===');
+  currentStore = new Map([
+    ['fx-failread-orphan', {
+      userId: NEHA_USER_ID, date: FIXTURE_DATE, inProgress: true, reconciliationNeeded: true,
+      sessionStartMs: hhmmToEpoch(FIXTURE_DATE, '10:11'), startTime: '10:11', desc: 'Parea Cafe',
+    }],
+    ['fx-failread-final', {
+      userId: NEHA_USER_ID, date: FIXTURE_DATE, inProgress: true, reconciliationNeeded: true,
+      sessionStartMs: hhmmToEpoch(FIXTURE_DATE, '14:10'), startTime: '14:10', desc: 'Parea Cafe',
+    }],
+    ['fx-failread-otheruser', {
+      userId: RIDHI_USER_ID, date: FIXTURE_DATE, inProgress: true, reconciliationNeeded: true,
+      sessionStartMs: hhmmToEpoch(FIXTURE_DATE, '10:54'), startTime: '10:54', desc: 'Parea Cafe',
+    }],
+  ]);
+  currentPunchRecords = [
+    { Empcode: NEHA_EMPCODE, Name: 'Neha (fixture)', INTime: '10:11', OUTTime: '19:14' },
+    { Empcode: RIDHI_EMPCODE, Name: 'Ridhi (fixture)', INTime: '10:54', OUTTime: '19:12' },
+  ];
+
+  failGetDocsForUserId = NEHA_USER_ID; // simulate the failure on this user only
+  let result;
+  try {
+    result = await closeReconciliationNeededSessions({}, FIXTURE_DATE, true);
+  } finally {
+    failGetDocsForUserId = null; // never leak into later cases
+  }
+  console.log('  write report:', JSON.stringify(result));
+
+  const orphan = currentStore.get('fx-failread-orphan');
+  const final = currentStore.get('fx-failread-final');
+  const otherUser = currentStore.get('fx-failread-otheruser');
+  console.log(`  failed-user orphan: inProgress:${orphan.inProgress} reconciliationNeeded:${orphan.reconciliationNeeded} endTime:${orphan.endTime}`);
+  console.log(`  failed-user final:  inProgress:${final.inProgress} reconciliationNeeded:${final.reconciliationNeeded} endTime:${final.endTime}`);
+  console.log(`  other user:         inProgress:${otherUser.inProgress} endTime:${otherUser.endTime}`);
+
+  check('failed-user orphan left completely untouched (still inProgress, still flagged, no endTime)', orphan.inProgress === true && orphan.reconciliationNeeded === true && orphan.endTime === undefined);
+  check('failed-user final left completely untouched (still inProgress, still flagged, no endTime)', final.inProgress === true && final.reconciliationNeeded === true && final.endTime === undefined);
+  check('neither failed-user doc was independently closed at biometric OUT (would silently reintroduce Bug C)', orphan.endTime !== '19:14' && final.endTime !== '19:14');
+
+  const review = result.needsManualReview;
+  const orphanReview = review.find((r) => r.id === 'fx-failread-orphan');
+  const finalReview = review.find((r) => r.id === 'fx-failread-final');
+  check('both failed-user docs routed to needsManualReview', !!orphanReview && !!finalReview);
+  check('manual-review reason correctly identifies the per-user read failure', !!orphanReview && orphanReview.reason.includes('could not read this user') && !!finalReview && finalReview.reason.includes('could not read this user'));
+
+  check('unrelated user in the same batch closes normally, unaffected', otherUser.inProgress === false && otherUser.endTime === '19:12');
+  check('read failure is not miscounted as a write failure (nothing was ever attempted)', result.failed === 0);
+  check('no de-overlap credited for the failed user (it never got that far)', result.deoverlapped === 0);
+  check('closedBiometric counts only the unaffected user', result.closedBiometric === 1);
+  check('scanned counts all 3 flagged docs across both users', result.scanned === 3);
+}
+
 (async () => {
   await runNehaCase();
   await runSouvikCase();
   await runSingleDocCase();
+  await runReadFailureCase();
 
   console.log(`\n${passCount} passed, ${failCount} failed`);
   if (failCount > 0) process.exit(1);
