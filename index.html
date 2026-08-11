@@ -7698,7 +7698,7 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
 }
 
 // ═══════════════════════════════════════════════════════
-// V14.3.33: ORPHANED-SESSION-ON-LOAD WARNING
+// V14.3.33: ORPHANED-SESSION-ON-LOAD, upgraded V16.3 to auto-close.
 // The watchdog (checkTimerHealth) only fires when a timer is RUNNING and its
 // heartbeat goes stale -- it needs a running timer to watch. A page RELOAD
 // (every deploy triggers one via the version banner) starts with NO running
@@ -7707,11 +7707,27 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
 // exactly this to Taskiya and Ridhi -- each lost a near-full day, only
 // discovered the next morning. This closes that gap: after restoreTimerState()
 // has had its chance to resume a session, if it didn't AND Firestore still
-// shows one inProgress for this user, tell them. Read-only -- never
-// auto-restarts or auto-closes anything; the user decides.
+// shows one inProgress for this user, act on it.
 // Uses the SAME "is a timer running" test as the watchdog (timerRunning) and
 // the same STALE_HEARTBEAT_MS/extractLastSeenMs as the watchdog and the
 // phantom-LIVE fix, so all three agree on what "stale" means.
+//
+// V16.3 (Bug B fix, 2026-08-11): confirmed against real usage that the
+// task-switch path itself (startTimerWithPlan/closeCurrentSessionNow) was
+// never the problem -- it already closes cleanly, immediately, every time.
+// The actual gap is purely cross-context: a session abandoned when a tab
+// froze/reloaded/closed, only found here, later, by a fresh load. Advisory-
+// only (a dismissible banner) left that orphan open indefinitely if the
+// person just started a new task anyway -- exactly the pattern that
+// produced Bug C's same-day duplicate-flag cases. This now auto-closes
+// whatever survives the existing fresh-heartbeat gate below (UNCHANGED --
+// same STALE_HEARTBEAT_MS, no new/shorter threshold), capped at that
+// session's own LAST HEARTBEAT, never at "now" -- discovery can happen
+// hours or days later, and capping at now would fabricate work time that
+// never happened. Anything whose time boundary can't be resolved
+// truthfully (no heartbeat signal, no start signal, or a malformed
+// hb<=start ordering) falls back to the banner instead of being guessed
+// at -- same discipline as resolveStartMsStrict() in api/biometric-sync.js.
 // ═══════════════════════════════════════════════════════
 async function checkForOrphanedSessionOnLoad() {
   if (!currentUser?.id) return; // not logged in -- no-op
@@ -7728,11 +7744,15 @@ async function checkForOrphanedSessionOnLoad() {
     return; // fails safe: never warn on an unverified read
   }
 
-  // V14.3.33: only flag heartbeats that are genuinely stale (or never seen),
-  // same STALE_HEARTBEAT_MS/extractLastSeenMs the watchdog and phantom-LIVE
-  // use. A doc with a FRESH heartbeat here is far more likely a legitimate
-  // session running live on another device/tab right now -- warning on that
-  // would be a false "orphan" alarm for something that isn't actually dead.
+  // V14.3.33: only consider heartbeats that are genuinely stale (or never
+  // seen), same STALE_HEARTBEAT_MS/extractLastSeenMs the watchdog and
+  // phantom-LIVE use, UNCHANGED by the V16.3 upgrade below. A doc with a
+  // FRESH heartbeat here is far more likely a legitimate session running
+  // live on another device/tab right now (or -- for this team specifically
+  // -- a session that's seconds into a normal fast project switch) --
+  // acting on that would be a false "orphan" alarm for something that
+  // isn't actually dead. This gate is what makes the auto-close below
+  // structurally unreachable for anything inside the 5-minute window.
   const now = Date.now();
   const orphans = [];
   snap.forEach(doc => {
@@ -7744,14 +7764,88 @@ async function checkForOrphanedSessionOnLoad() {
   });
   if (orphans.length === 0) return;
 
-  // Report the most recently active one if there's more than one.
-  orphans.sort((a, b) => (extractLastSeenMs(b) || 0) - (extractLastSeenMs(a) || 0));
-  const o = orphans[0];
-  const hbMs = extractLastSeenMs(o);
-  const staleMin = hbMs ? Math.round((now - hbMs) / 60000) : null;
+  // V16.3: try to auto-close every qualifying orphan (not just the newest
+  // -- leaving older stale ones untouched would be inconsistent with the
+  // goal of reducing what the server-side sweep has to catch). Whatever
+  // can't be closed truthfully falls through to the pre-existing banner.
+  const closed = [];
+  const stillNeedsBanner = [];
+  for (const o of orphans) {
+    const result = await tryAutoCloseOrphan(o);
+    if (result) closed.push(result); else stillNeedsBanner.push(o);
+  }
 
-  console.warn(`[orphan-check] ${orphans.length} orphaned inProgress session(s) found on load; newest: ${o.projectName || 'a project'} stale ${staleMin == null ? '?' : staleMin}m`);
-  showOrphanSessionBanner(o, orphans.length, staleMin);
+  if (closed.length > 0) {
+    console.log(`[orphan-check] auto-closed ${closed.length} abandoned session(s), capped at last heartbeat.`);
+    showNotificationToast('⏸ Abandoned session(s) closed',
+      `${closed.length} session${closed.length > 1 ? 's' : ''} from an earlier tab that stopped responding ${closed.length > 1 ? 'were' : 'was'} closed at their last known activity. Please verify in Time Report.`,
+      'warning');
+  }
+
+  if (stillNeedsBanner.length > 0) {
+    stillNeedsBanner.sort((a, b) => (extractLastSeenMs(b) || 0) - (extractLastSeenMs(a) || 0));
+    const o = stillNeedsBanner[0];
+    const hbMs = extractLastSeenMs(o);
+    const staleMin = hbMs ? Math.round((now - hbMs) / 60000) : null;
+    console.warn(`[orphan-check] ${stillNeedsBanner.length} orphaned inProgress session(s) could not be auto-closed (unresolvable time boundary); newest: ${o.projectName || 'a project'} stale ${staleMin == null ? '?' : staleMin}m`);
+    showOrphanSessionBanner(o, stillNeedsBanner.length, staleMin);
+  }
+}
+
+// V16.3: auto-closes ONE orphan, capped at its own last heartbeat -- never
+// at "now" (see the header above). Returns {id, durationMins, capped} on a
+// successful close, or null if the time boundary can't be resolved
+// truthfully (deferring to the banner) or the write itself fails (EOD-
+// close will still catch it eventually, same reasoning
+// closeCurrentSessionNow() already uses for its own write failures).
+async function tryAutoCloseOrphan(data) {
+  const hbMs = extractLastSeenMs(data);
+  const startMs = typeof data.sessionStartMs === 'number'
+    ? data.sessionStartMs
+    : (data.date && data.startTime ? new Date(`${data.date}T${data.startTime}:00+05:30`).getTime() : null);
+
+  if (hbMs == null || startMs == null || hbMs <= startMs) {
+    console.warn(`[orphan-check] ${data.id} has an unresolvable time boundary (hb:${hbMs} start:${startMs}) -- deferring to the banner, not guessing.`);
+    return null;
+  }
+
+  const sessionSecs = Math.floor((hbMs - startMs) / 1000);
+  const { durationMins, capped } = capSessionDuration(sessionSecs);
+  const endTime = new Date(hbMs).toLocaleTimeString('en-IN', {
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: 'Asia/Kolkata', // pinned explicitly, same as closeCurrentSessionNow()
+  });
+
+  // Detach-before-write, same discipline as closeCurrentSessionNow() --
+  // structurally a no-op here today (this tab isn't tracking ANY session
+  // when this runs, timerRunning is false, so there's nothing attached to
+  // this specific orphan to detach) -- included anyway for consistency and
+  // to protect against a future call-site change assuming otherwise.
+  detachSessionCloseListener();
+
+  const updates = {
+    inProgress: false,
+    endTime,
+    durationMins,
+    ts: hbMs, // last-known-alive moment, not discovery time
+    desc: `${data.desc || 'Work on project'} (auto-closed on load — capped at last heartbeat ${endTime})`,
+    recovered: true,
+    recoveredAt: new Date().toISOString(),
+    reconciliationNeeded: false, // real end now known -- same class of fix as the separately-logged Angana-cleanup item, for this one call site only
+    ...(capped ? { autoCapped: true } : {}),
+  };
+
+  try {
+    await db.collection('timeLogs').doc(data.id).update(updates);
+  } catch (e) {
+    console.error(`[orphan-check] auto-close write failed for ${data.id} (EOD-close will still catch it eventually):`, e.message);
+    return null;
+  }
+
+  const idx = timeLogs.findIndex((l) => l.id === data.id);
+  if (idx >= 0) timeLogs[idx] = { ...timeLogs[idx], ...updates };
+
+  return { id: data.id, durationMins, capped };
 }
 
 function showOrphanSessionBanner(orphan, count, staleMin) {
