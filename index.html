@@ -1184,7 +1184,12 @@ const firebaseConfig = {
 };
 
 firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+// V16.2 (Bug A stage B): `let`, not `const` -- purgePendingWritesOnLockout()
+// reassigns this to a fresh instance after terminate()+clearPersistence()
+// on a confirmed-stale tab, so every db.xxx() call site in the file (reads
+// especially) keeps working against a live instance instead of throwing
+// "client has already been terminated" for the rest of this tab's life.
+let db = firebase.firestore();
 // V14.2.9: Cache bypassed via {source:'server'} on all reads — see loadData()
 
 // ═══════════════════════════════════════════════════════
@@ -1483,6 +1488,7 @@ async function syncChangedDocs(diffs) {
 // worker-first, plain-interval fallback), not a bare unconditional
 // setInterval -- see that function, further down, for why.
 async function backstopFullSave() {
+  if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
   if (!dataLoaded || !currentUser) return;
   if (window._saveInProgress) return; // don't race a normal save cycle
   window._saveInProgress = true;
@@ -1519,6 +1525,7 @@ async function backstopFullSave() {
 
 // V12 Granular Save Functions
 async function saveTimeLog(log) {
+  if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
   if (!useGranularSaves) return saveData();
   try {
     // V14.3.21: {merge:true} -- this is the heartbeat's main write path
@@ -1538,6 +1545,7 @@ async function saveTimeLog(log) {
 }
 
 async function savePlanEntry(entry) {
+  if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
   if (!useGranularSaves) return saveData();
   try {
     await db.collection("planEntries").doc(entry.id).set({
@@ -1552,6 +1560,7 @@ async function savePlanEntry(entry) {
 }
 
 async function saveProject(project) {
+  if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
   if (!useGranularSaves) return saveData();
   try {
     await db.collection("projects").doc(project.id).set({
@@ -2081,11 +2090,82 @@ async function checkForNewVersion() {
 const VERSION_GATE_COUNTDOWN_SECS = 60; // tunable
 const VERSION_GATE_MAX_AUTO_ATTEMPTS = 2;
 const VERSION_GATE_ATTEMPTS_KEY = 'versionGateReloadAttempts';
-let versionGateModalShown = false;
+
+// V16.2 (Bug A stage B): staleVersionLockout -- set exactly once, only from
+// inside showVersionGateModal()'s manualMode branch below, which is only
+// reachable from checkForNewVersion()'s CONFIRMED `data.version !==
+// APP_VERSION` branch (never its catch block, which fails open on a
+// transient fetch error). That reachability is what makes "never lock on
+// a check failure" true by construction -- there's no separate condition
+// elsewhere that has to stay correct for that guarantee to hold. Checked
+// by saveData()/backstopFullSave()/heartbeatSession()/saveTimeLog()/
+// savePlanEntry()/saveProject() -- every write entry point in the file,
+// including the granular paths that bypass saveData() when
+// useGranularSaves is true.
+let staleVersionLockout = false;
+
+// V16.2: tracks what's CURRENTLY rendered ('countdown' | 'lockout' | null),
+// not just "was anything ever shown." The old versionGateModalShown
+// boolean short-circuited EVERY call after the first, forever, within a
+// single tab's lifetime -- meaning if the first mismatch landed in
+// countdown mode and its own auto-reload never actually completed (tab
+// backgrounded at the wrong moment, a stuck navigation), the tab could
+// never progress to manualMode/lockout no matter how many more mismatches
+// checkForNewVersion() went on to detect, because every subsequent call
+// returned immediately without re-evaluating anything. Tracking the
+// desired vs. currently-shown MODE (and whether the overlay is still
+// actually in the DOM) lets a later call escalate countdown -> lockout
+// within the same tab lifetime, while still not flickering/recreating an
+// already-correct overlay.
+let versionGateMode = null;
 
 function getVersionGateAttempts() {
   const n = parseInt(sessionStorage.getItem(VERSION_GATE_ATTEMPTS_KEY), 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+// V16.2: discards this tab's already-queued-but-unsent Firestore mutations
+// when lockout engages. Spike-confirmed (2026-08-11, against a live
+// warmed-up instance, server-verified) that terminate() + clearPersistence()
+// -- the compat-SDK-10.7.1 instance method, NOT the modular
+// clearIndexedDbPersistence() function, which doesn't exist on this
+// surface -- genuinely discards a pending write rather than silently
+// letting it flush later. Without this, a full-array rewrite handed to
+// the SDK even seconds before lockout would still be sitting in the local
+// queue, survive a reload by design, and flush its stale content onto the
+// fresh tab regardless of the lockout flag.
+//
+// Reassigns the top-level `db` to a fresh instance once terminate()
+// succeeds, unconditionally -- every db.xxx() call site in this file
+// (reads especially, e.g. the dashboard, admin views) would otherwise
+// throw "client has already been terminated" for the rest of this tab's
+// life, which is a far worse outcome than "reads still work, writes stay
+// blocked by the lockout guards regardless of purge success." Deliberately
+// does NOT re-enable persistence on the fresh instance: this tab is known
+// stale and write-locked, so there's no reason to let it durably re-queue
+// anything new even as defense in depth.
+//
+// Failure in either step leaves the tab NO WORSE than a plain lockout
+// (writes are already blocked by the flag, independent of db's state) --
+// logged loudly, never silently swallowed, since a purge that thinks it
+// worked but didn't would be more dangerous than no purge at all.
+async function purgePendingWritesOnLockout() {
+  let terminated = false;
+  try {
+    await db.terminate();
+    terminated = true;
+  } catch (e) {
+    console.error('[lockout] terminate() failed -- leaving the original Firestore instance in place; writes remain blocked by the lockout guards regardless:', e.message);
+  }
+  if (!terminated) return; // unclear instance state -- don't touch `db` further
+
+  db = firebase.firestore(); // fresh instance, so reads keep working for the rest of this tab's life
+  try {
+    await db.clearPersistence();
+    console.log('[lockout] pending write queue purged (terminate + clearPersistence both succeeded).');
+  } catch (e) {
+    console.error('[lockout] clearPersistence() failed -- a write queued BEFORE lockout may still flush once this fresh instance reconnects; NEW writes remain blocked by the lockout guards regardless:', e.message);
+  }
 }
 
 function forceReloadToVersion(remoteVersion) {
@@ -2101,9 +2181,31 @@ function forceReloadToVersion(remoteVersion) {
 }
 
 function showVersionGateModal(remoteVersion) {
-  if (versionGateModalShown) return; // already showing, don't recreate/flicker it
-  versionGateModalShown = true;
   const manualMode = getVersionGateAttempts() >= VERSION_GATE_MAX_AUTO_ATTEMPTS;
+  const desiredMode = manualMode ? 'lockout' : 'countdown';
+  const overlayInDom = !!document.getElementById('versionGateOverlay');
+
+  // V16.2: re-evaluates every call instead of a one-shot "already shown"
+  // flag -- already-correct-and-present is still a no-op (no flicker), but
+  // a call that finds the overlay missing (e.g. this is the first call
+  // reaching lockout after an earlier countdown call already ran) or a
+  // mode that needs to escalate (countdown -> lockout, once attempts hit
+  // the cap) proceeds and rebuilds. This is also what makes the lockout
+  // indicator "re-display on every tab-visible/focus event" -- both of
+  // those listeners already call checkForNewVersion() unconditionally,
+  // which calls back in here every time; the old versionGateModalShown
+  // flag was what silently swallowed all of those after the first.
+  if (versionGateMode === desiredMode && overlayInDom) return;
+
+  const existing = document.getElementById('versionGateOverlay');
+  if (existing) existing.remove(); // replacing an active countdown with the escalated lockout view
+  versionGateMode = desiredMode;
+
+  if (manualMode && !staleVersionLockout) {
+    staleVersionLockout = true;
+    console.warn('[lockout] confirmed stale past the auto-reload attempt cap -- write paths are now paused until reload.');
+    purgePendingWritesOnLockout(); // fire-and-forget; see its own header for why a failure here still leaves writes blocked
+  }
 
   const overlay = document.createElement('div');
   overlay.id = 'versionGateOverlay';
@@ -2117,10 +2219,13 @@ function showVersionGateModal(remoteVersion) {
     // the new version -- that's not a transient race anymore, it's most
     // likely a stale cached asset a JS-triggered reload can't bypass, so
     // stop looping and hand the person a manual, browser-level way out.
+    // V16.2: copy strengthened to say plainly that saves are paused, not
+    // just "you're on an old version" -- the stakes changed once this also
+    // means data stopped persisting, not just that the UI looks outdated.
     box.innerHTML = `<div style="font-size:32px;margin-bottom:10px;">⚠️</div>` +
-      `<div style="font-weight:700;font-size:16px;margin-bottom:10px;">Still on an old version</div>` +
-      `<div style="margin-bottom:14px;line-height:1.5;">Automatic reload didn't pick up the new version after ${VERSION_GATE_MAX_AUTO_ATTEMPTS} tries. Please:</div>` +
-      `<div style="text-align:left;line-height:1.7;">1. Close <b>every</b> SQUARE Office tab/window<br>2. Reopen the site, or press <b>Ctrl+Shift+R</b> (<b>Cmd+Shift+R</b> on Mac) to hard-refresh</div>`;
+      `<div style="font-weight:700;font-size:16px;margin-bottom:10px;">Still on an old version — your changes are NOT being saved</div>` +
+      `<div style="margin-bottom:14px;line-height:1.5;">Automatic reload didn't pick up the new version after ${VERSION_GATE_MAX_AUTO_ATTEMPTS} tries, so saving has been paused on this tab to protect your data. Please:</div>` +
+      `<div style="text-align:left;line-height:1.7;">1. Close <b>every</b> SQUARE Office tab/window<br>2. Reopen the site, or press <b>Ctrl+Shift+R</b> (<b>Cmd+Shift+R</b> on Mac) to hard-refresh<br>3. Reload to resume saving</div>`;
   } else {
     box.innerHTML = `<div style="font-size:32px;margin-bottom:10px;">🔄</div>` +
       `<div style="font-weight:700;font-size:16px;margin-bottom:10px;">A new version of SQUARE is available</div>` +
@@ -2149,7 +2254,11 @@ function showVersionGateModal(remoteVersion) {
 // V14.3.40: catch a backgrounded stale tab within seconds of refocus rather
 // than waiting out the tick cadence below -- cheap and safe to call any
 // time (checkForNewVersion() is a no-op on match/fail, and independent of
-// login state).
+// login state). V16.2: this is also what re-displays the lockout indicator
+// on a backgrounded-then-refocused locked-out tab -- checkForNewVersion()
+// re-detects the same confirmed mismatch and calls back into
+// showVersionGateModal(), which (per its own comment above) no longer
+// silently no-ops on a call after the first.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') checkForNewVersion();
 });
@@ -2345,6 +2454,7 @@ function detachSessionCloseListener() {
 }
 
 function heartbeatSession() {
+  if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
   if (sessionExternallyClosed) return; // V14.3.48: reopen guard -- don't resurrect a session the server already finalized
   if (awaitingWakeVerification) return; // V16: clobber guard -- in-memory state is unverified after a >=5min silence, don't trust it yet
@@ -2469,6 +2579,7 @@ async function commitInChunks(collectionName, items, buildDocData) {
 }
 
 async function saveData() {
+  if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
   if (!dataLoaded) {
     console.error('⏸️ SAVE BLOCKED - Data not loaded yet!');
     // V14.2.26: No alert during autoSave — silent skip
