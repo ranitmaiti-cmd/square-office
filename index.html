@@ -1479,7 +1479,9 @@ async function syncChangedDocs(diffs) {
 // Deliberately reuses the ORIGINAL commitInChunks() unchanged for the write
 // part -- this is exactly the unconditional full-array write saveData()
 // used to do on every tick; here it just runs on a 5-minute cadence.
-let backstopFullSaveInterval = null;
+// V16.2: scheduling now lives in startBackstopMonitor() (reliable-tick-
+// worker-first, plain-interval fallback), not a bare unconditional
+// setInterval -- see that function, further down, for why.
 async function backstopFullSave() {
   if (!dataLoaded || !currentUser) return;
   if (window._saveInProgress) return; // don't race a normal save cycle
@@ -1900,6 +1902,15 @@ function initReliableTickWorker() {
       // 30-min hard-background test), so the sweep rides it too now,
       // gated to admins only inside the function itself.
       if (workerTickCount % 5 === 0) finalizeStaleHeartbeatSessionsAllUsers();
+      // V16.2 (Bug A stage): backstopFullSave() used to run on its own
+      // standalone setInterval (see the old wiring this replaced, just
+      // above periodicSaveInterval further down) -- exactly the kind of
+      // plain main-thread timer this whole worker exists to route around.
+      // Every OTHER low-frequency sweep in this handler already rides the
+      // 5th tick (~5min, matching backstop's original cadence); this is
+      // the same pattern, not a new one. See startBackstopMonitor() for
+      // the fallback path when the worker itself never initializes.
+      if (workerTickCount % 5 === 0) backstopFullSave();
     };
     worker.onerror = (e) => {
       console.error('Reliable tick worker error, falling back to main-thread intervals:', e.message);
@@ -2189,6 +2200,23 @@ function startVersionCheckMonitor() {
   initReliableTickWorker();
   if (reliableTickWorkerActive) return; // worker's onmessage now calls checkForNewVersion() every tick (see initReliableTickWorker)
   versionCheckInterval = setInterval(checkForNewVersion, 60 * 1000);
+}
+
+// V16.2 (Bug A stage): replaces the old standalone backstopFullSaveInterval
+// (a plain setInterval, unconditional, independent of the reliable-tick
+// worker -- exactly the throttling exposure the worker exists to close).
+// Same shape as startVersionCheckMonitor() immediately above: try the
+// worker first, and only fall back to a plain interval if the worker
+// itself never initialized -- losing backstop coverage entirely on worker
+// failure would be worse than the throttling risk this is meant to fix,
+// since it's still the only drift-recovery net until it's made diff-based
+// (a separate, later change).
+let backstopFullSaveInterval = null;
+function startBackstopMonitor() {
+  if (backstopFullSaveInterval) clearInterval(backstopFullSaveInterval);
+  initReliableTickWorker();
+  if (reliableTickWorkerActive) return; // worker's onmessage now calls backstopFullSave() every 5th tick (see initReliableTickWorker)
+  backstopFullSaveInterval = setInterval(backstopFullSave, 5 * 60 * 1000);
 }
 
 function upsertTimeLog(log) {
@@ -3370,6 +3398,9 @@ loadData().then(async () => {
         // V14.3.19: Start deploy version-check monitor
         startVersionCheckMonitor();
 
+        // V16.2: Start low-frequency full-save backstop monitor
+        startBackstopMonitor();
+
         // V14.2.26: Hourly stale cleanup — guarded against compound intervals on re-login
         if (!window._staleCleanupInterval) {
           window._staleCleanupInterval = setInterval(() => {
@@ -3465,6 +3496,9 @@ async function doLogin(){
 
     // V14.3.19: Start deploy version-check monitor
     startVersionCheckMonitor();
+
+    // V16.2: Start low-frequency full-save backstop monitor
+    startBackstopMonitor();
 
     // V14.2.26: Hourly stale cleanup — guarded against compound intervals
     if (!window._staleCleanupInterval) {
@@ -8481,13 +8515,10 @@ periodicSaveInterval = setInterval(() => {
   saveData();
 }, 30000); // Every 30 seconds
 
-// V15: low-frequency full-save safety net, independent of the 30s diff
-// cycle above -- see backstopFullSave() for why this stays even though the
-// diff engine is comprehensive by construction.
-backstopFullSaveInterval = setInterval(() => {
-  backstopFullSave();
-}, 5 * 60 * 1000); // Every 5 minutes -- tighter risk floor; cost is trivial
-// once diffMode is 'primary' since this is the only bulk write left.
+// V16.2: backstop scheduling moved to startBackstopMonitor(), called
+// alongside startVersionCheckMonitor() at both login call sites -- see
+// that function for why (reliable-tick-worker first, plain-interval
+// fallback only if the worker never initializes).
 
 // Save before page unload
 window.addEventListener('beforeunload', (e) => {
