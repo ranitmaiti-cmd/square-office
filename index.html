@@ -1239,7 +1239,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-10.1'; // V16.1: Bug C fix -- EOD-close de-overlaps same-day duplicate flagged sessions instead of independently stretching each to biometric OUT
+const APP_VERSION = '2026-08-10.2'; // V16.2: Bug A stage A -- backstopFullSave() moved onto the reliable tick worker's 5th tick, closing the throttling asymmetry that let a stale tab clobber via the old standalone setInterval
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
