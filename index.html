@@ -1244,7 +1244,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-12.1'; // V16.2: Bug A stage B -- staleVersionLockout write-lockout + IndexedDB queue purge on confirmed-stale version, closing the gap where detection never stopped anything from writing
+const APP_VERSION = '2026-08-12.2'; // V16.3: Bug B fix -- checkForOrphanedSessionOnLoad() upgraded from advisory to acting, auto-closing stale cross-context orphans capped at last heartbeat
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
