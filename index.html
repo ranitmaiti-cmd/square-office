@@ -8016,6 +8016,31 @@ async function restoreTimerState() {
     // simple accidental reload. One number now governs every "stop trusting
     // raw elapsed time" decision across the app.
     if (hours >= MAX_SESSION_HOURS) {
+      // V16.3 (Glitch 3): before prompting for a self-report, check whether
+      // the SPECIFIC session this local state refers to is already resolved
+      // server-side -- if so, this is stale local residue (the tab loaded,
+      // then went stale, unaware anything else ever closed it), not a
+      // genuine pending self-report, and prompting would create a duplicate
+      // entry alongside the already-correct one (Taskiya's 12 Aug 510m
+      // duplicate, exactly this bug). Only suppress on POSITIVE
+      // confirmation (doc exists AND inProgress:false) -- any other
+      // outcome (doc missing, fetch fails, no sessionLogId on this local
+      // state at all) falls through to the existing prompt behavior
+      // unchanged. Same fail-closed principle as the Stage 0 delete guard:
+      // only act on a confirmed signal, default to asking a human rather
+      // than guessing when uncertain either way.
+      if (state.sessionLogId) {
+        try {
+          const snap = await db.collection('timeLogs').doc(state.sessionLogId).get({ source: 'server' });
+          if (snap.exists && snap.data().inProgress === false) {
+            console.log(`[orphan-check] local timer state for ${state.sessionLogId} is stale -- already resolved server-side, discarding without prompting`);
+            localStorage.removeItem('timerState');
+            return;
+          }
+        } catch (e) {
+          console.warn('[orphan-check] could not verify server state for orphaned local timer, falling through to prompt:', e.message);
+        }
+      }
       orphanTimerState = state;
       showOrphanRecoveryModal(state, Math.floor(hours));
       return; // Don't restore — wait for user decision
