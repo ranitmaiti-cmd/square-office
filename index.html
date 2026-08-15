@@ -7231,6 +7231,18 @@ function closeCurrentSessionNow(descSuffix) {
     durationMins: oldMins,
     desc: oldDesc,
     ts: closeNow,
+    // V16.3: this is a genuine, clean close -- the session's real end is
+    // now known, so it no longer needs EOD-close/reconciliation-queue
+    // treatment even if it was flagged stale at some earlier point before
+    // the person came back and switched tasks (or logged out) normally.
+    // Without this, a doc that closes cleanly through this ordinary path
+    // can stay stuck showing as "needs reconciliation" indefinitely --
+    // the Angana residue this fixes. Only touches THIS write, which only
+    // ever fires for a session that's actually, definitively ending right
+    // now -- finalize-stale.js's flagging pass, the EOD-close, and Bug
+    // B's tryAutoCloseOrphan() are entirely separate code paths and are
+    // unaffected by this change.
+    reconciliationNeeded: false,
     ...(oldCapped ? { autoCapped: true } : {}),
   }).catch((e) => console.error('[closeCurrentSessionNow] close failed (EOD-close will still catch it eventually):', e.message));
 
@@ -7244,6 +7256,7 @@ function closeCurrentSessionNow(descSuffix) {
     timeLogs[oldIdx] = {
       ...timeLogs[oldIdx], inProgress: false, endTime: oldEndTime,
       durationMins: oldMins, desc: oldDesc, ts: closeNow,
+      reconciliationNeeded: false,
       ...(oldCapped ? { autoCapped: true } : {}),
     };
   }
