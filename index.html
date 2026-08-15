@@ -1476,6 +1476,34 @@ async function syncChangedDocs(diffs) {
   }
 }
 
+// V16.3 (Stage 0): backstop-local content snapshot, deliberately SEPARATE
+// from the shared docSnapshots/computeDocHash used by the rest of the diff
+// engine (diffCollection/syncChangedDocs/saveData's shadow logging) -- this
+// keeps the guard below fully isolated, touching no other write/diff path.
+// Needed because the shared hash includes updatedAt, which is harmless for
+// same-context comparisons (local array now vs. local array at last
+// snapshot -- both computed the same way) but breaks a cross-context one:
+// a local array item's updatedAt is only ever loaded, never refreshed by
+// this tab's own writes (buildDocData() returns a new spread object, it
+// never mutates the array item itself), so it goes stale relative to the
+// server's real updatedAt the moment this tab's first write for that doc
+// lands. Comparing a full hash (including updatedAt) against a freshly
+// server-fetched hash would then false-mismatch on write-metadata alone
+// for nearly every doc, making the guard skip every delete unconditionally
+// -- safe, but useless. Stripped here so the comparison is about genuine
+// content, not write-timestamp staleness.
+let backstopContentSnapshots = { timeLogs: new Map(), planEntries: new Map(), projects: new Map() };
+function computeContentHash(item) {
+  if (!item) return computeDocHash(item);
+  const { updatedAt, ...content } = item;
+  return computeDocHash(content);
+}
+function snapshotBackstopContent(name, array) {
+  const snap = new Map();
+  array.forEach(item => { if (item && item.id) snap.set(item.id, computeContentHash(item)); });
+  backstopContentSnapshots[name] = snap;
+}
+
 // Low-frequency safety net, independent of the diff logic above: forces a
 // COMPLETE rewrite of all three collections (bypassing hash comparison
 // entirely) and rebuilds every snapshot from that write, so any bug in the
@@ -1487,6 +1515,19 @@ async function syncChangedDocs(diffs) {
 // V16.2: scheduling now lives in startBackstopMonitor() (reliable-tick-
 // worker-first, plain-interval fallback), not a bare unconditional
 // setInterval -- see that function, further down, for why.
+// V16.3 (Stage 0): the delete-by-omission block below now verifies each
+// candidate against fresh server truth before deleting -- "missing from my
+// array" alone can't distinguish "I deleted it" from "my array is simply
+// stale and never learned about this doc." A candidate is only deleted if
+// the server's current content hash still matches what THIS TAB last
+// recorded for it: if nobody else has touched it since, its absence from
+// my array can only be something I did locally. If the hash has moved,
+// someone else has written to it since I last synced, and "missing from my
+// array" becomes unreliable -- skip rather than guess. A failed verify
+// fetch fails closed (skips the whole chunk, never deletes on an
+// unconfirmed state). This can only make the block MORE conservative than
+// before -- it can skip a delete the old code would have done, it can never
+// cause a new delete the old code wouldn't have.
 async function backstopFullSave() {
   if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
   if (!dataLoaded || !currentUser) return;
@@ -1498,14 +1539,62 @@ async function backstopFullSave() {
     const arrays = { timeLogs, planEntries, projects: projectsData };
     for (const name of names) {
       const seenIds = new Set(arrays[name].filter(i => i && i.id).map(i => i.id));
-      const toDelete = [];
-      docSnapshots[name].forEach((_hash, id) => { if (!seenIds.has(id)) toDelete.push(id); });
+      const candidateDeletes = [];
+      docSnapshots[name].forEach((_hash, id) => { if (!seenIds.has(id)) candidateDeletes.push(id); });
       const collectionName = COLLECTION_FIRESTORE_NAME[name];
-      for (let i = 0; i < toDelete.length; i += 450) {
-        const chunk = toDelete.slice(i, i + 450);
-        const batch = db.batch();
-        chunk.forEach(id => batch.delete(db.collection(collectionName).doc(id)));
-        try { await batch.commit(); } catch (e) { console.error(`❌ [backstop] ${name} delete chunk failed:`, e); }
+
+      if (candidateDeletes.length > 0) {
+        let freshDocs = null;
+        try {
+          freshDocs = await Promise.all(
+            candidateDeletes.map(id => db.collection(collectionName).doc(id).get({ source: 'server' }))
+          );
+        } catch (e) {
+          console.warn(`[backstop] verify fetch failed for ${name}, skipping ${candidateDeletes.length} candidate delete(s) this cycle (fail-closed):`, e.message);
+        }
+
+        const confirmedDeletes = [];
+        if (freshDocs) {
+          candidateDeletes.forEach((id, i) => {
+            const snap = freshDocs[i];
+            if (!snap.exists) {
+              // Already gone server-side (another tab's cycle beat us to
+              // it, a benign race) -- nothing to delete. The housekeeping
+              // deletes below are a defensive fallback only -- in the
+              // normal path, snapshotCollection()/snapshotBackstopContent()
+              // at the end of this function unconditionally rebuild both
+              // maps from the current array anyway (this id, being absent
+              // from the array, is naturally excluded from that rebuild
+              // regardless); this just keeps state clean if something
+              // later in this same cycle throws before that rebuild runs.
+              docSnapshots[name].delete(id);
+              backstopContentSnapshots[name].delete(id);
+              return;
+            }
+            const serverHash = computeContentHash({ ...snap.data(), id: snap.id });
+            const lastKnownHash = backstopContentSnapshots[name].get(id);
+            if (serverHash === lastKnownHash) {
+              confirmedDeletes.push(id);
+            } else {
+              // Missing local hash (never verified this doc before, e.g.
+              // it was added to the array after our last content
+              // snapshot) also lands here -- undefined never equals a real
+              // hash string, so an unrecognized candidate is skipped too,
+              // not deleted. Same defensive-fallback caveat as above: this
+              // set() is only observable if something later in this cycle
+              // throws before the end-of-function rebuild runs.
+              backstopContentSnapshots[name].set(id, serverHash);
+              console.warn(`[backstop] SKIPPED delete of ${id} (${name}) -- server content changed since last known state, cannot safely infer deletion intent`);
+            }
+          });
+        }
+
+        for (let i = 0; i < confirmedDeletes.length; i += 450) {
+          const chunk = confirmedDeletes.slice(i, i + 450);
+          const batch = db.batch();
+          chunk.forEach(id => batch.delete(db.collection(collectionName).doc(id)));
+          try { await batch.commit(); } catch (e) { console.error(`❌ [backstop] ${name} delete chunk failed:`, e); }
+        }
       }
     }
     const saveTimestamp = new Date().toISOString();
@@ -1515,6 +1604,9 @@ async function backstopFullSave() {
     snapshotCollection('timeLogs', timeLogs);
     snapshotCollection('planEntries', planEntries);
     snapshotCollection('projects', projectsData);
+    snapshotBackstopContent('timeLogs', timeLogs);
+    snapshotBackstopContent('planEntries', planEntries);
+    snapshotBackstopContent('projects', projectsData);
     console.log('🛟 [backstop] full-save sweep complete -- snapshots rebuilt');
   } catch (e) {
     console.error('❌ [backstop] full-save sweep failed:', e);
