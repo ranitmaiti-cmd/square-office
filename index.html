@@ -2211,6 +2211,12 @@ let staleVersionLockout = false;
 // already-correct overlay.
 let versionGateMode = null;
 
+// V16.3 (Stage E): wall-clock deadline for the active countdown, or null
+// when none is running. This is what makes the reload guarantee survive a
+// backgrounded/throttled tab -- see the check at the top of
+// showVersionGateModal() and the comment there for how it's used.
+let versionGateCountdownDeadlineAt = null;
+
 function getVersionGateAttempts() {
   const n = parseInt(sessionStorage.getItem(VERSION_GATE_ATTEMPTS_KEY), 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
@@ -2260,7 +2266,19 @@ async function purgePendingWritesOnLockout() {
   }
 }
 
+// V16.3 (Stage E): reentrancy guard -- now that the reload can be
+// triggered from two independent places (the visual countdown interval
+// AND the worker-tick deadline check in showVersionGateModal()), both
+// could plausibly fire close together (e.g. the interval completes right
+// as a worker tick also lands). Without this, a double-fire would
+// increment the attempts counter twice, pushing the tab toward manualMode
+// faster than the countdown's own single pass intends. location.href
+// starts navigation asynchronously, not instantly, so a genuine race
+// between two same-tick calls is possible without this guard.
+let versionGateReloadInFlight = false;
 function forceReloadToVersion(remoteVersion) {
+  if (versionGateReloadInFlight) return;
+  versionGateReloadInFlight = true;
   // V14.3.39: loop guard -- counts every auto-reload attempt this gate has
   // fired, in sessionStorage so it survives the reload it's about to cause
   // (same-tab navigation, not a new tab). If the version STILL mismatches
@@ -2273,6 +2291,25 @@ function forceReloadToVersion(remoteVersion) {
 }
 
 function showVersionGateModal(remoteVersion) {
+  // V16.3 (Stage E): if a countdown is already running and its deadline
+  // has passed, fire the reload right here, before anything else in this
+  // function -- this is what makes the countdown survive a backgrounded/
+  // throttled tab. checkForNewVersion() (which calls this) is guaranteed
+  // to run at least once every ~60s via the reliable tick worker on any
+  // ongoing mismatch, regardless of tab visibility (the same mechanism
+  // already trusted for heartbeat/EOD-check/backstop) -- so even if the
+  // visual 1s setInterval below never gets a chance to run at all, this
+  // check catches the expired deadline on the next worker-driven call,
+  // bounded to at most ~60s past the original countdown target instead of
+  // never. Must run before the early-return just below: that return
+  // short-circuits on "nothing changed since last call," which is exactly
+  // the state during an ordinary in-progress countdown.
+  if (versionGateCountdownDeadlineAt !== null && Date.now() >= versionGateCountdownDeadlineAt) {
+    versionGateCountdownDeadlineAt = null;
+    forceReloadToVersion(remoteVersion);
+    return;
+  }
+
   const manualMode = getVersionGateAttempts() >= VERSION_GATE_MAX_AUTO_ATTEMPTS;
   const desiredMode = manualMode ? 'lockout' : 'countdown';
   const overlayInDom = !!document.getElementById('versionGateOverlay');
@@ -2329,15 +2366,28 @@ function showVersionGateModal(remoteVersion) {
   document.body.appendChild(overlay);
 
   if (!manualMode) {
-    let secsLeft = VERSION_GATE_COUNTDOWN_SECS;
+    // V16.3 (Stage E): record a real deadline instead of just a decrementing
+    // counter -- the worker-tick check at the top of this function reads
+    // THIS, not secsLeft, so it's what actually guarantees the reload even
+    // if this setInterval itself never gets to run at all while backgrounded.
+    versionGateCountdownDeadlineAt = Date.now() + VERSION_GATE_COUNTDOWN_SECS * 1000;
     const countdownEl = document.getElementById('versionGateCountdown');
     const intervalId = setInterval(() => {
-      secsLeft--;
-      if (secsLeft <= 0) { clearInterval(intervalId); forceReloadToVersion(remoteVersion); return; }
+      // Recomputed from the deadline (real elapsed wall-clock time) each
+      // tick, not decremented -- keeps the DISPLAYED number accurate even
+      // if this interval itself is delayed for a stretch while still
+      // foregrounded-but-busy, rather than drifting from a naive countdown.
+      const secsLeft = Math.ceil((versionGateCountdownDeadlineAt - Date.now()) / 1000);
+      if (secsLeft <= 0) {
+        clearInterval(intervalId);
+        if (versionGateCountdownDeadlineAt !== null) { versionGateCountdownDeadlineAt = null; forceReloadToVersion(remoteVersion); }
+        return;
+      }
       if (countdownEl) countdownEl.textContent = String(secsLeft);
     }, 1000);
     document.getElementById('versionGateReloadBtn').addEventListener('click', () => {
       clearInterval(intervalId);
+      versionGateCountdownDeadlineAt = null;
       forceReloadToVersion(remoteVersion);
     });
   }
