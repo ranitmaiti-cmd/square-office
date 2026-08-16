@@ -1414,8 +1414,17 @@ async function syncChangedDocs(diffs) {
 
     // Deletes first, chunked the same way -- independent of the toWrite
     // chunking below so a delete failure can't block writes or vice versa.
-    for (let i = 0; i < toDelete.length; i += CHUNK_SIZE) {
-      const chunk = toDelete.slice(i, i + CHUNK_SIZE);
+    // V16.4 (Stage C): each candidate is confirmed against fresh server
+    // truth via the shared verifyAndFilterDeletes() guard (same algorithm
+    // proven live in backstopFullSave() since Stage 0) before being
+    // deleted -- "missing from the local array" alone is not sufficient
+    // grounds to delete here either. Anything not confirmed simply isn't
+    // in confirmedDeletes, so it's left out of this cycle's batch and
+    // stays in docSnapshots[name] -- diffCollection() will find it missing
+    // again next cycle and retry automatically, no separate retry queue.
+    const confirmedDeletes = await verifyAndFilterDeletes(name, toDelete);
+    for (let i = 0; i < confirmedDeletes.length; i += CHUNK_SIZE) {
+      const chunk = confirmedDeletes.slice(i, i + CHUNK_SIZE);
       const batch = db.batch();
       chunk.forEach(id => batch.delete(db.collection(collectionName).doc(id)));
       try {
@@ -1468,6 +1477,59 @@ function snapshotBackstopContent(name, array) {
   backstopContentSnapshots[name] = snap;
 }
 
+// V16.4 (Stage C): shared verify-then-delete guard, extracted from
+// backstopFullSave()'s original Stage 0 inline block so a second call site
+// (syncChangedDocs(), below) can reuse the exact same algorithm instead of
+// each maintaining its own copy that could silently diverge. Unchanged
+// behavior from Stage 0 -- see that changelog note on backstopFullSave()
+// for the full rationale. Given a list of candidate ids (present in
+// docSnapshots but missing from the caller's current local array), returns
+// only the subset confirmed safe to delete: fresh server truth still
+// matches this tab's last-known content hash for that id. Anything
+// uncertain (server content changed, hash never recorded, or the verify
+// fetch itself fails) is left OUT of the returned list -- fail-closed, the
+// caller simply doesn't delete it, and it stays in docSnapshots to be
+// retried next cycle automatically (no separate retry queue needed).
+async function verifyAndFilterDeletes(name, candidateIds) {
+  if (candidateIds.length === 0) return [];
+  const collectionName = COLLECTION_FIRESTORE_NAME[name];
+  let freshDocs = null;
+  try {
+    freshDocs = await Promise.all(
+      candidateIds.map(id => db.collection(collectionName).doc(id).get({ source: 'server' }))
+    );
+  } catch (e) {
+    console.warn(`[guard] verify fetch failed for ${name}, skipping ${candidateIds.length} candidate delete(s) this cycle (fail-closed):`, e.message);
+    return [];
+  }
+
+  const confirmedDeletes = [];
+  candidateIds.forEach((id, i) => {
+    const snap = freshDocs[i];
+    if (!snap.exists) {
+      // Already gone server-side (another tab's cycle beat us to it, a
+      // benign race) -- nothing to delete. Clears the phantom id from both
+      // snapshot maps so it stops being re-flagged as a delete candidate
+      // every future cycle.
+      docSnapshots[name].delete(id);
+      backstopContentSnapshots[name].delete(id);
+      return;
+    }
+    const serverHash = computeContentHash({ ...snap.data(), id: snap.id });
+    const lastKnownHash = backstopContentSnapshots[name].get(id);
+    if (serverHash === lastKnownHash) {
+      confirmedDeletes.push(id);
+    } else {
+      // Missing local hash (never verified this doc before) also lands
+      // here -- undefined never equals a real hash string, so an
+      // unrecognized candidate is skipped too, not deleted.
+      backstopContentSnapshots[name].set(id, serverHash);
+      console.warn(`[guard] SKIPPED delete of ${id} (${name}) -- server content changed since last known state, cannot safely infer deletion intent`);
+    }
+  });
+  return confirmedDeletes;
+}
+
 // Low-frequency safety net, independent of the diff logic above: forces a
 // COMPLETE rewrite of all three collections (bypassing hash comparison
 // entirely) and rebuilds every snapshot from that write, so any bug in the
@@ -1507,58 +1569,16 @@ async function backstopFullSave() {
       docSnapshots[name].forEach((_hash, id) => { if (!seenIds.has(id)) candidateDeletes.push(id); });
       const collectionName = COLLECTION_FIRESTORE_NAME[name];
 
-      if (candidateDeletes.length > 0) {
-        let freshDocs = null;
-        try {
-          freshDocs = await Promise.all(
-            candidateDeletes.map(id => db.collection(collectionName).doc(id).get({ source: 'server' }))
-          );
-        } catch (e) {
-          console.warn(`[backstop] verify fetch failed for ${name}, skipping ${candidateDeletes.length} candidate delete(s) this cycle (fail-closed):`, e.message);
-        }
-
-        const confirmedDeletes = [];
-        if (freshDocs) {
-          candidateDeletes.forEach((id, i) => {
-            const snap = freshDocs[i];
-            if (!snap.exists) {
-              // Already gone server-side (another tab's cycle beat us to
-              // it, a benign race) -- nothing to delete. The housekeeping
-              // deletes below are a defensive fallback only -- in the
-              // normal path, snapshotCollection()/snapshotBackstopContent()
-              // at the end of this function unconditionally rebuild both
-              // maps from the current array anyway (this id, being absent
-              // from the array, is naturally excluded from that rebuild
-              // regardless); this just keeps state clean if something
-              // later in this same cycle throws before that rebuild runs.
-              docSnapshots[name].delete(id);
-              backstopContentSnapshots[name].delete(id);
-              return;
-            }
-            const serverHash = computeContentHash({ ...snap.data(), id: snap.id });
-            const lastKnownHash = backstopContentSnapshots[name].get(id);
-            if (serverHash === lastKnownHash) {
-              confirmedDeletes.push(id);
-            } else {
-              // Missing local hash (never verified this doc before, e.g.
-              // it was added to the array after our last content
-              // snapshot) also lands here -- undefined never equals a real
-              // hash string, so an unrecognized candidate is skipped too,
-              // not deleted. Same defensive-fallback caveat as above: this
-              // set() is only observable if something later in this cycle
-              // throws before the end-of-function rebuild runs.
-              backstopContentSnapshots[name].set(id, serverHash);
-              console.warn(`[backstop] SKIPPED delete of ${id} (${name}) -- server content changed since last known state, cannot safely infer deletion intent`);
-            }
-          });
-        }
-
-        for (let i = 0; i < confirmedDeletes.length; i += 450) {
-          const chunk = confirmedDeletes.slice(i, i + 450);
-          const batch = db.batch();
-          chunk.forEach(id => batch.delete(db.collection(collectionName).doc(id)));
-          try { await batch.commit(); } catch (e) { console.error(`❌ [backstop] ${name} delete chunk failed:`, e); }
-        }
+      // V16.4 (Stage C): verify-then-delete guard now lives in the shared
+      // verifyAndFilterDeletes() helper (identical algorithm, same
+      // fail-closed behavior as before) so syncChangedDocs() can reuse it
+      // too instead of maintaining a second, divergent copy.
+      const confirmedDeletes = await verifyAndFilterDeletes(name, candidateDeletes);
+      for (let i = 0; i < confirmedDeletes.length; i += 450) {
+        const chunk = confirmedDeletes.slice(i, i + 450);
+        const batch = db.batch();
+        chunk.forEach(id => batch.delete(db.collection(collectionName).doc(id)));
+        try { await batch.commit(); } catch (e) { console.error(`❌ [backstop] ${name} delete chunk failed:`, e); }
       }
     }
     const saveTimestamp = new Date().toISOString();

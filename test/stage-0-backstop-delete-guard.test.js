@@ -52,7 +52,7 @@ function extractLetInit(source, name) {
   return m[0];
 }
 
-const HELPER_NAMES = ['stableStringify', 'fnv1aHash', 'computeDocHash', 'snapshotCollection', 'computeContentHash', 'snapshotBackstopContent'];
+const HELPER_NAMES = ['stableStringify', 'fnv1aHash', 'computeDocHash', 'snapshotCollection', 'computeContentHash', 'snapshotBackstopContent', 'verifyAndFilterDeletes'];
 const helperSources = HELPER_NAMES.map((name) => extractFunction(fullScript, name));
 const backstopFullSaveSrc = extractFunction(fullScript, 'backstopFullSave');
 // Static check only -- confirms the real declarations exist with the
