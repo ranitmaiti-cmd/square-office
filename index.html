@@ -1208,7 +1208,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-15.5'; // V16.3: Glitch 3 -- orphan-recovery modal checks server truth before prompting, no more duplicate self-reports
+const APP_VERSION = '2026-08-16.1'; // V16.4: Stage B/C-prep -- verify-before-delete guard shared into syncChangedDocs(), diffMode still 'shadow' (inert)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
