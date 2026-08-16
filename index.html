@@ -1320,7 +1320,7 @@ let docSnapshots = { timeLogs: new Map(), planEntries: new Map(), projects: new 
 // script, so it's live-flippable from the DevTools console on a running tab
 // (`diffMode = 'primary'`) the same way useGranularSaves/DEBUG already are
 // elsewhere in this file, with no extra plumbing needed.
-let diffMode = 'shadow';
+let diffMode = 'primary'; // V16.5 (Stage D): flipped after Stage C landed the guarded syncChangedDocs() delete path -- see FINDINGS-2026-08-10.md "Stage C + Stage D" for why these ship together, not independently.
 
 // Small, fast, non-cryptographic string hash (FNV-1a, 32-bit) -- this is
 // change-detection, not security, so collision resistance just needs to be
@@ -1429,7 +1429,16 @@ async function syncChangedDocs(diffs) {
       chunk.forEach(id => batch.delete(db.collection(collectionName).doc(id)));
       try {
         await batch.commit();
-        chunk.forEach(id => docSnapshots[name].delete(id));
+        // V16.5 (Stage C/D): also clears backstopContentSnapshots, not just
+        // docSnapshots. Needed now that backstopFullSave() no longer does
+        // its own unconditional full-array rebuild of backstopContentSnapshots
+        // after every cycle (see that function, below) -- this is the only
+        // place left that keeps the guard's "last known content" baseline
+        // current. Without this, a deleted id's stale content hash would
+        // simply never get cleaned up (harmless on its own, since a deleted
+        // id can't become a delete candidate again), but see the toWrite
+        // side below for the case that actually matters.
+        chunk.forEach(id => { docSnapshots[name].delete(id); backstopContentSnapshots[name].delete(id); });
       } catch (e) {
         console.error(`❌ ${name} delete chunk failed (${chunk.length} doc(s)) -- will retry next cycle:`, e);
       }
@@ -1441,7 +1450,18 @@ async function syncChangedDocs(diffs) {
       chunk.forEach(({ item }) => batch.set(db.collection(collectionName).doc(item.id), buildDocData(item, saveTimestamp)));
       try {
         await batch.commit();
-        chunk.forEach(({ item, hash }) => docSnapshots[name].set(item.id, hash));
+        // V16.5 (Stage C/D): also refreshes backstopContentSnapshots to this
+        // write's real content hash, not just docSnapshots. This is the
+        // case that actually matters: once backstopFullSave() stops doing
+        // its own full rebuild, this is the ONLY place a doc's content
+        // snapshot gets updated after an edit. Without it, any doc written
+        // here even once would carry a permanently stale "last known
+        // content" hash -- so if it were ever deleted in a later cycle, the
+        // guard would compare fresh server content against that stale
+        // pre-edit hash, always see a mismatch, and skip the delete
+        // forever (fail-closed, so not unsafe, but a real toDelete would
+        // never actually complete).
+        chunk.forEach(({ item, hash }) => { docSnapshots[name].set(item.id, hash); backstopContentSnapshots[name].set(item.id, computeContentHash(item)); });
       } catch (e) {
         console.error(`❌ ${name} write chunk failed (items ${i}-${i + chunk.length - 1} of ${toWrite.length}) -- will retry next cycle:`, e);
       }
@@ -1530,70 +1550,38 @@ async function verifyAndFilterDeletes(name, candidateIds) {
   return confirmedDeletes;
 }
 
-// Low-frequency safety net, independent of the diff logic above: forces a
-// COMPLETE rewrite of all three collections (bypassing hash comparison
-// entirely) and rebuilds every snapshot from that write, so any bug in the
-// diff engine itself, or any snapshot drift from a source nobody's audited,
-// self-heals within this interval instead of silently persisting forever.
-// Deliberately reuses the ORIGINAL commitInChunks() unchanged for the write
-// part -- this is exactly the unconditional full-array write saveData()
-// used to do on every tick; here it just runs on a 5-minute cadence.
-// V16.2: scheduling now lives in startBackstopMonitor() (reliable-tick-
-// worker-first, plain-interval fallback), not a bare unconditional
-// setInterval -- see that function, further down, for why.
-// V16.3 (Stage 0): the delete-by-omission block below now verifies each
-// candidate against fresh server truth before deleting -- "missing from my
-// array" alone can't distinguish "I deleted it" from "my array is simply
-// stale and never learned about this doc." A candidate is only deleted if
-// the server's current content hash still matches what THIS TAB last
-// recorded for it: if nobody else has touched it since, its absence from
-// my array can only be something I did locally. If the hash has moved,
-// someone else has written to it since I last synced, and "missing from my
-// array" becomes unreliable -- skip rather than guess. A failed verify
-// fetch fails closed (skips the whole chunk, never deletes on an
-// unconfirmed state). This can only make the block MORE conservative than
-// before -- it can skip a delete the old code would have done, it can never
-// cause a new delete the old code wouldn't have.
+// V16.5 (Stage C): no longer a full unconditional rewrite. Through Stage B,
+// this forced a COMPLETE rewrite of all three collections every cycle
+// (bypassing hash comparison entirely), which self-healed any silent
+// diff-engine bug within 5 minutes -- see FINDINGS-2026-08-10.md, "C-spec
+// review and pre-build decisions, 2026-08-16" for the full reasoning
+// behind giving that up. Now this is the same computeCollectionDiffs() +
+// syncChangedDocs() cycle saveData() uses when diffMode is 'primary' (see
+// below) -- both callers share the exact same guarded write/delete logic,
+// on different cadences (this one every 5 minutes, independent of
+// saveData()'s own tick), catching anything the other might have missed
+// (a change made through a path that never set hasUnsavedChanges, a
+// missed write from a race) rather than catching hash-logic bugs
+// specifically. That gap is why the daily ground-truth spot-check
+// (DELIVERY-ACCEPTANCE-CRITERIA.md, criterion 1) is mandatory for the
+// first 5-7 days after diffMode goes primary, not optional -- it is the
+// only thing left that would catch a hash comparison silently reporting
+// "unchanged" when something really did change.
+// V16.2: scheduling lives in startBackstopMonitor() (reliable-tick-worker-
+// first, plain-interval fallback), not a bare unconditional setInterval --
+// see that function, further down, for why. Unchanged by this rewrite.
 async function backstopFullSave() {
   if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
   if (!dataLoaded || !currentUser) return;
   if (window._saveInProgress) return; // don't race a normal save cycle
   window._saveInProgress = true;
   try {
-    console.log('🛟 [backstop] full-save sweep starting');
-    const names = ['timeLogs', 'planEntries', 'projects'];
-    const arrays = { timeLogs, planEntries, projects: projectsData };
-    for (const name of names) {
-      const seenIds = new Set(arrays[name].filter(i => i && i.id).map(i => i.id));
-      const candidateDeletes = [];
-      docSnapshots[name].forEach((_hash, id) => { if (!seenIds.has(id)) candidateDeletes.push(id); });
-      const collectionName = COLLECTION_FIRESTORE_NAME[name];
-
-      // V16.4 (Stage C): verify-then-delete guard now lives in the shared
-      // verifyAndFilterDeletes() helper (identical algorithm, same
-      // fail-closed behavior as before) so syncChangedDocs() can reuse it
-      // too instead of maintaining a second, divergent copy.
-      const confirmedDeletes = await verifyAndFilterDeletes(name, candidateDeletes);
-      for (let i = 0; i < confirmedDeletes.length; i += 450) {
-        const chunk = confirmedDeletes.slice(i, i + 450);
-        const batch = db.batch();
-        chunk.forEach(id => batch.delete(db.collection(collectionName).doc(id)));
-        try { await batch.commit(); } catch (e) { console.error(`❌ [backstop] ${name} delete chunk failed:`, e); }
-      }
-    }
-    const saveTimestamp = new Date().toISOString();
-    await commitInChunks('projects', projectsData, p => COLLECTION_BUILD_DOC_DATA.projects(p, saveTimestamp));
-    await commitInChunks('timeLogs', timeLogs, l => COLLECTION_BUILD_DOC_DATA.timeLogs(l, saveTimestamp));
-    await commitInChunks('planEntries', planEntries, e => COLLECTION_BUILD_DOC_DATA.planEntries(e, saveTimestamp));
-    snapshotCollection('timeLogs', timeLogs);
-    snapshotCollection('planEntries', planEntries);
-    snapshotCollection('projects', projectsData);
-    snapshotBackstopContent('timeLogs', timeLogs);
-    snapshotBackstopContent('planEntries', planEntries);
-    snapshotBackstopContent('projects', projectsData);
-    console.log('🛟 [backstop] full-save sweep complete -- snapshots rebuilt');
+    console.log('🛟 [backstop] diff sweep starting');
+    const diffs = computeCollectionDiffs();
+    await syncChangedDocs(diffs);
+    console.log('🛟 [backstop] diff sweep complete');
   } catch (e) {
-    console.error('❌ [backstop] full-save sweep failed:', e);
+    console.error('❌ [backstop] diff sweep failed:', e);
   } finally {
     window._saveInProgress = false;
   }
@@ -3044,6 +3032,17 @@ async function loadData() {
       snapshotCollection('timeLogs', timeLogs);
       snapshotCollection('planEntries', planEntries);
       snapshotCollection('projects', projectsData);
+      // V16.5 (Stage C): same reasoning, for the delete guard's own content
+      // baseline. Without this, a doc loaded here but never itself written
+      // or deleted this session would have no backstopContentSnapshots
+      // entry at all -- verifyAndFilterDeletes() would treat it as an
+      // "unknown candidate" on its first legitimate delete (skip, fail
+      // closed, harmless) and only succeed on the NEXT cycle once the skip
+      // itself records the current hash. Seeding here from the start
+      // avoids that one-cycle delay for the common case.
+      snapshotBackstopContent('timeLogs', timeLogs);
+      snapshotBackstopContent('planEntries', planEntries);
+      snapshotBackstopContent('projects', projectsData);
 
       console.log('📋 Plan Entries Detail:', planEntries);
       
