@@ -356,6 +356,90 @@ async function run() {
     check('not recorded as deleted since the commit failed', !deleted.planEntries.includes(docId));
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // CASE 9 (Stage C/D addition): backstopContentSnapshots must be kept
+  // current on every successful WRITE, not just deletes. Now that
+  // backstopFullSave() no longer does its own unconditional full rebuild
+  // of backstopContentSnapshots after every cycle, syncChangedDocs() is
+  // the ONLY place that map gets refreshed. Two-cycle scenario: a doc is
+  // edited and written (cycle 1), then genuinely deleted locally (cycle
+  // 2). If the write in cycle 1 didn't refresh backstopContentSnapshots
+  // to the NEW content's hash, cycle 2's guard would compare fresh server
+  // content (which now holds cycle 1's new content) against a stale
+  // PRE-edit hash, see a permanent mismatch, and skip the delete forever
+  // -- a real, self-inflicted regression this test exists to catch. Uses
+  // its own mutable mock server (unlike the static one above) so cycle 2
+  // genuinely sees what cycle 1 wrote, not a fixed fixture snapshot.
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n=== CASE 9: write refreshes backstopContentSnapshots, so a later delete of the same doc still succeeds ===');
+  {
+    const docId = 'timelogs-edited-then-deleted';
+    const oldContent = { id: docId, x: 1, updatedAt: 'old' };
+    const newContent = { id: docId, x: 2, updatedAt: 'irrelevant-stripped-by-hash' };
+    let serverStore = { [docId]: { ...oldContent, updatedAt: 'server-ts-0' } };
+
+    const sandbox = {
+      console,
+      currentUser: { id: 'u1', name: 'Admin' },
+      timeLogs: [{ ...newContent }], // locally edited -- differs from docSnapshots' recorded hash below
+      planEntries: [], projectsData: [],
+      COLLECTION_FIRESTORE_NAME: { projects: 'projects', timeLogs: 'timeLogs', planEntries: 'planEntries' },
+      COLLECTION_BUILD_DOC_DATA: { timeLogs: (l, ts) => ({ ...l, updatedAt: ts }), planEntries: (e, ts) => ({ ...e, updatedAt: ts }), projects: (p, ts) => ({ ...p, updatedAt: ts }) },
+      docSnapshots: { timeLogs: new Map([[docId, 'stale-shared-hash-from-before-the-edit']]), planEntries: new Map(), projects: new Map() },
+      backstopContentSnapshots: { timeLogs: new Map(), planEntries: new Map(), projects: new Map() },
+    };
+    vm.createContext(sandbox);
+    helperSources.forEach((s) => vm.runInContext(s, sandbox));
+    sandbox.backstopContentSnapshots.timeLogs.set(docId, vm.runInContext(`computeContentHash(${JSON.stringify(oldContent)})`, sandbox));
+
+    sandbox.db = {
+      collection(collectionName) {
+        return {
+          doc(id) {
+            return {
+              id,
+              get() {
+                return Promise.resolve({ exists: Object.prototype.hasOwnProperty.call(serverStore, id), id, data: () => serverStore[id] || null });
+              },
+            };
+          },
+        };
+      },
+      batch() {
+        const deleteOps = []; const setOps = [];
+        return {
+          delete(docRef) { deleteOps.push(docRef.id); },
+          set(docRef, data) { setOps.push({ id: docRef.id, data }); },
+          commit() {
+            deleteOps.forEach(id => { delete serverStore[id]; });
+            setOps.forEach(({ id, data }) => { serverStore[id] = data; });
+            return Promise.resolve();
+          },
+        };
+      },
+    };
+    vm.runInContext(syncChangedDocsSrc, sandbox);
+
+    // Cycle 1: the edit gets written.
+    let diffs = vm.runInContext('computeCollectionDiffs()', sandbox);
+    check('cycle 1: edited doc detected as toWrite', diffs.timeLogs.toWrite.some(w => w.item.id === docId));
+    await vm.runInContext('syncChangedDocs', sandbox)(diffs);
+    check('cycle 1: new content actually landed on the mock server', serverStore[docId] && serverStore[docId].x === 2);
+    const contentHashAfterWrite = sandbox.backstopContentSnapshots.timeLogs.get(docId);
+    const expectedNewHash = vm.runInContext(`computeContentHash(${JSON.stringify(newContent)})`, sandbox);
+    check('cycle 1: backstopContentSnapshots refreshed to the NEW content hash, not left stale', contentHashAfterWrite === expectedNewHash);
+
+    // Between cycles: local delete (e.g. user cancels/removes the entry).
+    sandbox.timeLogs = [];
+
+    // Cycle 2: now a delete candidate. Must succeed -- if backstopContentSnapshots
+    // were still stale, this would incorrectly skip.
+    diffs = vm.runInContext('computeCollectionDiffs()', sandbox);
+    check('cycle 2: doc now detected as toDelete', diffs.timeLogs.toDelete.includes(docId));
+    await vm.runInContext('syncChangedDocs', sandbox)(diffs);
+    check('cycle 2: delete succeeded (backstopContentSnapshots was current, no false skip)', !Object.prototype.hasOwnProperty.call(serverStore, docId));
+  }
+
   console.log(`\n${passCount} passed, ${failCount} failed`);
   if (failCount > 0) process.exit(1);
 }
