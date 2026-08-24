@@ -2102,6 +2102,58 @@ async function reArmHeartbeat() {
 }
 
 // ═══════════════════════════════════════════════════════
+// V16.6: PAGE LIFECYCLE TELEMETRY (read-only investigation aid)
+// Diagnosed 2026-08-20/21 (see FINDINGS-2026-08-10.md, "Backgrounded-tab
+// heartbeat survival gap"): Suravi's session-death gaps split into two
+// causes, and distinguishing "browser discarded the tab" from "machine
+// slept" from "tab froze but stayed alive" could previously only be
+// INFERRED from whether an orphan-recovery event happened at all -- no
+// direct signal existed. This adds that direct signal, via the Page
+// Lifecycle API (`document.wasDiscarded`, `freeze`/`resume` events),
+// unsupported in some browsers but harmless where absent (the property
+// reads undefined, the events simply never fire -- no feature-detection
+// needed).
+//
+// Deliberately, strictly additive: `recordLifecycleEvent()` is a small,
+// isolated `.update()` call, never read back anywhere in this file, never
+// gates any existing behavior, and is NOT part of heartbeatSession()'s
+// own write -- a failure here can never block or alter a real heartbeat,
+// save, delete, or diffMode-path write. Call sites are added AFTER each
+// relevant function's existing logic, not interleaved with it.
+// ═══════════════════════════════════════════════════════
+
+// Captured once, synchronously, at script parse time -- document.wasDiscarded
+// is available immediately (not an event), and only meaningful for THIS
+// page load, so there's no reason to re-read it later.
+const pageWasDiscarded = (typeof document !== 'undefined' && document.wasDiscarded === true);
+
+async function recordLifecycleEvent(sessionLogId, eventType) {
+  if (!sessionLogId) return;
+  try {
+    await db.collection('timeLogs').doc(sessionLogId).update({
+      lifecycleEvent: eventType,
+      lifecycleEventAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    // Telemetry only -- a failed write here must never surface to the user
+    // or affect the session itself. Console-only, matches the existing
+    // non-fatal-write-failure pattern used throughout this file.
+    console.warn(`[lifecycle] failed to record "${eventType}" for ${sessionLogId} (non-fatal, telemetry only):`, e.message);
+  }
+}
+
+// freeze/resume fire for a tab the browser paused-but-did-not-discard --
+// lighter-weight than a full discard, no reload involved, so this is the
+// ONLY mechanism that can observe that scenario at all (a discard forces a
+// fresh load, which the orphan-recovery/restore hooks below cover instead).
+document.addEventListener('freeze', () => {
+  if (currentSessionLogId) recordLifecycleEvent(currentSessionLogId, 'frozen');
+});
+document.addEventListener('resume', () => {
+  if (currentSessionLogId) recordLifecycleEvent(currentSessionLogId, 'resumed');
+});
+
+// ═══════════════════════════════════════════════════════
 // V14.3.19: DEPLOY VERSION CHECK
 // Team leaves the SQUARE tab open all day, so a deploy doesn't reach an
 // already-running tab on its own -- nothing about a fresh index.html on the
@@ -7891,6 +7943,12 @@ async function checkForOrphanedSessionOnLoad() {
     showNotificationToast('⏸ Abandoned session(s) closed',
       `${closed.length} session${closed.length > 1 ? 's' : ''} from an earlier tab that stopped responding ${closed.length > 1 ? 'were' : 'was'} closed at their last known activity. Please verify in Time Report.`,
       'warning');
+    // V16.6: additive lifecycle tag, separate call from tryAutoCloseOrphan()'s
+    // own write above -- this load is what discovered the orphan(s), so if
+    // the browser discarded this tab (forcing this fresh load), this is
+    // exactly the signal that confirms it, definitively, for whichever
+    // session(s) got recovered this cycle.
+    if (pageWasDiscarded) closed.forEach((c) => recordLifecycleEvent(c.id, 'discarded'));
   }
 
   if (stillNeedsBanner.length > 0) {
@@ -8094,6 +8152,12 @@ async function restoreTimerState() {
       sessionHeartbeatInterval = setInterval(heartbeatSession, 60000);
     }
     heartbeatSession(); // immediate flush so the restored session is durable again
+    // V16.6: additive lifecycle tag -- this branch means the session under
+    // MAX_SESSION_HOURS resumed normally rather than hitting the orphan
+    // path above; if the browser still discarded this tab (forcing this
+    // fresh load) while the elapsed time stayed under that cap, this is the
+    // only place left to capture that signal for this specific session.
+    if (pageWasDiscarded) recordLifecycleEvent(currentSessionLogId, 'discarded');
 
     // Update localStorage so next pause/reload reads correct value
     localStorage.setItem('timerState', JSON.stringify({

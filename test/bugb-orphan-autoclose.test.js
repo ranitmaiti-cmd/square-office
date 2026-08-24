@@ -83,6 +83,12 @@ function buildSandbox({ existingTimeLogsEntry, nowMs } = {}) {
     detachSessionCloseListener: () => { calls.detachCalls++; },
     showNotificationToast: (title, msg, type) => { calls.toastCalls.push({ title, msg, type }); },
     showOrphanSessionBanner: (o, count, staleMin) => { calls.bannerCalls.push({ id: o.id, count, staleMin }); },
+    // V16.6 (Page Lifecycle telemetry, added after this test): checkForOrphanedSessionOnLoad()
+    // now references these -- this test predates and doesn't exercise that
+    // feature, so pageWasDiscarded stays false (never triggers the new call)
+    // and recordLifecycleEvent is a harmless no-op stub for safety.
+    pageWasDiscarded: false,
+    recordLifecycleEvent: () => {},
     db: {
       collection: (name) => ({
         where: () => ({
