@@ -1208,7 +1208,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-16.2'; // V16.5: Stage C+D -- backstopFullSave() diff-based, diffMode 'primary' (live write path is now syncChangedDocs())
+const APP_VERSION = '2026-08-24.1'; // V16.6: Page Lifecycle telemetry -- document.wasDiscarded/freeze/resume tracked additively on session docs (read-only investigation aid, diffMode/timer/save-path untouched)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
