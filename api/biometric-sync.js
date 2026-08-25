@@ -287,6 +287,33 @@ function resolveStartMsStrict(data) {
   return null;
 }
 
+// V16.7 (Glitch 5): verbatim port of index.html's extractLastSeenMs() --
+// same reasoning as capSessionDuration/resolveStartMsStrict above, this
+// runs as a separate Vercel function with no shared runtime with the
+// client. Reads the raw numeric .seconds off the Timestamp directly
+// (matches the client's own fix for a prior .toMillis-only bug that
+// silently missed real docs), falling back to ts/updatedAt for docs
+// written before lastHeartbeat existed.
+function extractLastSeenMs(data) {
+  if (!data) return null;
+  return (data.lastHeartbeat && typeof data.lastHeartbeat.seconds === 'number')
+    ? data.lastHeartbeat.seconds * 1000
+    : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
+}
+
+// V16.7 (Glitch 5, raised 2026-08-25): a ceiling on the miss-punch
+// fallback close, but NOT an enforcement of "usually wraps by 7:30" --
+// the anchor (previous session's end, or the doc's own last heartbeat) is
+// already the real signal for how late someone genuinely worked. This
+// ceiling's only job is to catch a clearly IMPLAUSIBLE anchor (a stray
+// entry at 2am, a corrupted timestamp) that would otherwise sail through
+// uncapped. 22:00 sits comfortably above any realistic work hour for this
+// office (confirmed: real evenings run to 8/8:30/9pm at the latest per
+// observed data) while still catching genuinely stray values. A tighter
+// ceiling (19:30 was the original draft) would have wrongly truncated
+// real late work -- caught and corrected before this shipped.
+const MISS_PUNCH_CEILING = '22:00';
+
 // REQUIRES a Firestore composite index on timeLogs for
 // (inProgress ASC, reconciliationNeeded ASC, date ASC) -- two equality
 // filters plus a range filter on a third field needs one. Firestore will
@@ -344,7 +371,6 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
   });
 
   const userIdToEmpcode = new Map(Object.entries(EMPCODE_TO_USERID).map(([e, u]) => [u, e]));
-  const nowAtJobRun = Date.now(); // one shared close-point for every fallback entry THIS run produces
 
   let closedBiometric = 0, closedFallback = 0, deoverlapped = 0, failed = 0, skippedReconciledDate = 0;
   const needsManualReview = [];
@@ -357,7 +383,7 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
   // "this is the one flagged doc that turns out to be the day's actual
   // latest session" -- both must behave identically, per the requirement
   // that the single-flagged-doc case (Ridhi/Taskiya) never changes.
-  async function closeAtGenuineFinal(id, data, date, startMs) {
+  async function closeAtGenuineFinal(id, data, date, startMs, previousDoc) {
     const empcode = userIdToEmpcode.get(data.userId);
     const rec = empcode && punchByEmpcode ? punchByEmpcode.get(empcode) : null;
     const hasBiometricOut = rec && rec.OUTTime && rec.OUTTime !== '--:--';
@@ -391,19 +417,78 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
         closedBiometric++; // dry-run: counted as "would close," nothing written
       }
     } else {
-      // Fallback-close: no biometric OUT for this user/date (unmapped
-      // Empcode, or mapped but no/blank punch). Close at this job run's
-      // own timestamp -- an honest real boundary, not an invented one --
-      // capped by the same 12h ceiling, explicitly flagged estimatedClose
-      // so it's never confused with a biometric-anchored close.
-      const { durationMins, capped } = capSessionDuration(Math.max(0, Math.round((nowAtJobRun - startMs) / 1000)));
+      // V16.7 (Glitch 5, 2026-08-25): no biometric OUT for this user/date.
+      // Previously closed at nowAtJobRun -- whenever this job happened to
+      // run -- an honest boundary, but one that could stretch a session by
+      // hours depending purely on cron timing. Now caps at the user's own
+      // last logged OMS activity instead, a reliable anchor now that OMS
+      // is stable post-C/D. Same fail-closed discipline as every other
+      // branch in this file: anything unresolvable defers to manual
+      // review, never fabricates a time. Full spec:
+      // FINDINGS-2026-08-10.md, "Glitch 5" scoping + the Taskiya
+      // refinement (2026-08-25).
+      //
+      // PRIMARY: the entry immediately preceding this one in the user's
+      // day (`previousDoc`, passed by the caller from `combined`). Its
+      // endTime is always a real, already-fail-closed-computed boundary
+      // -- whether it came from a normal close, a recovered close, or a
+      // prior fallback close -- so it's used as-is, unconditionally, as
+      // long as it resolves and is genuinely before this session's own
+      // start.
+      //
+      // FALLBACK (the Taskiya case): if there's no previous entry, or its
+      // endTime is at/before this session's OWN start -- meaning this
+      // session began AFTER everything else that day already ended, so
+      // "the previous session's end" says nothing about THIS session --
+      // fall through to this doc's own last known heartbeat, the only
+      // remaining honest signal for how long THIS specific session was
+      // genuinely alive.
+      let anchorMs = null;
+      let anchorReason = null;
+
+      if (previousDoc && previousDoc.data && previousDoc.data.endTime) {
+        const prevEndMs = hhmmToEpoch(date, previousDoc.data.endTime);
+        if (prevEndMs > startMs) {
+          anchorMs = prevEndMs;
+          anchorReason = `previous session's end (${previousDoc.data.endTime})`;
+        }
+      }
+      if (anchorMs === null) {
+        const lastSeenMs = extractLastSeenMs(data);
+        if (lastSeenMs !== null && lastSeenMs > startMs) {
+          anchorMs = lastSeenMs;
+          anchorReason = `own last heartbeat (${toHHMM(lastSeenMs)})`;
+        }
+      }
+
+      // FAIL-SAFE: neither anchor resolved -- cannot close this truthfully.
+      if (anchorMs === null) {
+        needsManualReview.push({ id, userId: data.userId, date, reason: 'no biometric OUT, no usable previous-session end, and no usable own heartbeat -- cannot resolve a close time truthfully' });
+        return;
+      }
+
+      // CEILING: never later than MISS_PUNCH_CEILING, regardless of which
+      // anchor path produced the value. If even the ceiling can't beat
+      // this session's own start, nothing here resolves truthfully either.
+      const ceilingMs = hhmmToEpoch(date, MISS_PUNCH_CEILING);
+      if (ceilingMs <= startMs) {
+        needsManualReview.push({ id, userId: data.userId, date, reason: `${MISS_PUNCH_CEILING} ceiling is at/before this session's own start -- cannot resolve a close time truthfully` });
+        return;
+      }
+      let closeMs = anchorMs;
+      if (ceilingMs < closeMs) {
+        closeMs = ceilingMs;
+        anchorReason = `${MISS_PUNCH_CEILING} ceiling (anchor was later)`;
+      }
+
+      const { durationMins, capped } = capSessionDuration(Math.round((closeMs - startMs) / 1000));
       const updates = {
         inProgress: false,
         recovered: true,
         estimatedClose: true,
         durationMins,
-        endTime: toHHMM(nowAtJobRun),
-        desc: `${data.desc || 'Work on project'} (closed end-of-day — no biometric data, estimated)`,
+        endTime: toHHMM(closeMs),
+        desc: `${data.desc || 'Work on project'} (closed end-of-day — no biometric data, capped at ${anchorReason})`,
         recoveredAt: new Date().toISOString(),
         reconciliationNeeded: false,
         ...(capped ? { autoCapped: true } : {}),
@@ -537,7 +622,11 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
         if (next) {
           await boundToNextSessionStart(item.id, item.data, date, item.startMs, next.startMs);
         } else {
-          await closeAtGenuineFinal(item.id, item.data, date, item.startMs);
+          // V16.7 (Glitch 5): pass whatever immediately precedes this item
+          // in the user's day (undefined if this is their only entry) --
+          // closeAtGenuineFinal()'s no-biometric-OUT fallback uses it as
+          // its primary close-time anchor.
+          await closeAtGenuineFinal(item.id, item.data, date, item.startMs, combined[i - 1]);
         }
       }
     }
