@@ -55,12 +55,17 @@ assert.ok(closeAtGenuineFinalSrc.includes('extractLastSeenMs('), 'closeAtGenuine
 assert.ok(closeAtGenuineFinalSrc.includes('MISS_PUNCH_CEILING'), 'closeAtGenuineFinal does not reference MISS_PUNCH_CEILING -- ceiling not wired in as expected');
 assert.ok(!/\bnowAtJobRun\b\s*[,)=;.]/.test(closeAtGenuineFinalSrc.replace(/\/\/.*$/gm, '')), 'closeAtGenuineFinal still USES nowAtJobRun outside comments -- old fallback not fully replaced');
 
-// Confirm the ceiling constant itself is 22:00, not the original 19:30 draft.
+// Confirm the ceiling constant is 20:30 -- settled here after 19:30 (too
+// tight) and 22:00 (raised, but risked silent over-credit) drafts.
 const ceilingMatch = src.match(/const MISS_PUNCH_CEILING = '([\d:]+)'/);
 assert.ok(ceilingMatch, 'could not find MISS_PUNCH_CEILING declaration');
-assert.strictEqual(ceilingMatch[1], '22:00', `MISS_PUNCH_CEILING is '${ceilingMatch[1]}', expected '22:00'`);
+assert.strictEqual(ceilingMatch[1], '20:30', `MISS_PUNCH_CEILING is '${ceilingMatch[1]}', expected '20:30'`);
 
-console.log('--- confirmed: closeAtGenuineFinal() implements previousDoc primary anchor, extractLastSeenMs fallback, MISS_PUNCH_CEILING=22:00, nowAtJobRun fully removed ---');
+// Confirm the flag-on-clamp behavior is wired in -- a ceiling clamp must
+// still be visible for review, not just silently applied.
+assert.ok(closeAtGenuineFinalSrc.includes('ceilingClamped'), 'closeAtGenuineFinal does not reference ceilingClamped -- flag-on-clamp not wired in as expected');
+
+console.log('--- confirmed: closeAtGenuineFinal() implements previousDoc primary anchor, extractLastSeenMs fallback, MISS_PUNCH_CEILING=20:30 with flag-on-clamp, nowAtJobRun fully removed ---');
 
 function buildSandbox({ hasOwnHeartbeat = false, heartbeatOffsetFromStartMin = 5, updateShouldFail = false } = {}) {
   const updates = []; // { id, data } for every updateDoc() call
@@ -89,7 +94,7 @@ function buildSandbox({ hasOwnHeartbeat = false, heartbeatOffsetFromStartMin = 5
   vm.runInContext(capSessionDurationSrc, sandbox);
   vm.runInContext(extractLastSeenMsSrc, sandbox);
   sandbox.MAX_SESSION_HOURS = 12;
-  sandbox.MISS_PUNCH_CEILING = '22:00';
+  sandbox.MISS_PUNCH_CEILING = '20:30';
   vm.runInContext(closeAtGenuineFinalSrc, sandbox);
 
   // Counters the real function increments via closure -- mirrored here as
@@ -157,58 +162,72 @@ async function run() {
   }
 
   // ═══════════════════════════════════════════════════════
-  // CASE (h) [new, per the raised ceiling]: real last activity 20:30 --
-  // must pass through UNCLAMPED, since 20:30 < 22:00 ceiling. Proves the
-  // raised ceiling doesn't truncate genuine late work.
+  // CASE (h): real last activity BEFORE the 20:30 ceiling -- caps at the
+  // real anchor, no flag. The ordinary, most-common shape.
   // ═══════════════════════════════════════════════════════
-  console.log('\n=== CASE (h): real last activity 20:30 -> NOT clamped (20:30 < 22:00 ceiling) ===');
+  console.log('\n=== CASE (h): last activity 19:45 (before 20:30 ceiling) -> caps there, no flag ===');
   {
-    const { sandbox, updates } = buildSandbox();
+    const { sandbox, updates, needsManualReview } = buildSandbox();
     const startMs = vm.runInContext(`hhmmToEpoch('${DATE}', '11:00')`, sandbox);
-    const previousDoc = { data: { endTime: '20:30' } }; // legitimately later than start, real late work
+    const previousDoc = { data: { endTime: '19:45' } };
     await vm.runInContext('closeAtGenuineFinal', sandbox)('doc-h', { userId: 'u1', desc: 'Work' }, DATE, startMs, previousDoc);
     check('exactly one write', updates.length === 1);
-    check('endTime is the REAL 20:30, not clamped to 22:00 or anything else', updates[0].data.endTime === '20:30');
-    check('desc names the previous-session-end reason, NOT the ceiling', /previous session's end \(20:30\)/.test(updates[0].data.desc) && !/ceiling/.test(updates[0].data.desc));
+    check('endTime is the real 19:45, not clamped', updates[0].data.endTime === '19:45');
+    check('desc names the previous-session-end reason, NOT the ceiling', /previous session's end \(19:45\)/.test(updates[0].data.desc) && !/ceiling/.test(updates[0].data.desc));
+    check('ceilingClamped absent -- no flag when under the ceiling', !updates[0].data.ceilingClamped);
+    check('zero manual-review entries', needsManualReview.length === 0);
   }
 
   // ═══════════════════════════════════════════════════════
-  // CASE (c): stray-late anchor (previous doc endTime 23:30, clearly
-  // implausible) -- clamped at the 22:00 ceiling.
+  // CASE (c): real last activity PAST 20:30 (e.g. 21:00, a plausible
+  // genuine-late-worker case) -- capped at 20:30 AND flagged for review.
+  // This is the deliberate error-direction choice: under-credit is
+  // visible/self-correcting (the person notices being shorted), so the
+  // system proactively flags rather than silently trusting a value past
+  // the ceiling either way.
   // ═══════════════════════════════════════════════════════
-  console.log('\n=== CASE (c): stray-late previous endTime (23:30) -> clamped at 22:00 ceiling ===');
+  console.log('\n=== CASE (c): last activity 21:00 (past 20:30 ceiling, plausible late work) -> capped at 20:30 AND flagged ===');
   {
-    const { sandbox, updates } = buildSandbox();
+    const { sandbox, updates, needsManualReview } = buildSandbox();
     const startMs = vm.runInContext(`hhmmToEpoch('${DATE}', '11:00')`, sandbox);
-    const previousDoc = { data: { endTime: '23:30' } };
+    const previousDoc = { data: { endTime: '21:00' } };
     await vm.runInContext('closeAtGenuineFinal', sandbox)('doc-c', { userId: 'u1', desc: 'Work' }, DATE, startMs, previousDoc);
-    check('exactly one write', updates.length === 1);
-    check('endTime clamped to the 22:00 ceiling, not the stray 23:30', updates[0].data.endTime === '22:00');
-    check('desc names the ceiling reason', /22:00 ceiling \(anchor was later\)/.test(updates[0].data.desc));
+    check('exactly one write (still closes -- flag is not a fail-safe)', updates.length === 1);
+    check('endTime clamped to the 20:30 ceiling, not the real 21:00', updates[0].data.endTime === '20:30');
+    check('desc names the ceiling reason and the real anchor time', /20:30 ceiling \(previous session's end \(21:00\) was later\)/.test(updates[0].data.desc));
+    check('ceilingClamped:true written on the doc', updates[0].data.ceilingClamped === true);
+    check('exactly one manual-review flag', needsManualReview.length === 1);
+    check('flag reason names the real anchor and the under-credit risk', /closed at the 20:30 ceiling.*previous session's end \(21:00\).*under-crediting/.test(needsManualReview[0].reason));
   }
 
-  // Bonus: the same ceiling clamp via the OWN-HEARTBEAT fallback path,
-  // proving the ceiling applies uniformly regardless of which anchor
-  // path produced the value (not just the previous-doc path above).
-  console.log('\n=== CASE (c2): stray-late OWN heartbeat -> also clamped at 22:00 ===');
+  // Same clamp+flag path via the OWN-HEARTBEAT fallback, and via a
+  // clearly implausible stray value (23:30) -- proving both "plausible
+  // late work" and "clearly stray" anchors are treated identically:
+  // capped + flagged, since the system deliberately doesn't try to
+  // distinguish the two itself -- that judgment call is left to whoever
+  // reviews the flag.
+  console.log('\n=== CASE (c2): stray-implausible 23:30 (own heartbeat) -> also capped at 20:30 AND flagged ===');
   {
-    const { sandbox, updates } = buildSandbox();
+    const { sandbox, updates, needsManualReview } = buildSandbox();
     const startMs = vm.runInContext(`hhmmToEpoch('${DATE}', '11:00')`, sandbox);
-    const strayHeartbeatMs = vm.runInContext(`hhmmToEpoch('${DATE}', '23:45')`, sandbox);
+    const strayHeartbeatMs = vm.runInContext(`hhmmToEpoch('${DATE}', '23:30')`, sandbox);
     const data = { userId: 'u1', desc: 'Work', lastHeartbeat: { seconds: Math.floor(strayHeartbeatMs / 1000) } };
     await vm.runInContext('closeAtGenuineFinal', sandbox)('doc-c2', data, DATE, startMs, null); // no previous doc -> own heartbeat is the anchor
     check('exactly one write', updates.length === 1);
-    check('endTime clamped to 22:00, not the stray 23:45 heartbeat', updates[0].data.endTime === '22:00');
+    check('endTime clamped to 20:30, not the stray 23:30 heartbeat', updates[0].data.endTime === '20:30');
+    check('ceilingClamped:true written on the doc -- same path as case (c)', updates[0].data.ceilingClamped === true);
+    check('exactly one manual-review flag', needsManualReview.length === 1);
+    check('flag reason names the own-heartbeat anchor', /own last heartbeat \(23:30\)/.test(needsManualReview[0].reason));
   }
 
   // ═══════════════════════════════════════════════════════
   // CASE (d): ceiling <= flagged doc's own start -- manual review, no write.
   // ═══════════════════════════════════════════════════════
-  console.log('\n=== CASE (d): flagged doc itself starts at/after 22:00 -> manual review ===');
+  console.log('\n=== CASE (d): flagged doc itself starts at/after 20:30 -> manual review ===');
   {
     const { sandbox, updates, needsManualReview } = buildSandbox();
-    const startMs = vm.runInContext(`hhmmToEpoch('${DATE}', '22:15')`, sandbox);
-    const heartbeatMs = vm.runInContext(`hhmmToEpoch('${DATE}', '22:20')`, sandbox); // resolves fine, but ceiling can't beat the 22:15 start
+    const startMs = vm.runInContext(`hhmmToEpoch('${DATE}', '20:45')`, sandbox);
+    const heartbeatMs = vm.runInContext(`hhmmToEpoch('${DATE}', '20:50')`, sandbox); // resolves fine, but ceiling can't beat the 20:45 start
     const data = { userId: 'u1', desc: 'Work', lastHeartbeat: { seconds: Math.floor(heartbeatMs / 1000) } };
     await vm.runInContext('closeAtGenuineFinal', sandbox)('doc-d', data, DATE, startMs, null);
     check('zero writes', updates.length === 0);

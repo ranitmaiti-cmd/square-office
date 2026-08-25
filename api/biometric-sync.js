@@ -301,18 +301,21 @@ function extractLastSeenMs(data) {
     : (data.ts || (data.updatedAt ? new Date(data.updatedAt).getTime() : null));
 }
 
-// V16.7 (Glitch 5, raised 2026-08-25): a ceiling on the miss-punch
-// fallback close, but NOT an enforcement of "usually wraps by 7:30" --
-// the anchor (previous session's end, or the doc's own last heartbeat) is
-// already the real signal for how late someone genuinely worked. This
-// ceiling's only job is to catch a clearly IMPLAUSIBLE anchor (a stray
-// entry at 2am, a corrupted timestamp) that would otherwise sail through
-// uncapped. 22:00 sits comfortably above any realistic work hour for this
-// office (confirmed: real evenings run to 8/8:30/9pm at the latest per
-// observed data) while still catching genuinely stray values. A tighter
-// ceiling (19:30 was the original draft) would have wrongly truncated
-// real late work -- caught and corrected before this shipped.
-const MISS_PUNCH_CEILING = '22:00';
+// V16.7 (Glitch 5, settled 2026-08-25): a ceiling on the miss-punch
+// fallback close. Went through two drafts -- 19:30 (too tight, would
+// truncate real late work), then 22:00 (raised to stop that, but that
+// meant a genuine 9pm-10pm worker would get silently OVER-credited with
+// no signal anyone would ever notice) -- before landing here at 20:30
+// with a deliberate error-direction choice: for hours feeding budgets,
+// an error that's VISIBLE and self-correcting beats one that's silent.
+// Capping at 20:30 means a rare genuine late-worker sees LESS than they
+// worked -- people notice being shorted and say so. A higher ceiling
+// risks the opposite: someone sees more than they worked and has no
+// reason to flag it. Under-credit is self-reporting; over-credit isn't.
+// Paired with the flag-on-clamp below, which proactively surfaces the
+// rare "really did work past 8:30" case for review, instead of relying
+// on the person to notice and complain.
+const MISS_PUNCH_CEILING = '20:30';
 
 // REQUIRES a Firestore composite index on timeLogs for
 // (inProgress ASC, reconciliationNeeded ASC, date ASC) -- two equality
@@ -476,9 +479,12 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
         return;
       }
       let closeMs = anchorMs;
+      let ceilingClamped = false;
+      const realAnchorReason = anchorReason; // preserved for the flag below, before anchorReason may get overwritten
       if (ceilingMs < closeMs) {
         closeMs = ceilingMs;
-        anchorReason = `${MISS_PUNCH_CEILING} ceiling (anchor was later)`;
+        ceilingClamped = true;
+        anchorReason = `${MISS_PUNCH_CEILING} ceiling (${realAnchorReason} was later)`;
       }
 
       const { durationMins, capped } = capSessionDuration(Math.round((closeMs - startMs) / 1000));
@@ -492,7 +498,16 @@ async function closeReconciliationNeededSessions(db, isoDate, confirm) {
         recoveredAt: new Date().toISOString(),
         reconciliationNeeded: false,
         ...(capped ? { autoCapped: true } : {}),
+        ...(ceilingClamped ? { ceilingClamped: true } : {}),
       };
+      // Flag-on-clamp: closing at the ceiling still writes (below) -- this
+      // is a proactive review pointer, not a fail-safe. Whenever the real
+      // anchor was later than 20:30, there's a chance it's genuine late
+      // work getting under-credited, not just a stray value. Surface it
+      // for review rather than waiting on the person to notice and say so.
+      if (ceilingClamped) {
+        needsManualReview.push({ id, userId: data.userId, date, reason: `closed at the ${MISS_PUNCH_CEILING} ceiling, but ${realAnchorReason} suggests this session may genuinely have run later -- review to avoid under-crediting real late work` });
+      }
       if (confirm) {
         try {
           await updateDoc(doc(db, 'timeLogs', id), updates);
