@@ -2142,6 +2142,26 @@ async function recordLifecycleEvent(sessionLogId, eventType) {
   }
 }
 
+// V16.8 (Glitch 3 race fix, 2026-08-26): same discipline as
+// recordLifecycleEvent() immediately above -- additive `.update()` on the
+// session doc itself, never read back anywhere in this file, never gates
+// any behavior (called AFTER the discard decision is already made), and a
+// failed write here can never block or alter that decision. Exists purely
+// so this race's fix is observable, not just assumed: without it, "the
+// duplicate stopped happening" and "this path never fires" look identical
+// from the outside. See the guard at the orphanSaveBtn handler below.
+async function recordDuplicateDiscarded(sessionLogId) {
+  if (!sessionLogId) return;
+  try {
+    await db.collection('timeLogs').doc(sessionLogId).update({
+      orphanDuplicateDiscarded: true,
+      orphanDuplicateDiscardedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.warn(`[orphan-check] failed to record duplicate-discard telemetry for ${sessionLogId} (non-fatal, telemetry only):`, e.message);
+  }
+}
+
 // freeze/resume fire for a tab the browser paused-but-did-not-discard --
 // lighter-weight than a full discard, no reload involved, so this is the
 // ONLY mechanism that can observe that scenario at all (a discard forces a
@@ -8236,6 +8256,43 @@ document.getElementById('orphanSaveBtn').addEventListener('click', async () => {
   }
 
   const state = orphanTimerState;
+
+  // V16.8 (Glitch 3 race fix, 2026-08-26): re-check the session's CURRENT
+  // state at SUBMIT time, not whatever was true when the modal opened.
+  // Between the modal opening and the user clicking Save, Bug B
+  // (checkForOrphanedSessionOnLoad -> tryAutoCloseOrphan) can independently
+  // close the SAME session -- exactly what happened to Taskiya's 24 Aug
+  // day (29 real seconds between Bug B's close and this modal's submit).
+  // The original guard (restoreTimerState(), above) only checks once,
+  // before the modal is shown -- right after any crash the doc is ALWAYS
+  // still inProgress:true at that instant (nothing else has touched it
+  // yet), so that check can structurally never catch this specific case.
+  // Deliberately reads the in-memory `timeLogs` array here, NOT a fresh
+  // server fetch: tryAutoCloseOrphan() mirrors its own write into that same
+  // array synchronously, right after its Firestore write succeeds (see its
+  // `timeLogs[idx] = {...}` line) -- so by the time a human has had time to
+  // read a modal and type two numbers, that mutation is already long done.
+  // No network round-trip, no new async gap, can't itself race. Only
+  // suppresses on POSITIVE confirmation (doc found locally AND inProgress
+  // strictly `false`) -- same fail-closed principle as the original guard:
+  // doc not found locally, no sessionLogId at all, or inProgress anything
+  // other than exactly `false` all fall through to the existing write,
+  // completely unchanged.
+  if (state.sessionLogId) {
+    const currentDoc = timeLogs.find((l) => l.id === state.sessionLogId);
+    if (currentDoc && currentDoc.inProgress === false) {
+      console.log(`[orphan-check] ${state.sessionLogId} was resolved by something else since this modal opened -- discarding self-report, not writing a duplicate`);
+      recordDuplicateDiscarded(state.sessionLogId); // telemetry only, fire-and-forget -- see its own header
+      localStorage.removeItem('timerState');
+      if (orphanSnoozeTimeout) clearTimeout(orphanSnoozeTimeout);
+      orphanTimerState  = null;
+      orphanSnoozeCount = 0;
+      closeModal('orphanTimerModal');
+      alert('This session was already closed automatically in the meantime, so no duplicate entry was created.');
+      return;
+    }
+  }
+
   const projectName = state.linkedPlan?.project || 'Unknown Project';
   const startDate   = new Date(state.startedAt);
 
