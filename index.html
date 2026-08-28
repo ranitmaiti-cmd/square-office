@@ -809,9 +809,10 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="sh-tabcontent" id="sh-submissionlog">
           <div class="sh-empty">Coming soon — a submission log for delivery rhythm and package history, independent of phase budgets.</div>
         </div>
-        <div class="sh-tabcontent" id="sh-individualinsight">
-          <div class="sh-empty">Coming soon — workload and estimation patterns, presented for you to investigate. Never scores, never rankings.</div>
-        </div>
+        <!-- V16.11: Individual Insight (Workload + Estimation-vs-actual).
+             Populated entirely by renderIndividualInsight() -- structurally
+             empty here, same pattern as #sh-projecthealth. -->
+        <div class="sh-tabcontent" id="sh-individualinsight"></div>
       </div>
 
     </div><!-- /content -->
@@ -3584,6 +3585,287 @@ async function renderStudioHealth() {
 }
 
 // ═══════════════════════════════════════════════════════
+// V16.11: Studio Health -- Individual Insight, Workload (#1) and
+// Estimation-vs-actual (#3) ONLY. Attendance (#2) deliberately HELD --
+// no new collection, no plumbing, no writes here at all (see
+// FINDINGS-2026-08-10.md, "Individual Insight" scoping: biometric IN-time
+// is fetched live by api/biometric-sync.js and never persisted anywhere
+// today -- that's separate server-side work, decided later).
+//
+// Same pure-read shape as Layer A: fresh source:'server' reads on open,
+// zero writes, no schema change. Compares each person ONLY to their own
+// history -- never a shared absolute target (no part-time/employment-type
+// field exists to build one fairly) and never to each other.
+//
+// STRUCTURAL anti-scoreboard mechanism, not cosmetic: flag SENTENCES can
+// name multiple people at once (sorted alphabetically -- never by
+// magnitude, which would itself be a ranking), but carry no numbers. Raw
+// numbers only ever render for ONE person at a time, after a deliberate
+// picker selection -- there is no view anywhere in this feature where two
+// people's numbers are visible together. That is what actually prevents
+// ranking: you cannot compare what you cannot see side by side.
+// ═══════════════════════════════════════════════════════
+
+const SH_WORKLOAD_WINDOWS = [7, 30]; // selectable window sizes, in days
+const SH_PRIOR_WINDOW_COUNT = 3;     // how many equal-length prior windows form "their own normal"
+const SH_EST_MIN_CONTRIBUTION_PCT = 0.20; // meaningful-contributor threshold -- no drive-by dilution
+const SH_EST_RECENT_COUNT = 5;            // "last N" phase-instances, per the owner's own example shape
+const SH_EST_MIN_HISTORICAL_COUNT = 3;    // minimum historical sample before drawing any comparison
+
+let shCachedInsightData = null; // { projects, logs, leaveRequestsFresh, allUsers } -- set once per fetch, re-rendered from on selector changes
+let shSelectedPersonId = '';
+let shSelectedWindowDays = 30;
+
+// Rolling-window date-string bounds [start, end) -- deliberately NOT
+// calendar-month boundaries, which would make a partial current month
+// look artificially "light" against full prior months. offsetPeriods=0
+// is the current window; 1, 2, 3... are equal-length windows immediately
+// before it, all real, none partial. Pure -- `today` passed in as an arg.
+function getWindowBounds(windowDays, offsetPeriods, today) {
+  const end = new Date(today);
+  end.setDate(end.getDate() - windowDays * offsetPeriods);
+  const start = new Date(end);
+  start.setDate(start.getDate() - windowDays);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  return { start: fmt(start), end: fmt(end) };
+}
+
+// Pure: sums productive minutes for one person within [start, end).
+function productiveMinsInWindow(logs, userId, start, end) {
+  return logs
+    .filter(l => l.userId === userId && l.productive && l.date >= start && l.date < end)
+    .reduce((s, l) => s + (l.durationMins || 0), 0);
+}
+
+// Pure: approved-leave day count for one person, clamped to [start, end).
+function approvedLeaveDaysInWindow(leaveRequestsList, userId, start, end) {
+  let days = 0;
+  leaveRequestsList.filter(l => l.userId === userId && l.status === 'approved').forEach(l => {
+    if (!l.startDate || !l.endDate) return;
+    // startDate/endDate are BOTH inclusive (a leave request from the 10th
+    // to the 12th means 3 days off); the window's own `end` is exclusive.
+    // Walk from max(leave.start, window.start) through leave.end
+    // inclusive, only counting days that also fall inside [start, end).
+    const s = l.startDate > start ? l.startDate : start;
+    let d = new Date(s + 'T00:00:00');
+    const leaveEnd = new Date(l.endDate + 'T00:00:00');
+    while (d <= leaveEnd) {
+      const ds = d.toISOString().slice(0, 10);
+      if (ds >= start && ds < end) days++;
+      d.setDate(d.getDate() + 1);
+    }
+  });
+  return days;
+}
+
+// Pure: current-window hours vs. the average of SH_PRIOR_WINDOW_COUNT
+// equal-length prior windows -- the person's OWN normal, never a shared
+// target. Requires at least one prior window with real data to flag at
+// all; otherwise this is genuinely their first tracked period and
+// nothing can honestly be said yet.
+function computeWorkloadPattern(logs, userId, windowDays, priorWindowCount, today) {
+  const current = getWindowBounds(windowDays, 0, today);
+  const currentMins = productiveMinsInWindow(logs, userId, current.start, current.end);
+
+  const priorMinsList = [];
+  for (let i = 1; i <= priorWindowCount; i++) {
+    const w = getWindowBounds(windowDays, i, today);
+    priorMinsList.push(productiveMinsInWindow(logs, userId, w.start, w.end));
+  }
+  const hasPriorData = priorMinsList.some(m => m > 0);
+  if (!hasPriorData) {
+    return { currentMins, avgPriorMins: null, flagged: false, direction: null, insufficientHistory: true, currentWindow: current };
+  }
+  const avgPriorMins = priorMinsList.reduce((s, m) => s + m, 0) / priorMinsList.length;
+  let flagged = false, direction = null;
+  if (avgPriorMins > 0) {
+    const ratio = currentMins / avgPriorMins;
+    if (ratio >= 1.3) { flagged = true; direction = 'above'; }
+    else if (ratio <= 0.7) { flagged = true; direction = 'below'; }
+  }
+  return { currentMins, avgPriorMins, flagged, direction, insufficientHistory: false, currentWindow: current };
+}
+
+// Pure: groups timeLogs into phase-instances (projectId+phase, budget>0
+// only) with per-person minute contributions, each instance's overall
+// actual/budget ratio, and its most-recent activity date (for recency
+// sorting). Shared across every person -- computed once per render, not
+// once per person, so it can't drift between people shown in the same view.
+function computePhaseContributions(logs, projects) {
+  const instances = {};
+  projects.forEach(proj => {
+    const phases = proj.phases || {};
+    Object.keys(phases).forEach(phaseName => {
+      const budgetHours = phases[phaseName] || 0;
+      if (!budgetHours) return;
+      instances[proj.id + '|' + phaseName] = {
+        projectId: proj.id, projectName: proj.name || proj.id, phase: phaseName,
+        budgetMins: budgetHours * 60, totalActualMins: 0, byPerson: {}, mostRecentDate: null,
+      };
+    });
+  });
+  logs.forEach(l => {
+    if (!l.projectId || !l.phase) return;
+    const inst = instances[l.projectId + '|' + l.phase];
+    if (!inst) return; // no budget set for this phase -- not tracked here, same as Layer A
+    inst.totalActualMins += (l.durationMins || 0);
+    inst.byPerson[l.userId] = (inst.byPerson[l.userId] || 0) + (l.durationMins || 0);
+    if (l.date && (!inst.mostRecentDate || l.date > inst.mostRecentDate)) inst.mostRecentDate = l.date;
+  });
+  return Object.values(instances).filter(inst => inst.totalActualMins > 0);
+}
+
+// Pure: a person's estimation-vs-actual PATTERN. Deliberately never
+// computes a "share of the overrun" for a shared phase -- only whether
+// THIS person was a meaningful contributor (>= minContributionPct of
+// that instance's total hours), then compares their most-recent N such
+// instances' over-run RATE against their own historical rate. Raw
+// per-instance data (their hours, total hours, budget, ratio) is
+// returned unmodified for direct display -- no attribution math applied
+// to it anywhere.
+function computeEstimationPattern(phaseInstances, userId, minContributionPct, recentCount, minHistoricalCount) {
+  const contributed = phaseInstances
+    .filter(inst => inst.totalActualMins > 0 && (inst.byPerson[userId] || 0) / inst.totalActualMins >= minContributionPct)
+    .map(inst => ({ ...inst, ratio: inst.totalActualMins / inst.budgetMins, personMins: inst.byPerson[userId] }))
+    .sort((a, b) => (b.mostRecentDate || '').localeCompare(a.mostRecentDate || ''));
+
+  const recent = contributed.slice(0, recentCount);
+  const historical = contributed.slice(recentCount);
+
+  if (recent.length < recentCount || historical.length < minHistoricalCount) {
+    return { contributed, recent, historical, flagged: false, insufficientHistory: true, recentOverRate: null, historicalOverRate: null };
+  }
+  const overRate = (arr) => arr.filter(x => x.ratio > 1.10).length / arr.length;
+  const recentOverRate = overRate(recent);
+  const historicalOverRate = overRate(historical);
+  const flagged = (recentOverRate - historicalOverRate) >= 0.4;
+  return { contributed, recent, historical, flagged, insufficientHistory: false, recentOverRate, historicalOverRate };
+}
+
+async function renderIndividualInsight() {
+  const container = document.getElementById('sh-individualinsight');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  try {
+    const [projSnap, logSnap, leaveSnap, userSnap] = await Promise.all([
+      db.collection('projects').get({ source: 'server' }),
+      db.collection('timeLogs').get({ source: 'server' }),
+      db.collection('leaveRequests').get({ source: 'server' }),
+      db.collection('users').get({ source: 'server' }),
+    ]);
+    const projects = []; projSnap.forEach(d => projects.push({ ...d.data(), id: d.id }));
+    const logs = []; logSnap.forEach(d => logs.push({ ...d.data(), id: d.id }));
+    const leaveRequestsFresh = []; leaveSnap.forEach(d => leaveRequestsFresh.push({ ...d.data(), id: d.id }));
+    const allUsers = []; userSnap.forEach(d => allUsers.push({ id: d.id, name: d.data().name, isAdmin: d.data().isAdmin }));
+    shCachedInsightData = { projects, logs, leaveRequestsFresh, allUsers };
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+  renderIndividualInsightBody();
+}
+
+// Renders from shCachedInsightData + the current selector state --
+// deliberately does NOT re-fetch (picking a person or changing the
+// window is a local view change, not new data; only the tab-open and the
+// explicit refresh link re-fetch, matching Project Health's own pattern).
+function renderIndividualInsightBody() {
+  const container = document.getElementById('sh-individualinsight');
+  const data = shCachedInsightData;
+  if (!container || !data) return;
+  const { projects, logs, leaveRequestsFresh, allUsers } = data;
+  const today = new Date();
+
+  const phaseInstances = computePhaseContributions(logs, projects);
+  const peopleWithData = allUsers.filter(u => logs.some(l => l.userId === u.id));
+
+  const flagSentences = [];
+  const patternsByPerson = {};
+  peopleWithData.forEach(u => {
+    const wl = computeWorkloadPattern(logs, u.id, shSelectedWindowDays, SH_PRIOR_WINDOW_COUNT, today);
+    const est = computeEstimationPattern(phaseInstances, u.id, SH_EST_MIN_CONTRIBUTION_PCT, SH_EST_RECENT_COUNT, SH_EST_MIN_HISTORICAL_COUNT);
+    patternsByPerson[u.id] = { workload: wl, estimation: est };
+    if (wl.flagged) {
+      flagSentences.push({ name: u.name, text: `${u.name}'s workload this period is well ${wl.direction} their own normal — worth a look.` });
+    }
+    if (est.flagged) {
+      const recentOverCount = est.recent.filter(x => x.ratio > 1.10).length;
+      const historicalOverCount = est.historical.filter(x => x.ratio > 1.10).length;
+      flagSentences.push({ name: u.name, text: `Phases ${u.name} has meaningfully worked on have run over budget in ${recentOverCount} of their last ${est.recent.length}, versus ${historicalOverCount} of ${est.historical.length} historically — worth a conversation.` });
+    }
+  });
+  flagSentences.sort((a, b) => a.name.localeCompare(b.name)); // alphabetical, NEVER by magnitude
+
+  const peopleOptions = peopleWithData
+    .slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map(u => `<option value="${u.id}" ${u.id === shSelectedPersonId ? 'selected' : ''}>${u.name}</option>`).join('');
+
+  let selectedPersonHTML = '<div class="sh-flag-none">Pick a name above to see their numbers.</div>';
+  if (shSelectedPersonId && patternsByPerson[shSelectedPersonId]) {
+    const u = peopleWithData.find(p => p.id === shSelectedPersonId);
+    const { workload: wl, estimation: est } = patternsByPerson[shSelectedPersonId];
+    const leaveDays = approvedLeaveDaysInWindow(leaveRequestsFresh, shSelectedPersonId, wl.currentWindow.start, wl.currentWindow.end);
+
+    let workloadHTML;
+    if (wl.insufficientHistory) {
+      workloadHTML = `<p>${(wl.currentMins / 60).toFixed(1)}h logged in the last ${shSelectedWindowDays} days. Not enough prior history yet to compare against their own normal.</p>`;
+    } else {
+      workloadHTML = `<p>${(wl.currentMins / 60).toFixed(1)}h logged in the last ${shSelectedWindowDays} days, versus their own average of ${(wl.avgPriorMins / 60).toFixed(1)}h over the same length window.</p>`;
+    }
+    if (leaveDays > 0) workloadHTML += `<p style="color:#8A7E74;">${leaveDays} day${leaveDays > 1 ? 's' : ''} of approved leave in this period.</p>`;
+
+    let estRows = '';
+    const rowsFor = (arr) => arr.map(x => `<tr><td>${x.projectName} — ${x.phase}</td><td class="sh-num">${(x.personMins / 60).toFixed(1)}h</td><td class="sh-num">${(x.totalActualMins / 60).toFixed(1)}h</td><td class="sh-num">${(x.budgetMins / 60).toFixed(0)}h</td><td class="sh-num">${Math.round(x.ratio * 100)}%</td></tr>`).join('');
+    if (est.contributed.length === 0) {
+      estRows = '<tr><td colspan="5" class="sh-flag-none">No phases with a meaningful (≥20%) contribution found.</td></tr>';
+    } else {
+      if (est.recent.length) estRows += `<tr class="sh-proj-group"><td colspan="5">Most recent</td></tr>` + rowsFor(est.recent);
+      if (est.historical.length) estRows += `<tr class="sh-proj-group"><td colspan="5">Historical</td></tr>` + rowsFor(est.historical);
+    }
+
+    selectedPersonHTML = `
+      <div style="margin-bottom:16px;"><strong>${u.name}</strong> — Workload</div>
+      ${workloadHTML}
+      <div style="margin:16px 0 8px;"><strong>${u.name}</strong> — Phases meaningfully worked on (≥20% of that phase's hours), their raw numbers, no attribution math</div>
+      <table class="sh-table">
+        <thead><tr><th>Project — Phase</th><th style="text-align:right">Their Hours</th><th style="text-align:right">Total Hours</th><th style="text-align:right">Budget</th><th style="text-align:right">%</th></tr></thead>
+        <tbody>${estRows}</tbody>
+      </table>
+      ${est.insufficientHistory ? '<p style="color:#8A7E74;font-size:12px;margin-top:8px;">Not enough phase history yet (need ' + SH_EST_RECENT_COUNT + ' recent + ' + SH_EST_MIN_HISTORICAL_COUNT + ' historical) to compare a pattern.</p>' : ''}
+    `;
+  }
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shiiRefreshLink" style="color:#A96E35;">refresh</a></div>
+    <div class="card">
+      <div class="card-title">🔎 Patterns Worth a Look — workload and estimation, vs. each person's own history</div>
+      ${flagSentences.length ? flagSentences.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f.text}</div></div>`).join('') : '<div class="sh-flag-none">Nothing stands out right now.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">👤 Look at One Person</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <select class="form-control" id="shiiPersonPicker" style="max-width:220px;">
+          <option value="">Select a person…</option>
+          ${peopleOptions}
+        </select>
+        <select class="form-control" id="shiiWindowPicker" style="max-width:160px;">
+          ${SH_WORKLOAD_WINDOWS.map(d => `<option value="${d}" ${d === shSelectedWindowDays ? 'selected' : ''}>Last ${d} Days</option>`).join('')}
+        </select>
+      </div>
+      ${selectedPersonHTML}
+    </div>
+  `;
+
+  const personPicker = document.getElementById('shiiPersonPicker');
+  if (personPicker) personPicker.addEventListener('change', (e) => { shSelectedPersonId = e.target.value; renderIndividualInsightBody(); });
+  const windowPicker = document.getElementById('shiiWindowPicker');
+  if (windowPicker) windowPicker.addEventListener('change', (e) => { shSelectedWindowDays = parseInt(e.target.value, 10); renderIndividualInsightBody(); });
+  const refreshLink = document.getElementById('shiiRefreshLink');
+  if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderIndividualInsight(); });
+}
+
+// ═══════════════════════════════════════════════════════
 // INIT — Load data then set up login
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
@@ -4165,15 +4447,19 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='studiohealth') renderStudioHealth();
   });
 
-// V16.10: Studio Health tab-switching -- local to this page, same
+// V16.10/V16.11: Studio Health tab-switching -- local to this page, same
 // active-class-toggle pattern as the main nav above, scoped to .sh-tab/
-// .sh-tabcontent so it can't interfere with page navigation.
+// .sh-tabcontent so it can't interfere with page navigation. Each tab
+// with a render function re-fetches fresh on every click (not just the
+// first time) -- same "don't trust a snapshot from whenever this admin
+// tab happened to load" reasoning as Project Health's own refresh link.
 document.querySelectorAll('.sh-tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.sh-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.sh-tabcontent').forEach(c => c.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById('sh-' + tab.dataset.shtab).classList.add('active');
+    if (tab.dataset.shtab === 'individualinsight') renderIndividualInsight();
   });
 });
 });
