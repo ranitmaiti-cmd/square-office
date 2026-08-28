@@ -7265,7 +7265,16 @@ function finalizeCurrentSession(reason) {
   // the full external-finalize response (toast + resetTimer) against a
   // session that was never actually over. Only the capped branch below is a
   // real end -- that one still correctly writes inProgress:false.
-  upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:!capped,ts:Date.now(),...(capped?{autoCapped:true}:{})});
+  // V16.9 (reconciliation-flag-clear gap, 2026-08-28): mirrors
+  // closeCurrentSessionNow()'s 2026-08-15.4 fix, but ONLY in the capped
+  // branch -- this write fires on every heartbeat checkpoint, uncapped or
+  // not, and an uncapped checkpoint is NOT a close (see the comment above:
+  // "durability write for a session that's STILL running"). Clearing
+  // reconciliationNeeded unconditionally here would be wrong -- it would
+  // fire on ordinary live ticks too. Only the capped branch is a genuine,
+  // definitive end, exactly the same "only touches a write that's a real
+  // close" principle the original fix used.
+  upsertTimeLog({id:currentSessionLogId,userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc,productive:timerLinkedPlan.type!=='lunch',inProgress:!capped,ts:Date.now(),...(capped?{autoCapped:true,reconciliationNeeded:false}:{})});
 
   if (capped) {
     console.log(`⚠️ Session auto-capped at ${MAX_SESSION_HOURS}h (${reason}) -- stopping, was likely left running`);
@@ -7559,7 +7568,16 @@ document.getElementById('timerCompleteBtn').addEventListener('click', async ()=>
   // V14.3.35: sessionStartMs here too -- a session under 60s never ticks a
   // heartbeat, so this is its ONLY write. Matches Stage 1's heartbeat path
   // exactly: timerStartedAt (the session's true origin), not Date.now().
-  upsertTimeLog({id:currentSessionLogId||genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,inProgress:false,ts:Date.now(),sessionStartMs:timerStartedAt,...(capped?{autoCapped:true}:{})});
+  // V16.9 (reconciliation-flag-clear gap, 2026-08-28): mirrors
+  // closeCurrentSessionNow()'s 2026-08-15.4 fix -- this write IS always a
+  // genuine close (inProgress:false unconditionally, right above), so
+  // unlike the heartbeat's capped-only branch above, this one is
+  // unconditional too. Without this, a session flagged reconciliationNeeded
+  // mid-day (a brief stale-heartbeat blip) that later closes via Complete
+  // Task -- rather than a task-switch or logout -- stays stuck showing
+  // "needs reconciliation" indefinitely even though it's actually a
+  // correctly-closed doc. Exactly what happened to Rai's 26 Aug day.
+  upsertTimeLog({id:currentSessionLogId||genId(),userId:currentUser.id,date:today,projectId:timerLinkedPlan.projectId,projectName:timerLinkedPlan.project,phase:timerLinkedPlan.phase,typology:timerLinkedPlan.typology,activity:'',durationMins:mins,startTime:clockStart,endTime:clockEnd,desc:autoDesc,productive:true,inProgress:false,ts:Date.now(),sessionStartMs:timerStartedAt,reconciliationNeeded:false,...(capped?{autoCapped:true}:{})});
   const plan=planEntries.find(p=>p.id===timerLinkedPlan.id);
   if(plan)plan.done=true;
 
@@ -8417,6 +8435,12 @@ function runEndOfDayCheck() {
 
     if (linkedPlanSnapshot) {
       // V14.3.3: finalise the heartbeat log under the same id (no duplicate)
+      // V16.9 (reconciliation-flag-clear gap, 2026-08-28): mirrors
+      // closeCurrentSessionNow()'s 2026-08-15.4 fix -- this write is always
+      // a genuine close (inProgress:false unconditionally, same as the
+      // Complete Task path above), so reconciliationNeeded:false is
+      // unconditional here too. Same gap class as Rai's 26 Aug case, just
+      // via the 8pm-tab-still-open trigger instead of Complete Task.
       upsertTimeLog({
         id: currentSessionLogId || genId(), userId: currentUser.id, date: fmt(new Date()),
         projectId: linkedPlanSnapshot.projectId, projectName,
@@ -8424,7 +8448,7 @@ function runEndOfDayCheck() {
         activity: '', durationMins: mins,
         startTime: clockStart, endTime: clockEnd,
         desc: `${linkedPlanSnapshot.typology || linkedPlanSnapshot.phase || 'Work on project'} (Auto-completed at end of day)` + (capped ? ` (auto-capped at ${MAX_SESSION_HOURS}h — verify)` : ''),
-        productive: true, inProgress: false, ts: Date.now(),
+        productive: true, inProgress: false, ts: Date.now(), reconciliationNeeded: false,
         ...(capped?{autoCapped:true}:{})
       });
       const plan = planEntries.find(p => p.id === linkedPlanSnapshot?.id);
