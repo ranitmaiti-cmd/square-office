@@ -367,6 +367,30 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .ap-save-scorecard.saved{background:#6E8F52;}
 .ap-save-status{font-size:10px;color:#B0A89E;line-height:1.3;}
 .ap-save-status.ok{color:#6E8F52;}
+
+/* V16.10: Studio Health -- admin-only reporting, Layer A (Project &
+   Estimation Health) first. Deliberately ONE neutral flag register
+   (tan/amber, matching .ht-badge.met's existing tone) -- NOT the
+   red/green .ht-badge.at-risk/.behind pattern used elsewhere in this
+   file for per-person targets. That contrast is intentional: this view
+   surfaces patterns to investigate, never a pass/fail verdict, so it
+   never borrows the app's existing "you're behind" visual language. */
+.sh-tabs{display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid #E0D8CE;}
+.sh-tab{padding:9px 16px;font-size:13px;font-weight:600;color:#8A7E74;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all 0.15s;}
+.sh-tab:hover{color:#5C4F42;}
+.sh-tab.active{color:#A96E35;border-bottom-color:#A96E35;}
+.sh-tabcontent{display:none;}
+.sh-tabcontent.active{display:block;}
+.sh-empty{text-align:center;color:#8A7E74;padding:44px 20px;font-size:13px;line-height:1.6;}
+.sh-flag{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:8px;background:#FBF7F0;margin-bottom:8px;font-size:13px;line-height:1.5;color:#3D332A;}
+.sh-flag-mark{flex-shrink:0;width:20px;height:20px;border-radius:50%;background:#F0E6D6;color:#8A5828;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px;}
+.sh-flag-none{text-align:center;color:#8A7E74;padding:20px;font-size:13px;}
+.sh-table{width:100%;border-collapse:collapse;font-size:12px;}
+.sh-table th{background:#EDE9E3;padding:8px 12px;text-align:left;font-weight:700;color:#5C4F42;border-bottom:2px solid #E0D8CE;}
+.sh-table td{padding:8px 12px;border-bottom:1px solid #EDE9E3;color:#3D332A;}
+.sh-table td.sh-num{text-align:right;font-variant-numeric:tabular-nums;}
+.sh-proj-group{font-weight:700;color:#5C4F42;background:#F7F4EF;}
+.sh-refresh-note{font-size:11px;color:#8A7E74;margin-bottom:14px;display:flex;align-items:center;gap:6px;}
 </style>
 
 <!-- Firebase SDK v10 - WORKING VERSION -->
@@ -472,6 +496,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="nav-item" data-page="teamleave"><span class="nav-icon">◫</span>Team Leave</div>
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
       <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">◈</span>Manage</div>
+      <div class="nav-item admin-only" data-page="studiohealth" style="display:none;"><span class="nav-icon">❖</span>Studio Health</div>
       <div style="border-top:1px solid #E0D8CE;margin:10px 0;"></div>
       <div class="nav-item" id="timerNavBtn" style="color:#6E8F52;font-weight:600;"><span class="nav-icon">▶</span><span id="timerNavLabel">Start Timer</span></div>
     </div>
@@ -765,6 +790,27 @@ textarea.form-control{min-height:70px;resize:vertical;}
           <div class="card-title">📋 Change Log (Recent Activity)</div>
           <div id="changeLogList" style="font-size:12px;max-height:200px;overflow-y:auto;"></div>
           <button class="btn btn-ghost btn-sm" id="clearChangeLogBtn" style="margin-top:10px;">Clear Log</button>
+        </div>
+      </div>
+
+      <!-- STUDIO HEALTH -->
+      <!-- V16.10: admin-only reporting. Tabbed shell from day one -- only
+           Project Health (Layer A) has content; Submission Log and
+           Individual Insight are present-but-empty placeholders so B/C
+           slot in later without restructuring this page. -->
+      <div class="page admin-only" id="page-studiohealth">
+        <h2 class="page-title">❖ Studio Health</h2>
+        <div class="sh-tabs">
+          <div class="sh-tab active" data-shtab="projecthealth">Project Health</div>
+          <div class="sh-tab" data-shtab="submissionlog">Submission Log</div>
+          <div class="sh-tab" data-shtab="individualinsight">Individual Insight</div>
+        </div>
+        <div class="sh-tabcontent active" id="sh-projecthealth"></div>
+        <div class="sh-tabcontent" id="sh-submissionlog">
+          <div class="sh-empty">Coming soon — a submission log for delivery rhythm and package history, independent of phase budgets.</div>
+        </div>
+        <div class="sh-tabcontent" id="sh-individualinsight">
+          <div class="sh-empty">Coming soon — workload and estimation patterns, presented for you to investigate. Never scores, never rankings.</div>
         </div>
       </div>
 
@@ -3375,6 +3421,169 @@ function phaseLoggedMins(projectId,phaseName){ return timeLogs.filter(l=>l.proje
 function projectLoggedMins(projectId){ return timeLogs.filter(l=>l.projectId===projectId).reduce((s,l)=>s+l.durationMins,0); }
 
 // ═══════════════════════════════════════════════════════
+// V16.10: STUDIO HEALTH -- Layer A (Project & Estimation Health)
+// Admin-only, read-only reporting. Pure aggregation over EXISTING
+// timeLogs.durationMins + project.phases[] -- zero writes, no schema
+// change, never enters computeCollectionDiffs()/the backstop/diffMode
+// system (there is nothing here for that system to register).
+//
+// Reads FRESH from server on open (source:'server'), deliberately NOT
+// the cached in-memory timeLogs/projectsData arrays -- an admin tab can
+// sit open for hours (see the projects/p1-p2 staleness lesson,
+// FINDINGS-2026-08-10.md "Overnight admin-tab redundant write"), and a
+// stale in-memory snapshot here would misreport project health.
+//
+// The two aggregation functions below are deliberately pure (take their
+// data as arguments, touch no globals) and are NOT inlined into the
+// render function -- Layer C (individual insight, not yet built) will
+// reuse this exact math regrouped by person instead of becoming a 14th
+// independent summation site that could quietly diverge from Layer A's
+// numbers. This is also why they don't call the existing global-array-
+// bound phaseLoggedMins()/projectLoggedMins() just above: those read the
+// cached `timeLogs` array, which is exactly what this view avoids.
+//
+// Insight-not-verdict, proven here first (project-level, no names
+// attached at this layer, so mistakes in the visual language are cheap
+// to catch before Layer C puts a person's name next to a flag): flags
+// render as plain-language lines (.sh-flag), ONE neutral visual
+// register (.sh-flag-mark, tan/amber -- never the red/green
+// .ht-badge.at-risk/.behind pattern used elsewhere in this file for
+// per-person targets), and the reference table is grouped by PROJECT,
+// never sorted by "worst overrun" -- sorting by severity is a ranking
+// wearing a table's clothing.
+// ═══════════════════════════════════════════════════════
+
+// Groups durationMins by projectId+phase from a raw timeLogs array.
+// Pure function: no Firestore access, no globals beyond its argument.
+function sumHoursByProjectPhase(logs) {
+  const byProjectPhase = {}; // { projectId: { phaseName: totalMins } }
+  logs.forEach(l => {
+    if (!l.projectId || !l.phase) return; // skip lunch/unplanned/non-project entries
+    if (!byProjectPhase[l.projectId]) byProjectPhase[l.projectId] = {};
+    byProjectPhase[l.projectId][l.phase] = (byProjectPhase[l.projectId][l.phase] || 0) + (l.durationMins || 0);
+  });
+  return byProjectPhase;
+}
+
+// Cross-project estimation bias per phase NAME (not per-project) -- sums
+// actual and budgeted hours for a given phase type across every project
+// that has budgeted it, so a systemic over/under-run pattern is visible
+// even when no single project looks alarming on its own. Pure function.
+function computeEstimationBias(projects, byProjectPhase) {
+  const byPhaseName = {}; // { phaseName: { actualMins, budgetMins, projectCount } }
+  projects.forEach(proj => {
+    const phases = proj.phases || {};
+    Object.keys(phases).forEach(phaseName => {
+      const budgetHours = phases[phaseName] || 0;
+      if (!budgetHours) return; // no budget set for this phase -- nothing to compare
+      const actualMins = (byProjectPhase[proj.id] && byProjectPhase[proj.id][phaseName]) || 0;
+      if (!byPhaseName[phaseName]) byPhaseName[phaseName] = { actualMins: 0, budgetMins: 0, projectCount: 0 };
+      byPhaseName[phaseName].actualMins += actualMins;
+      byPhaseName[phaseName].budgetMins += budgetHours * 60;
+      byPhaseName[phaseName].projectCount += 1;
+    });
+  });
+  return byPhaseName;
+}
+
+async function renderStudioHealth() {
+  const container = document.getElementById('sh-projecthealth');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  let projects, logs;
+  try {
+    const [projSnap, logSnap] = await Promise.all([
+      db.collection('projects').get({ source: 'server' }),
+      db.collection('timeLogs').get({ source: 'server' }),
+    ]);
+    projects = []; projSnap.forEach(d => projects.push({ ...d.data(), id: d.id }));
+    logs = []; logSnap.forEach(d => logs.push({ ...d.data(), id: d.id }));
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+
+  const byProjectPhase = sumHoursByProjectPhase(logs);
+  const bias = computeEstimationBias(projects, byProjectPhase);
+
+  // Estimation-bias flags: phase TYPES running >10% over/under in
+  // aggregate across projects that have budgeted them (same 10%
+  // tolerance already used elsewhere in this file for per-person budget
+  // adherence, index.html's Appraisal scoring -- reused here for
+  // consistency, not a new arbitrary threshold).
+  const biasFlags = [];
+  Object.keys(bias).sort().forEach(phaseName => {
+    const b = bias[phaseName];
+    if (b.budgetMins <= 0) return;
+    const pct = b.actualMins / b.budgetMins;
+    if (pct > 1.10) {
+      biasFlags.push(`${phaseName} phases are running over budget on average (${Math.round(pct * 100)}% of budgeted hours across ${b.projectCount} project${b.projectCount > 1 ? 's' : ''}) — worth a look.`);
+    } else if (pct < 0.70 && b.actualMins > 0) {
+      biasFlags.push(`${phaseName} phases are finishing well under budget on average (${Math.round(pct * 100)}% of budgeted hours across ${b.projectCount} project${b.projectCount > 1 ? 's' : ''}) — worth checking whether that's efficiency or under-scoped budgets.`);
+    }
+  });
+
+  // Live burn: phases that are CURRENTLY open (a doc still inProgress)
+  // and already at or past 90% of their own budget -- the early-warning
+  // case, project-level, no person named.
+  const liveFlags = [];
+  projects.forEach(proj => {
+    const phases = proj.phases || {};
+    Object.keys(phases).forEach(phaseName => {
+      const budgetHours = phases[phaseName] || 0;
+      if (!budgetHours) return;
+      const isLive = logs.some(l => l.projectId === proj.id && l.phase === phaseName && l.inProgress === true);
+      if (!isLive) return;
+      const actualMins = (byProjectPhase[proj.id] && byProjectPhase[proj.id][phaseName]) || 0;
+      const pct = actualMins / (budgetHours * 60);
+      if (pct >= 0.90) {
+        liveFlags.push(`${proj.name || proj.id} — ${phaseName} is at ${Math.round(pct * 100)}% of budget and still running.`);
+      }
+    });
+  });
+
+  // Reference table: grouped BY PROJECT, in whatever order projects
+  // naturally come back in -- deliberately not sorted by overrun%, which
+  // would read as a ranking regardless of any caption above it.
+  let tableRows = '';
+  projects.forEach(proj => {
+    const phases = proj.phases || {};
+    const phaseNames = Object.keys(phases).filter(p => phases[p]);
+    if (phaseNames.length === 0) return;
+    tableRows += `<tr class="sh-proj-group"><td colspan="4">${proj.name || proj.id}</td></tr>`;
+    phaseNames.forEach(phaseName => {
+      const budgetHours = phases[phaseName];
+      const actualMins = (byProjectPhase[proj.id] && byProjectPhase[proj.id][phaseName]) || 0;
+      const actualHours = actualMins / 60;
+      const pct = budgetHours > 0 ? Math.round((actualHours / budgetHours) * 100) : 0;
+      tableRows += `<tr><td>${phaseName}</td><td class="sh-num">${actualHours.toFixed(1)}h</td><td class="sh-num">${budgetHours}h</td><td class="sh-num">${pct}%</td></tr>`;
+    });
+  });
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shRefreshLink" style="color:#A96E35;">refresh</a></div>
+    <div class="card">
+      <div class="card-title">📊 Estimation Bias — which phase types run over or under, across projects</div>
+      ${biasFlags.length ? biasFlags.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f}</div></div>`).join('') : '<div class="sh-flag-none">No phase type is running meaningfully over or under budget right now.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">⏱ Live Project Burn — open phases nearing or past budget</div>
+      ${liveFlags.length ? liveFlags.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f}</div></div>`).join('') : '<div class="sh-flag-none">No currently-open phase is near its budget.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">📁 Actual vs. Budget, by Project</div>
+      <table class="sh-table">
+        <thead><tr><th>Phase</th><th style="text-align:right">Actual</th><th style="text-align:right">Budget</th><th style="text-align:right">%</th></tr></thead>
+        <tbody>${tableRows || '<tr><td colspan="4" class="sh-flag-none">No budgeted phases found.</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+  const refreshLink = document.getElementById('shRefreshLink');
+  if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderStudioHealth(); });
+}
+
+// ═══════════════════════════════════════════════════════
 // INIT — Load data then set up login
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
@@ -3953,7 +4162,20 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='manage')       renderManage();
     if(page==='hourstracker') renderHoursTracker();
     if(page==='appraisal')   renderAppraisal();
+    if(page==='studiohealth') renderStudioHealth();
   });
+
+// V16.10: Studio Health tab-switching -- local to this page, same
+// active-class-toggle pattern as the main nav above, scoped to .sh-tab/
+// .sh-tabcontent so it can't interfere with page navigation.
+document.querySelectorAll('.sh-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.sh-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.sh-tabcontent').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('sh-' + tab.dataset.shtab).classList.add('active');
+  });
+});
 });
 
 // ═══════════════════════════════════════════════════════
