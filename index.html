@@ -3585,25 +3585,40 @@ async function renderStudioHealth() {
 }
 
 // ═══════════════════════════════════════════════════════
-// V16.11: Studio Health -- Individual Insight, Workload (#1) and
-// Estimation-vs-actual (#3) ONLY. Attendance (#2) deliberately HELD --
-// no new collection, no plumbing, no writes here at all (see
-// FINDINGS-2026-08-10.md, "Individual Insight" scoping: biometric IN-time
-// is fetched live by api/biometric-sync.js and never persisted anywhere
-// today -- that's separate server-side work, decided later).
+// V16.13 (reshaped 2026-08-28, after a second real-data review):
+// Individual Insight now leads with MARGIN RISK -- project/phase
+// economics, not individual performance. The owner bills roughly fixed
+// revenue, so hours running over budget is lost margin, full stop, not
+// a person-quality question. This is a deliberate reframe of what
+// V16.12 called "estimation-vs-actual, per person, primary" -- the
+// BURDWAN-RD clustering that used to surface as three separate
+// person-level "worth a conversation" sentences now surfaces ONCE, at
+// the project level, with people-on-it as drill-down "why" detail
+// underneath, not three individual flags.
 //
-// Same pure-read shape as Layer A: fresh source:'server' reads on open,
-// zero writes, no schema change. Compares each person ONLY to their own
-// history -- never a shared absolute target (no part-time/employment-type
-// field exists to build one fairly) and never to each other.
+// Attendance (#2, biometric IN-time) is STILL deliberately held out --
+// unchanged from V16.11/12, still no plumbing, still not persisted
+// anywhere in this system today.
 //
-// STRUCTURAL anti-scoreboard mechanism, not cosmetic: flag SENTENCES can
-// name multiple people at once (sorted alphabetically -- never by
-// magnitude, which would itself be a ranking), but carry no numbers. Raw
-// numbers only ever render for ONE person at a time, after a deliberate
-// picker selection -- there is no view anywhere in this feature where two
-// people's numbers are visible together. That is what actually prevents
-// ranking: you cannot compare what you cannot see side by side.
+// Same pure-read shape as every layer so far: fresh source:'server'
+// reads on open, zero writes, no schema change. Person-level patterns
+// (workload, the estimation recency-pattern) still compare each person
+// ONLY to their own history -- never a shared target, never each other.
+//
+// TWO drill-down axes now, both still one-at-a-time and non-comparative:
+// "Look at One Project" (margin risk -- budget burn bars, plus who's on
+// it) and "Look at One Person" (versatility/workload/leave-heatmap).
+//
+// STRUCTURAL anti-scoreboard mechanism, extended to the new visuals, with
+// ONE explicit, deliberate exception: flag sentences and the "Look at
+// One Person" drill-down never show two people's numbers together --
+// unchanged. The "Look at One Project" contributor list is DIFFERENT ON
+// PURPOSE: showing who worked on a shared over-budget phase is project
+// staffing context ("who's on this, for the why conversation"), not a
+// performance comparison between them -- the owner asked for this
+// explicitly, and it doesn't reopen the person-ranking risk because the
+// signal being surfaced is about the PROJECT, not about comparing the
+// people on it to each other.
 // ═══════════════════════════════════════════════════════
 
 const SH_WORKLOAD_WINDOWS = [7, 30]; // selectable window sizes, in days
@@ -3621,17 +3636,17 @@ const SH_WORKLOAD_DROP_RATIO = 0.4;  // <= 40% of their own normal
 const SH_EST_MIN_CONTRIBUTION_PCT = 0.20; // meaningful-contributor threshold -- no drive-by dilution
 const SH_EST_RECENT_COUNT = 5;            // "last N" phase-instances, per the owner's own example shape
 const SH_EST_MIN_HISTORICAL_COUNT = 3;    // minimum historical sample before drawing any comparison
-// V16.12: the PRIMARY estimation signal -- a meaningful contributor on a
-// phase that's ALREADY significantly over budget, right now, independent
-// of whether enough history exists for the recency-vs-historical pattern
-// below. This is the Taskiya-shaped case from the real-data review: one
-// phase-instance was enough to be worth a look, it didn't need 5+3
-// samples to matter. Deliberately a higher bar than Layer A's 10%
-// aggregate-bias tolerance -- an individual "worth a conversation" flag
-// should mean more than a phase running a little hot.
+// V16.13: the bar for a REAL margin problem -- reused for both the new
+// project-level Margin Risk ranking and the (still-kept) person-level
+// estimation recency-pattern's own internal over/under check. Kept as
+// one constant rather than two so the two signals stay consistent with
+// each other about what "significantly over" means.
 const SH_EST_SIGNIFICANT_OVER_RATIO = 1.5;
+const SH_TREND_WEEKS = 12;   // workload trend sparkline: last N weeks, one person's own series only
+const SH_HEATMAP_DAYS = 120; // leave-near-holiday heatmap: last N days, one person's own calendar only
 
-let shCachedInsightData = null; // { projects, logs, leaveRequestsFresh, allUsers } -- set once per fetch, re-rendered from on selector changes
+let shCachedInsightData = null; // { projects, logs, leaveRequestsFresh, allUsers, holidaysFresh } -- set once per fetch, re-rendered from on selector changes
+let shSelectedProjectId = '';
 let shSelectedPersonId = '';
 let shSelectedWindowDays = 30;
 
@@ -3640,13 +3655,27 @@ let shSelectedWindowDays = 30;
 // look artificially "light" against full prior months. offsetPeriods=0
 // is the current window; 1, 2, 3... are equal-length windows immediately
 // before it, all real, none partial. Pure -- `today` passed in as an arg.
+// Pure: formats a Date's LOCAL calendar-day components as 'YYYY-MM-DD' --
+// deliberately NOT d.toISOString().slice(0,10), which converts to UTC
+// first and silently rolls the date back a day for any local time before
+// UTC (IST midnight-05:29 becomes the PREVIOUS UTC day) -- the exact
+// pitfall fmt() itself was already written to avoid (see the comment at
+// its own definition, a few hundred lines up). Every local-day
+// computation in this section goes through this one function so that
+// mistake can't recur independently at each call site.
+function toLocalDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function getWindowBounds(windowDays, offsetPeriods, today) {
   const end = new Date(today);
   end.setDate(end.getDate() - windowDays * offsetPeriods);
   const start = new Date(end);
   start.setDate(start.getDate() - windowDays);
-  const fmt = (d) => d.toISOString().slice(0, 10);
-  return { start: fmt(start), end: fmt(end) };
+  return { start: toLocalDateStr(start), end: toLocalDateStr(end) };
 }
 
 // Pure: sums productive minutes for one person within [start, end).
@@ -3669,7 +3698,7 @@ function approvedLeaveDaysInWindow(leaveRequestsList, userId, start, end) {
     let d = new Date(s + 'T00:00:00');
     const leaveEnd = new Date(l.endDate + 'T00:00:00');
     while (d <= leaveEnd) {
-      const ds = d.toISOString().slice(0, 10);
+      const ds = toLocalDateStr(d);
       if (ds >= start && ds < end) days++;
       d.setDate(d.getDate() + 1);
     }
@@ -3761,16 +3790,168 @@ function computeEstimationPattern(phaseInstances, userId, minContributionPct, re
   return { contributed, recent, historical, flagged, insufficientHistory: false, recentOverRate, historicalOverRate };
 }
 
-// V16.12: the PRIMARY estimation signal, pure. A meaningful contributor
-// on a phase-instance that's ALREADY significantly over budget, right
-// now -- doesn't wait on enough history to exist for the recency pattern
-// above. This is deliberately the lead signal (see the real-data
-// review): a single over-budget phase with a real contributor on it is
-// worth a look on its own, unlike computeEstimationPattern()'s
-// comparison, which structurally can't say anything until 5+3 samples
-// exist.
-function significantlyOverBudgetInstances(contributed, overBudgetRatio) {
-  return contributed.filter(x => x.ratio > overBudgetRatio);
+// V16.13: the PRIMARY signal, pure, and now PROJECT-level. Every
+// budgeted phase-instance running significantly over budget, ranked by
+// ABSOLUTE hours over -- the direct proxy for margin lost, since revenue
+// is roughly fixed. Deliberately NOT ranked by percentage: a small phase
+// at 288% can represent fewer real hours (less real money) than a large
+// phase at 130%. Ranking PROJECTS by severity is fine -- unlike ranking
+// PEOPLE, it was never what the anti-scoreboard rule protected against
+// (Layer A's own "over-budget is a project signal" already established
+// this). Supersedes V16.12's significantlyOverBudgetInstances(), which
+// this replaces at the project level -- see the header above for why.
+function computeMarginRiskRanking(phaseInstances, minRatio) {
+  return phaseInstances
+    .filter(inst => inst.budgetMins > 0 && inst.totalActualMins / inst.budgetMins > minRatio)
+    .map(inst => ({
+      ...inst,
+      ratio: inst.totalActualMins / inst.budgetMins,
+      hoursOver: (inst.totalActualMins - inst.budgetMins) / 60,
+    }))
+    .sort((a, b) => b.hoursOver - a.hoursOver);
+}
+
+// Pure: which people were MEANINGFUL contributors (>= minContributionPct)
+// to one specific phase-instance -- the "who's on this, for the why
+// conversation" detail shown under a Margin Risk project. Raw hours
+// only, sorted by their own hours purely for legibility (most-involved
+// first) -- NOT a quality ranking; see the file-level header for why
+// this deliberately differs from the person-view's no-side-by-side rule.
+function meaningfulContributorsFor(phaseInstance, minContributionPct, allUsers) {
+  return Object.keys(phaseInstance.byPerson)
+    .filter(uid => phaseInstance.byPerson[uid] / phaseInstance.totalActualMins >= minContributionPct)
+    .map(uid => ({ userId: uid, name: (allUsers.find(u => u.id === uid) || {}).name || uid, hours: phaseInstance.byPerson[uid] / 60 }))
+    .sort((a, b) => b.hours - a.hours);
+}
+
+// Pure: distinct active-project count for one person within [start, end).
+function distinctProjectCount(logs, userId, start, end) {
+  const set = new Set();
+  logs.filter(l => l.userId === userId && l.projectId && l.date >= start && l.date < end).forEach(l => set.add(l.projectId));
+  return set.size;
+}
+
+// Pure: Versatility -- current-window distinct-project count vs. the
+// average of SH_PRIOR_WINDOW_COUNT prior windows, same self-baseline
+// shape as computeWorkloadPattern(). Deliberately does NOT set a
+// flagged/direction outcome -- this is framed as a pattern to interpret
+// (potentially positive, could also mean spread thin), not a proactive
+// alert, so it's shown only as a stat in the person drill-down, never as
+// its own flag sentence.
+function computeVersatilityStat(logs, userId, windowDays, priorWindowCount, today) {
+  const current = getWindowBounds(windowDays, 0, today);
+  const currentCount = distinctProjectCount(logs, userId, current.start, current.end);
+  const priorCounts = [];
+  for (let i = 1; i <= priorWindowCount; i++) {
+    const w = getWindowBounds(windowDays, i, today);
+    priorCounts.push(distinctProjectCount(logs, userId, w.start, w.end));
+  }
+  const hasPriorData = priorCounts.some(c => c > 0);
+  if (!hasPriorData) return { currentCount, avgPriorCount: null, insufficientHistory: true };
+  const avgPriorCount = priorCounts.reduce((s, c) => s + c, 0) / priorCounts.length;
+  return { currentCount, avgPriorCount, insufficientHistory: false };
+}
+
+// Pure: is this specific calendar date (as a 'YYYY-MM-DD' string) a
+// closed day -- Sunday, a 2nd/4th Saturday (this app's existing sandwich-
+// rule definition, ported verbatim from is24Sat()), or a real holiday
+// from the holidaysList passed in? A pure port of the existing
+// isClosedDay()/is24Sat()/isHoliday() globals (which read the cached
+// `holidays` array) -- needed as a pure function here because Individual
+// Insight reads fresh data, not the cached global.
+function isClosedDayStr(dateStr, holidaysList) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const dow = d.getDay();
+  if (dow === 0) return true; // Sunday
+  if (dow === 6) {
+    const weekOfMonth = Math.floor((d.getDate() - 1) / 7) + 1;
+    if (weekOfMonth === 2 || weekOfMonth === 4) return true; // 2nd/4th Saturday only, matching is24Sat() exactly
+  }
+  return holidaysList.some(h => h.date === dateStr);
+}
+
+function addDaysToDateStr(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return toLocalDateStr(d);
+}
+
+// Pure: which of a person's approved leave requests are adjacent to a
+// weekend/holiday -- the day immediately before it starts, or
+// immediately after it ends, is closed. The "bridge leave" shape (a day
+// taken to extend a long weekend). Deliberately NEUTRAL, coverage-
+// planning framing only -- this is never surfaced as a flag sentence,
+// see renderIndividualInsightBody() below.
+function leaveNearHolidayInstances(leaveRequestsList, userId, holidaysList) {
+  return leaveRequestsList
+    .filter(l => l.userId === userId && l.status === 'approved' && l.startDate && l.endDate)
+    .filter(l => isClosedDayStr(addDaysToDateStr(l.startDate, -1), holidaysList) || isClosedDayStr(addDaysToDateStr(l.endDate, 1), holidaysList));
+}
+
+// Pure: one person's own last `dayCount` days, classified normal/
+// weekend/holiday/leave, oldest-first -- feeds the heatmap visual. Leave
+// takes precedence in classification even if it happens to also be a
+// weekend/holiday (the interesting fact to show is "they were on leave,"
+// not "that day happened to be closed anyway").
+function buildLeaveHeatmapDays(leaveRequestsList, holidaysList, userId, dayCount, today) {
+  const days = [];
+  for (let i = dayCount - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const ds = toLocalDateStr(d);
+    let type = 'normal';
+    if (holidaysList.some(h => h.date === ds)) type = 'holiday';
+    else if (isClosedDayStr(ds, holidaysList)) type = 'weekend';
+    const onLeave = leaveRequestsList.some(l => l.userId === userId && l.status === 'approved' && l.startDate <= ds && ds <= l.endDate);
+    if (onLeave) type = 'leave';
+    days.push({ date: ds, type });
+  }
+  return days;
+}
+
+// Pure: one person's own last `weekCount` weeks of productive hours,
+// oldest-first -- a purely VISUAL series (the workload FLAG itself still
+// comes from computeWorkloadPattern()'s current-vs-prior-average
+// comparison; this is a finer-grained trend for the sparkline only).
+function computeWorkloadTrend(logs, userId, weekCount, today) {
+  const points = [];
+  for (let i = weekCount - 1; i >= 0; i--) {
+    const w = getWindowBounds(7, i, today);
+    points.push({ weekStart: w.start, hours: productiveMinsInWindow(logs, userId, w.start, w.end) / 60 });
+  }
+  return points;
+}
+
+// Presentational (deterministic string builders, not business logic) --
+// hand-built inline SVG, no charting library. Both take exactly ONE
+// person's own data and nothing else -- single series / single calendar,
+// confirmed by fixture, never two people on the same chart.
+function renderWorkloadTrendSVG(points) {
+  const w = 260, h = 50, pad = 4;
+  const max = Math.max(1, ...points.map(p => p.hours));
+  const n = Math.max(1, points.length - 1);
+  const stepX = (w - pad * 2) / n;
+  const barW = Math.max(2, stepX * 0.6);
+  const bars = points.map((p, i) => {
+    const x = pad + i * stepX - barW / 2;
+    const barH = Math.max(1, (p.hours / max) * (h - pad * 2));
+    const y = h - pad - barH;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" fill="#A96E35" opacity="0.55" rx="1"></rect>`;
+  }).join('');
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;">${bars}</svg>`;
+}
+
+function renderLeaveHeatmapSVG(days) {
+  const cell = 10, gap = 2, cols = 14;
+  const colorFor = { leave: '#D8B98A', holiday: '#B9CFE0', weekend: '#E8E2D8', normal: '#F5F2ED' };
+  const rows = Math.ceil(days.length / cols);
+  const rects = days.map((d, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = col * (cell + gap), y = row * (cell + gap);
+    return `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" fill="${colorFor[d.type]}"></rect>`;
+  }).join('');
+  const w = cols * (cell + gap), h = rows * (cell + gap);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;">${rects}</svg>`;
 }
 
 async function renderIndividualInsight() {
@@ -3779,17 +3960,25 @@ async function renderIndividualInsight() {
   container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
 
   try {
-    const [projSnap, logSnap, leaveSnap, userSnap] = await Promise.all([
+    const [projSnap, logSnap, leaveSnap, userSnap, companySnap] = await Promise.all([
       db.collection('projects').get({ source: 'server' }),
       db.collection('timeLogs').get({ source: 'server' }),
       db.collection('leaveRequests').get({ source: 'server' }),
       db.collection('users').get({ source: 'server' }),
+      // V16.13: the ONE non-collection read this feature needs -- holidays
+      // lives as a field on the legacy single companyData/squareDB doc
+      // (predates the per-collection migration projects/timeLogs/
+      // leaveRequests/users already went through), not its own
+      // collection. Still a pure, fresh, targeted source:'server' read --
+      // no new plumbing, just a different existing read shape.
+      db.collection('companyData').doc('squareDB').get({ source: 'server' }),
     ]);
     const projects = []; projSnap.forEach(d => projects.push({ ...d.data(), id: d.id }));
     const logs = []; logSnap.forEach(d => logs.push({ ...d.data(), id: d.id }));
     const leaveRequestsFresh = []; leaveSnap.forEach(d => leaveRequestsFresh.push({ ...d.data(), id: d.id }));
     const allUsers = []; userSnap.forEach(d => allUsers.push({ id: d.id, name: d.data().name, isAdmin: d.data().isAdmin }));
-    shCachedInsightData = { projects, logs, leaveRequestsFresh, allUsers };
+    const holidaysFresh = (companySnap.exists ? companySnap.data().holidays : null) || [];
+    shCachedInsightData = { projects, logs, leaveRequestsFresh, allUsers, holidaysFresh };
   } catch (e) {
     container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
     return;
@@ -3798,57 +3987,78 @@ async function renderIndividualInsight() {
 }
 
 // Renders from shCachedInsightData + the current selector state --
-// deliberately does NOT re-fetch (picking a person or changing the
-// window is a local view change, not new data; only the tab-open and the
-// explicit refresh link re-fetch, matching Project Health's own pattern).
+// deliberately does NOT re-fetch (picking a project/person or changing
+// the window is a local view change, not new data; only the tab-open and
+// the explicit refresh link re-fetch, matching Project Health's own
+// pattern).
 function renderIndividualInsightBody() {
   const container = document.getElementById('sh-individualinsight');
   const data = shCachedInsightData;
   if (!container || !data) return;
-  const { projects, logs, leaveRequestsFresh, allUsers } = data;
+  const { projects, logs, leaveRequestsFresh, allUsers, holidaysFresh } = data;
   const today = new Date();
 
   const phaseInstances = computePhaseContributions(logs, projects);
-  // V16.12: admin accounts excluded entirely -- not a team workload data
-  // point, confirmed noise on real data (Admin User's own incidental
-  // hours flagged as "well above normal" with nothing behind it).
   const peopleWithData = allUsers.filter(u => !u.isAdmin && logs.some(l => l.userId === u.id));
 
-  // V16.12: estimation leads -- this is the PRIMARY, top-of-page signal.
-  // Combines both estimation sources: phases significantly over budget
-  // RIGHT NOW (the Taskiya-shaped case, fires on a single instance, no
-  // history required) and the recency-vs-historical pattern (needs 5+3
-  // samples, a slower-forming signal). Workload is collected separately,
-  // below, and rendered second and quieter -- it's real but was mostly
-  // noise at the old threshold; now it only fires on genuinely extreme
-  // deviation, so it stays secondary by design, not just by accident.
-  const estimationFlagSentences = [];
-  const workloadFlagSentences = [];
+  // ── PRIMARY: Margin Risk (project-level, see file header) ──────
+  const marginRisk = computeMarginRiskRanking(phaseInstances, SH_EST_SIGNIFICANT_OVER_RATIO);
+  const marginRiskSentences = marginRisk.map(inst =>
+    `${inst.projectName} — ${inst.phase} is running ${Math.round(inst.hoursOver)}h over its ${Math.round(inst.budgetMins / 60)}h budget (${Math.round(inst.ratio * 100)}%) — worth a look at margin.`
+  ); // already sorted by hoursOver descending -- a PROJECT severity ranking, not a person one, so this ordering is fine (see file header)
+
+  // ── SECONDARY: person-level patterns, quiet by design ───────────
+  const secondarySentences = [];
   const patternsByPerson = {};
   peopleWithData.forEach(u => {
     const wl = computeWorkloadPattern(logs, u.id, shSelectedWindowDays, SH_PRIOR_WINDOW_COUNT, today);
     const est = computeEstimationPattern(phaseInstances, u.id, SH_EST_MIN_CONTRIBUTION_PCT, SH_EST_RECENT_COUNT, SH_EST_MIN_HISTORICAL_COUNT);
-    const overBudgetNow = significantlyOverBudgetInstances(est.contributed, SH_EST_SIGNIFICANT_OVER_RATIO);
-    patternsByPerson[u.id] = { workload: wl, estimation: est, overBudgetNow };
-
-    if (overBudgetNow.length === 1) {
-      const x = overBudgetNow[0];
-      estimationFlagSentences.push({ name: u.name, text: `${u.name} is a meaningful contributor on ${x.projectName} — ${x.phase}, which is running well over its budgeted hours — worth a conversation.` });
-    } else if (overBudgetNow.length > 1) {
-      estimationFlagSentences.push({ name: u.name, text: `${u.name} is a meaningful contributor on ${overBudgetNow.length} phases running well over budget — worth a conversation.` });
+    const vs = computeVersatilityStat(logs, u.id, shSelectedWindowDays, SH_PRIOR_WINDOW_COUNT, today);
+    patternsByPerson[u.id] = { workload: wl, estimation: est, versatility: vs };
+    if (wl.flagged) {
+      secondarySentences.push({ name: u.name, text: `${u.name}'s workload this period is well ${wl.direction} their own normal — worth a look.` });
     }
     if (est.flagged) {
       const recentOverCount = est.recent.filter(x => x.ratio > 1.10).length;
       const historicalOverCount = est.historical.filter(x => x.ratio > 1.10).length;
-      estimationFlagSentences.push({ name: u.name, text: `Phases ${u.name} has meaningfully worked on have run over budget in ${recentOverCount} of their last ${est.recent.length}, versus ${historicalOverCount} of ${est.historical.length} historically — worth a conversation.` });
-    }
-    if (wl.flagged) {
-      workloadFlagSentences.push({ name: u.name, text: `${u.name}'s workload this period is well ${wl.direction} their own normal — worth a look.` });
+      secondarySentences.push({ name: u.name, text: `Phases ${u.name} has meaningfully worked on have run over budget in ${recentOverCount} of their last ${est.recent.length}, versus ${historicalOverCount} of ${est.historical.length} historically — worth a conversation.` });
     }
   });
-  estimationFlagSentences.sort((a, b) => a.name.localeCompare(b.name)); // alphabetical, NEVER by magnitude
-  workloadFlagSentences.sort((a, b) => a.name.localeCompare(b.name));
+  secondarySentences.sort((a, b) => a.name.localeCompare(b.name)); // alphabetical, NEVER by magnitude -- unchanged rule for PEOPLE
 
+  // ── "Look at One Project" (NEW, margin-risk drill-down) ─────────
+  const projectsWithBudgets = projects.filter(p => Object.values(p.phases || {}).some(v => v > 0));
+  const projectOptions = projectsWithBudgets
+    .slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .map(p => `<option value="${p.id}" ${p.id === shSelectedProjectId ? 'selected' : ''}>${p.name || p.id}</option>`).join('');
+
+  let selectedProjectHTML = '<div class="sh-flag-none">Pick a project above to see its budget burn.</div>';
+  const selectedProject = shSelectedProjectId ? projectsWithBudgets.find(p => p.id === shSelectedProjectId) : null;
+  if (selectedProject) {
+    const phaseRows = Object.keys(selectedProject.phases || {}).filter(ph => selectedProject.phases[ph] > 0).map(ph => {
+      const inst = phaseInstances.find(x => x.projectId === selectedProject.id && x.phase === ph);
+      const actualMins = inst ? inst.totalActualMins : 0;
+      const budgetHours = selectedProject.phases[ph];
+      const pct = budgetHours > 0 ? Math.round((actualMins / 60 / budgetHours) * 100) : 0;
+      const status = pct >= 100 ? 'over' : pct >= 80 ? 'near' : 'ok';
+      // V16.13: reuses Projects & Budget's existing .phase-bar-wrap/
+      // .phase-bar-fill.{over|near|ok} pattern verbatim -- deliberate,
+      // this visual is project-level (see file header for why that's OK).
+      const bar = `<div class="phase-row"><span class="phase-name">${ph}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${status}" style="width:${Math.min(100, pct)}%;"></div></div><span class="phase-nums">${(actualMins / 60).toFixed(1)}h / <strong>${budgetHours}h</strong> (${pct}%)</span></div>`;
+      const contributors = inst ? meaningfulContributorsFor(inst, SH_EST_MIN_CONTRIBUTION_PCT, allUsers) : [];
+      // V16.13: multiple people's raw hours, together, on purpose -- this
+      // IS the "who's on it, for the why conversation" detail the owner
+      // explicitly asked for. Project staffing context, not a
+      // person-to-person performance comparison -- see file header.
+      const contribHTML = contributors.length
+        ? `<div style="font-size:12px;color:#8A7E74;margin:2px 0 12px;">Who's on this: ${contributors.map(c => `${c.name} (${c.hours.toFixed(1)}h)`).join(', ')}</div>`
+        : '<div style="font-size:12px;color:#8A7E74;margin:2px 0 12px;">No meaningful (≥20%) contributor on record.</div>';
+      return bar + contribHTML;
+    }).join('');
+    selectedProjectHTML = `<div style="margin-bottom:12px;"><strong>${selectedProject.name}</strong> — budget burn by phase</div>${phaseRows}`;
+  }
+
+  // ── "Look at One Person" (existing axis, extended) ──────────────
   const peopleOptions = peopleWithData
     .slice().sort((a, b) => a.name.localeCompare(b.name))
     .map(u => `<option value="${u.id}" ${u.id === shSelectedPersonId ? 'selected' : ''}>${u.name}</option>`).join('');
@@ -3856,7 +4066,7 @@ function renderIndividualInsightBody() {
   let selectedPersonHTML = '<div class="sh-flag-none">Pick a name above to see their numbers.</div>';
   if (shSelectedPersonId && patternsByPerson[shSelectedPersonId]) {
     const u = peopleWithData.find(p => p.id === shSelectedPersonId);
-    const { workload: wl, estimation: est } = patternsByPerson[shSelectedPersonId];
+    const { workload: wl, estimation: est, versatility: vs } = patternsByPerson[shSelectedPersonId];
     const leaveDays = approvedLeaveDaysInWindow(leaveRequestsFresh, shSelectedPersonId, wl.currentWindow.start, wl.currentWindow.end);
 
     let workloadHTML;
@@ -3866,6 +4076,14 @@ function renderIndividualInsightBody() {
       workloadHTML = `<p>${(wl.currentMins / 60).toFixed(1)}h logged in the last ${shSelectedWindowDays} days, versus their own average of ${(wl.avgPriorMins / 60).toFixed(1)}h over the same length window.</p>`;
     }
     if (leaveDays > 0) workloadHTML += `<p style="color:#8A7E74;">${leaveDays} day${leaveDays > 1 ? 's' : ''} of approved leave in this period.</p>`;
+    workloadHTML += renderWorkloadTrendSVG(computeWorkloadTrend(logs, shSelectedPersonId, SH_TREND_WEEKS, today));
+
+    let versatilityHTML;
+    if (vs.insufficientHistory) {
+      versatilityHTML = `<p>Active on ${vs.currentCount} project${vs.currentCount === 1 ? '' : 's'} in the last ${shSelectedWindowDays} days. Not enough prior history yet to compare.</p>`;
+    } else {
+      versatilityHTML = `<p>Active on ${vs.currentCount} project${vs.currentCount === 1 ? '' : 's'} in the last ${shSelectedWindowDays} days, versus their own average of ${vs.avgPriorCount.toFixed(1)} over the same length window. Could mean versatile utility across projects, or spread thin — worth understanding why, not a verdict either way.</p>`;
+    }
 
     let estRows = '';
     const rowsFor = (arr) => arr.map(x => `<tr><td>${x.projectName} — ${x.phase}</td><td class="sh-num">${(x.personMins / 60).toFixed(1)}h</td><td class="sh-num">${(x.totalActualMins / 60).toFixed(1)}h</td><td class="sh-num">${(x.budgetMins / 60).toFixed(0)}h</td><td class="sh-num">${Math.round(x.ratio * 100)}%</td></tr>`).join('');
@@ -3876,8 +4094,15 @@ function renderIndividualInsightBody() {
       if (est.historical.length) estRows += `<tr class="sh-proj-group"><td colspan="5">Historical</td></tr>` + rowsFor(est.historical);
     }
 
-    // V16.12: estimation leads in the drill-down too, same ordering as
-    // the flags above -- workload comes after, not before.
+    // V16.13: leave-near-holiday -- drill-down ONLY, never a flag
+    // sentence anywhere above. Strictly neutral, coverage-planning
+    // language -- no suspicion wording.
+    const heatmapDays = buildLeaveHeatmapDays(leaveRequestsFresh, holidaysFresh, shSelectedPersonId, SH_HEATMAP_DAYS, today);
+    const nearHoliday = leaveNearHolidayInstances(leaveRequestsFresh, shSelectedPersonId, holidaysFresh);
+    const heatmapNote = nearHoliday.length
+      ? `<p style="font-size:12px;color:#8A7E74;margin-top:6px;">${nearHoliday.length} leave period${nearHoliday.length > 1 ? 's' : ''} fell next to a weekend or holiday — useful for coverage planning around upcoming holidays, not a concern on its own.</p>`
+      : `<p style="font-size:12px;color:#8A7E74;margin-top:6px;">No leave adjacent to a weekend or holiday in this window.</p>`;
+
     selectedPersonHTML = `
       <div style="margin-bottom:16px;"><strong>${u.name}</strong> — Phases meaningfully worked on (≥20% of that phase's hours), their raw numbers, no attribution math</div>
       <table class="sh-table">
@@ -3885,20 +4110,35 @@ function renderIndividualInsightBody() {
         <tbody>${estRows}</tbody>
       </table>
       ${est.insufficientHistory ? '<p style="color:#8A7E74;font-size:12px;margin-top:8px;">Not enough phase history yet (need ' + SH_EST_RECENT_COUNT + ' recent + ' + SH_EST_MIN_HISTORICAL_COUNT + ' historical) to compare a pattern.</p>' : ''}
-      <div style="margin:20px 0 8px;"><strong>${u.name}</strong> — Workload</div>
+      <div style="margin:20px 0 8px;"><strong>${u.name}</strong> — Versatility</div>
+      ${versatilityHTML}
+      <div style="margin:20px 0 8px;"><strong>${u.name}</strong> — Workload, last ${SH_TREND_WEEKS} weeks (their own trend)</div>
       ${workloadHTML}
+      <div style="margin:20px 0 8px;"><strong>${u.name}</strong> — Leave, last ${SH_HEATMAP_DAYS} days (for coverage planning)</div>
+      ${renderLeaveHeatmapSVG(heatmapDays)}
+      ${heatmapNote}
     `;
   }
 
   container.innerHTML = `
     <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shiiRefreshLink" style="color:#A96E35;">refresh</a></div>
     <div class="card">
-      <div class="card-title">🔎 Worth a Conversation — meaningful contributors on phases running significantly over budget</div>
-      ${estimationFlagSentences.length ? estimationFlagSentences.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f.text}</div></div>`).join('') : '<div class="sh-flag-none">Nothing stands out right now.</div>'}
+      <div class="card-title">💰 Margin Risk — projects/phases consuming far more hours than budgeted</div>
+      ${marginRiskSentences.length ? marginRiskSentences.map(t => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${t}</div></div>`).join('') : '<div class="sh-flag-none">Nothing bleeding margin right now.</div>'}
     </div>
     <div class="card">
-      <div class="card-title">📊 Also Worth Noting — workload well outside someone's own normal</div>
-      ${workloadFlagSentences.length ? workloadFlagSentences.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f.text}</div></div>`).join('') : '<div class="sh-flag-none">Nothing extreme right now.</div>'}
+      <div class="card-title">📊 Also Worth Noting — person-level patterns, quieter by design</div>
+      ${secondarySentences.length ? secondarySentences.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f.text}</div></div>`).join('') : '<div class="sh-flag-none">Nothing extreme right now.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">📁 Look at One Project</div>
+      <div style="margin-bottom:14px;">
+        <select class="form-control" id="shiiProjectPicker" style="max-width:260px;">
+          <option value="">Select a project…</option>
+          ${projectOptions}
+        </select>
+      </div>
+      ${selectedProjectHTML}
     </div>
     <div class="card">
       <div class="card-title">👤 Look at One Person</div>
@@ -3915,6 +4155,8 @@ function renderIndividualInsightBody() {
     </div>
   `;
 
+  const projectPicker = document.getElementById('shiiProjectPicker');
+  if (projectPicker) projectPicker.addEventListener('change', (e) => { shSelectedProjectId = e.target.value; renderIndividualInsightBody(); });
   const personPicker = document.getElementById('shiiPersonPicker');
   if (personPicker) personPicker.addEventListener('change', (e) => { shSelectedPersonId = e.target.value; renderIndividualInsightBody(); });
   const windowPicker = document.getElementById('shiiWindowPicker');

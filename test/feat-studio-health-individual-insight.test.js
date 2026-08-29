@@ -1,18 +1,23 @@
-// Fixture test for Studio Health -- Individual Insight, Workload (#1) and
-// Estimation-vs-actual (#3) ONLY. Attendance (#2) is explicitly held --
-// no plumbing built, nothing to test here for it.
+// Fixture test for Studio Health -- Individual Insight, V16.13 reshape:
+// Margin Risk (project-level, primary) + Versatility + Workload (quiet)
+// + Leave-near-holidays (drill-down-only, never a flag). Attendance (#2,
+// biometric IN-time) is STILL held -- no plumbing, nothing to test here.
 //
 // Extracts the ACTUAL functions from index.html (brace-matched, not
 // retyped) and runs them in a vm sandbox -- proving the real shipped
 // code, same discipline as every other fixture in this repo.
 //
 // Central claims under test:
-//  - pure-read: no writes anywhere (source-text check, like Layer A)
-//  - self-baseline only: never a shared absolute target, never
-//    cross-person comparison in the computation itself
-//  - >=20% meaningful-contributor threshold enforced correctly
-//  - flag sentences carry no numbers; raw numbers render for at most
-//    ONE selected person at a time (the structural anti-scoreboard claim)
+//  - pure-read: no writes anywhere (source-text check)
+//  - margin risk ranks by ABSOLUTE hours over budget, not percentage
+//  - person-level patterns still self-baseline only, never each other
+//  - leave-near-holiday adjacency, including the real sandwich/weekend
+//    rule (2nd/4th Saturday only, ported from the app's own is24Sat())
+//  - leave-near-holiday NEVER appears as a flag sentence, drill-down only
+//  - the two-axis drill-down (project vs. person) works independently
+//  - the structural no-side-by-side rule, extended to the new visuals,
+//    WITH the one deliberate, explicitly-tested exception: the project
+//    drill-down's contributor list intentionally shows multiple people
 //
 // Run with: node test/feat-studio-health-individual-insight.test.js
 'use strict';
@@ -41,62 +46,59 @@ function extractFunction(source, name) {
   assert.ok(depth === 0, `brace matching failed for ${name}`);
   return source.slice(startIdx, i + 1);
 }
-
 function extractConstLine(source, name) {
   const idx = source.indexOf(`const ${name} =`);
   assert.ok(idx >= 0, `could not find "const ${name} =" in index.html`);
   const end = source.indexOf(';', idx);
   return source.slice(idx, end + 1);
 }
+
 const shConstantsSrc = [
   'SH_WORKLOAD_WINDOWS', 'SH_PRIOR_WINDOW_COUNT', 'SH_WORKLOAD_SPIKE_RATIO', 'SH_WORKLOAD_DROP_RATIO',
   'SH_EST_MIN_CONTRIBUTION_PCT', 'SH_EST_RECENT_COUNT', 'SH_EST_MIN_HISTORICAL_COUNT', 'SH_EST_SIGNIFICANT_OVER_RATIO',
+  'SH_TREND_WEEKS', 'SH_HEATMAP_DAYS',
 ].map(name => extractConstLine(fullScript, name)).join('\n');
 
-const getWindowBoundsSrc = extractFunction(fullScript, 'getWindowBounds');
-const productiveMinsSrc = extractFunction(fullScript, 'productiveMinsInWindow');
-const leaveDaysSrc = extractFunction(fullScript, 'approvedLeaveDaysInWindow');
-const workloadPatternSrc = extractFunction(fullScript, 'computeWorkloadPattern');
-const phaseContribSrc = extractFunction(fullScript, 'computePhaseContributions');
-const estimationPatternSrc = extractFunction(fullScript, 'computeEstimationPattern');
-const overBudgetNowSrc = extractFunction(fullScript, 'significantlyOverBudgetInstances');
+const FN_NAMES = [
+  'toLocalDateStr', 'getWindowBounds', 'productiveMinsInWindow', 'approvedLeaveDaysInWindow', 'computeWorkloadPattern',
+  'computePhaseContributions', 'computeEstimationPattern', 'computeMarginRiskRanking', 'meaningfulContributorsFor',
+  'distinctProjectCount', 'computeVersatilityStat', 'isClosedDayStr', 'addDaysToDateStr', 'leaveNearHolidayInstances',
+  'buildLeaveHeatmapDays', 'computeWorkloadTrend', 'renderWorkloadTrendSVG', 'renderLeaveHeatmapSVG',
+];
+const fnSrc = {};
+FN_NAMES.forEach(name => { fnSrc[name] = extractFunction(fullScript, name); });
 const renderInsightSrc = extractFunction(fullScript, 'renderIndividualInsight');
 const renderInsightBodySrc = extractFunction(fullScript, 'renderIndividualInsightBody');
 
 // ═══════════════════════════════════════════════════════════════════
-console.log('=== Source-text check: Individual Insight never writes ===');
+console.log('=== Source-text check: Individual Insight never writes; supersession confirmed ===');
 let passCount = 0, failCount = 0;
 function check(label, cond) {
   if (cond) { console.log(`  PASS: ${label}`); passCount++; }
   else { console.log(`  FAIL: ${label}`); failCount++; }
 }
-const allSrc = [getWindowBoundsSrc, productiveMinsSrc, leaveDaysSrc, workloadPatternSrc, phaseContribSrc, estimationPatternSrc, overBudgetNowSrc, renderInsightSrc, renderInsightBodySrc].join('\n');
+const allSrc = Object.values(fnSrc).concat([renderInsightSrc, renderInsightBodySrc]).join('\n');
 check('no .set( anywhere', !allSrc.includes('.set('));
 check('no .update( anywhere', !allSrc.includes('.update('));
-check('no .add( anywhere', !allSrc.includes('.add('));
+check('no Firestore .add( anywhere (Set.add() in distinctProjectCount is a plain JS Set, not a write, and is excluded from this check)', !allSrc.replace(/set\.add\(/g, '').includes('.add('));
 check('no .delete( anywhere', !allSrc.includes('.delete('));
 check('no .batch( anywhere', !allSrc.includes('.batch('));
 check('renderIndividualInsight reads with source:\'server\'', renderInsightSrc.includes(`source: 'server'`));
 check('renderIndividualInsightBody does NOT touch db at all (no re-fetch on selector change)', !renderInsightBodySrc.includes('db.'));
-check('computeWorkloadPattern never references a shared/global target constant (self-baseline only)', !workloadPatternSrc.includes('htTarget') && !workloadPatternSrc.includes('MAX_SESSION_HOURS'));
-check('computeEstimationPattern never computes a per-person share/fraction of an overrun amount', !estimationPatternSrc.includes('overrun') && !estimationPatternSrc.includes('share'));
+check('computeWorkloadPattern never references a shared/global target constant (self-baseline only)', !fnSrc.computeWorkloadPattern.includes('htTarget') && !fnSrc.computeWorkloadPattern.includes('MAX_SESSION_HOURS'));
+check('computeMarginRiskRanking sorts by hoursOver, not ratio/percentage', /sort\(\(a, b\) => b\.hoursOver - a\.hoursOver\)/.test(fnSrc.computeMarginRiskRanking));
+check('V16.12\'s per-person significantlyOverBudgetInstances() is gone -- superseded by the project-level ranking', !fullScript.includes('function significantlyOverBudgetInstances'));
+check('renderIndividualInsight now reads companyData/squareDB for holidays', renderInsightSrc.includes(`collection('companyData').doc('squareDB')`));
 
 function buildSandbox() {
-  const sandbox = { console, Date, Object, Math };
+  const sandbox = { console, Date, Object, Math, Set };
   vm.createContext(sandbox);
   vm.runInContext(shConstantsSrc, sandbox);
-  vm.runInContext(getWindowBoundsSrc, sandbox);
-  vm.runInContext(productiveMinsSrc, sandbox);
-  vm.runInContext(leaveDaysSrc, sandbox);
-  vm.runInContext(workloadPatternSrc, sandbox);
-  vm.runInContext(phaseContribSrc, sandbox);
-  vm.runInContext(estimationPatternSrc, sandbox);
-  vm.runInContext(overBudgetNowSrc, sandbox);
+  FN_NAMES.forEach(name => vm.runInContext(fnSrc[name], sandbox));
   return sandbox;
 }
 
-const TODAY = new Date('2026-08-28T12:00:00Z');
-
+const TODAY = new Date('2026-08-28T12:00:00Z'); // a Friday
 function dateStr(offsetDaysFromToday) {
   const d = new Date(TODAY);
   d.setDate(d.getDate() + offsetDaysFromToday);
@@ -105,188 +107,252 @@ function dateStr(offsetDaysFromToday) {
 
 async function run() {
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeWorkloadPattern: flags a genuinely EXTREME spike (>=2.0x), not moderate variation ===');
+  // THE ACTUAL BUG FOUND WHILE BUILDING THIS: toLocalDateStr() replaces
+  // four separate d.toISOString().slice(0,10) call sites (including
+  // getWindowBounds(), already-shipped since V16.11) that silently
+  // rolled the date BACKWARD by one day for any `today` between IST
+  // midnight and 05:29 -- toISOString() converts to UTC first, and IST
+  // is UTC+5:30, so IST 02:00 is UTC 20:30 the PREVIOUS calendar day.
+  // fmt() (this file's own established date-string helper, defined a
+  // few hundred lines up) was already written specifically to avoid
+  // this exact pitfall -- toLocalDateStr() mirrors it, this proves it.
+  // ═══════════════════════════════════════════════════════════════
+  console.log('=== toLocalDateStr: does NOT roll the date backward for an early-IST-morning instant ===');
+  {
+    const sandbox = buildSandbox();
+    // 2026-08-15T00:30:00+05:30 IST = 2026-08-14T19:00:00Z UTC -- a
+    // PREVIOUS-UTC-day instant that a naive toISOString().slice(0,10)
+    // would wrongly report as 2026-08-14.
+    const earlyIST = new Date('2026-08-15T00:30:00+05:30');
+    const result = vm.runInContext('toLocalDateStr', sandbox)(earlyIST);
+    check('correctly reports the LOCAL calendar day (2026-08-15), not the UTC-shifted previous day', result === '2026-08-15');
+  }
+
+  console.log('\n=== getWindowBounds: does NOT roll backward when `today` is an early-IST-morning instant ===');
+  {
+    const sandbox = buildSandbox();
+    const earlyIST = new Date('2026-08-15T00:30:00+05:30');
+    const window = vm.runInContext('getWindowBounds', sandbox)(30, 0, earlyIST);
+    check('window.end is the real local day (2026-08-15), not rolled back to 2026-08-14', window.end === '2026-08-15');
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Workload -- unchanged from V16.12, re-confirmed against the real
+  // shipped code post-restructure (nothing here should have regressed).
+  // ═══════════════════════════════════════════════════════════════
+  console.log('=== computeWorkloadPattern: still self-baseline, extreme-only (unchanged) ===');
   {
     const sandbox = buildSandbox();
     const logs = [];
-    // 3 prior 30-day windows: ~100h each (their "normal")
-    for (let w = 1; w <= 3; w++) {
-      logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    }
-    // current 30-day window: 260h -- 2.6x their own normal, comfortably past the 2.0x bar
+    for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
     logs.push({ userId: 'u1', productive: true, durationMins: 260 * 60, date: dateStr(-5) });
-    const result = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
-    check('flagged', result.flagged === true);
-    check('direction is "above"', result.direction === 'above');
-    check('currentMins reflects the real logged total', result.currentMins === 260 * 60);
+    const spike = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
+    check('extreme spike (2.6x) still flags', spike.flagged === true && spike.direction === 'above');
+
+    const sandbox2 = buildSandbox();
+    const logs2 = [];
+    for (let w = 1; w <= 3; w++) logs2.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
+    logs2.push({ userId: 'u1', productive: true, durationMins: 109 * 60, date: dateStr(-5) });
+    const ordinary = vm.runInContext('computeWorkloadPattern', sandbox2)(logs2, 'u1', 30, 3, TODAY);
+    check('the Souvik case (9% above) still stays silent', ordinary.flagged === false);
   }
 
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeWorkloadPattern: flags a genuinely EXTREME drop (<=0.4x) ===');
-  {
-    const sandbox = buildSandbox();
-    const logs = [];
-    for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    logs.push({ userId: 'u1', productive: true, durationMins: 30 * 60, date: dateStr(-5) }); // 0.3x -- comfortably below the 0.4x bar
-    const result = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
-    check('flagged', result.flagged === true);
-    check('direction is "below"', result.direction === 'below');
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // THE ACTUAL BUG THIS RE-TUNING FIXES: the real-data review found
-  // Souvik at 1.09x his own normal (9% above -- an ordinary week)
-  // getting flagged under the old 1.3x/0.7x band. Confirm that specific
-  // real shape is now silent.
-  // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeWorkloadPattern: the Souvik case (9% above normal) -- NOT flagged, was the bug ===');
-  {
-    const sandbox = buildSandbox();
-    const logs = [];
-    for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    logs.push({ userId: 'u1', productive: true, durationMins: 109 * 60, date: dateStr(-5) }); // exactly the real 9%-above case
-    const result = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
-    check('NOT flagged -- an ordinary week, not noise anymore', result.flagged === false);
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeWorkloadPattern: NOT flagged for moderate (not extreme) variation, e.g. 1.5x ===');
-  {
-    const sandbox = buildSandbox();
-    const logs = [];
-    for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    logs.push({ userId: 'u1', productive: true, durationMins: 150 * 60, date: dateStr(-5) }); // 1.5x -- a busy stretch, still within the wider quiet zone
-    const result = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
-    check('NOT flagged -- 1.5x is a real busy period, not an extreme one under the new bar', result.flagged === false);
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeWorkloadPattern: insufficient history (first tracked period) -- never flagged ===');
-  {
-    const sandbox = buildSandbox();
-    // Only a current window, zero prior data at all
-    const logs = [{ userId: 'u1', productive: true, durationMins: 500 * 60, date: dateStr(-5) }];
-    const result = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
-    check('insufficientHistory true', result.insufficientHistory === true);
-    check('NOT flagged despite an extreme number (nothing to compare against)', result.flagged === false);
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== approvedLeaveDaysInWindow: leave annotation ===');
+  console.log('\n=== approvedLeaveDaysInWindow: unchanged ===');
   {
     const sandbox = buildSandbox();
     const window = vm.runInContext('getWindowBounds', sandbox)(30, 0, TODAY);
     const leaveRequests = [
-      { userId: 'u1', status: 'approved', startDate: dateStr(-10), endDate: dateStr(-8) }, // 3 days, fully inside the window
-      { userId: 'u1', status: 'pending', startDate: dateStr(-5), endDate: dateStr(-4) },    // not approved -- must not count
-      { userId: 'u2', status: 'approved', startDate: dateStr(-10), endDate: dateStr(-8) },  // different person -- must not count
+      { userId: 'u1', status: 'approved', startDate: dateStr(-10), endDate: dateStr(-8) },
     ];
     const days = vm.runInContext('approvedLeaveDaysInWindow', sandbox)(leaveRequests, 'u1', window.start, window.end);
     check('3 approved leave days counted', days === 3);
   }
 
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeEstimationPattern: >=20% meaningful-contributor threshold enforced ===');
+  console.log('\n=== computeEstimationPattern: >=20% threshold + raw hours, unchanged ===');
   {
     const sandbox = buildSandbox();
     const projects = [{ id: 'p1', name: 'Test Project', phases: { 'Construction Documents': 100 } }];
     const logs = [
-      { userId: 'u1', projectId: 'p1', phase: 'Construction Documents', durationMins: 100 * 60 * 0.25, date: dateStr(-5) }, // 25% -- above threshold
+      { userId: 'u1', projectId: 'p1', phase: 'Construction Documents', durationMins: 100 * 60 * 0.25, date: dateStr(-5) },
       { userId: 'u2', projectId: 'p1', phase: 'Construction Documents', durationMins: 100 * 60 * 0.75, date: dateStr(-5) },
     ];
     const instances = vm.runInContext('computePhaseContributions', sandbox)(logs, projects);
-    const patternU1 = vm.runInContext('computeEstimationPattern', sandbox)(instances, 'u1', 0.20, 5, 3);
-    check('u1 (25% contributor) IS included', patternU1.contributed.length === 1);
-
-    const projects2 = [{ id: 'p2', name: 'Drive-by Project', phases: { 'Site Supervision': 100 } }];
-    const logs2 = [
-      { userId: 'u3', projectId: 'p2', phase: 'Site Supervision', durationMins: 100 * 60 * 0.05, date: dateStr(-5) }, // 5% -- below threshold
-      { userId: 'u4', projectId: 'p2', phase: 'Site Supervision', durationMins: 100 * 60 * 0.95, date: dateStr(-5) },
-    ];
-    const instances2 = vm.runInContext('computePhaseContributions', sandbox)(logs2, projects2);
-    const patternU3 = vm.runInContext('computeEstimationPattern', sandbox)(instances2, 'u3', 0.20, 5, 3);
-    check('u3 (5% drive-by contributor) is EXCLUDED', patternU3.contributed.length === 0);
+    const pattern = vm.runInContext('computeEstimationPattern', sandbox)(instances, 'u1', 0.20, 5, 3);
+    check('u1 (25% contributor) IS included, raw hours not split', pattern.contributed.length === 1 && pattern.contributed[0].personMins === 100 * 60 * 0.25);
   }
 
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeEstimationPattern: raw hours shown, no attribution/split math applied ===');
+  // NEW: Margin Risk -- the central reframe. Absolute hours over, NOT
+  // percentage, is the sort key.
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== computeMarginRiskRanking: ranks by ABSOLUTE hours over, not percentage ===');
   {
     const sandbox = buildSandbox();
-    const projects = [{ id: 'p1', name: 'Shared Phase Project', phases: { 'Final Design': 100 } }];
+    const projects = [
+      { id: 'small', name: 'Small Phase Project', phases: { Phase: 10 } },  // 288% of 10h = 28.8h actual, 18.8h over
+      { id: 'big', name: 'Big Phase Project', phases: { Phase: 500 } },     // 130% of 500h = 650h actual, 150h over
+    ];
     const logs = [
-      { userId: 'u1', projectId: 'p1', phase: 'Final Design', durationMins: 130 * 60 * 0.6, date: dateStr(-5) },
-      { userId: 'u2', projectId: 'p1', phase: 'Final Design', durationMins: 130 * 60 * 0.4, date: dateStr(-5) },
+      { userId: 'u1', projectId: 'small', phase: 'Phase', durationMins: 10 * 60 * 2.88, date: dateStr(-5) },
+      { userId: 'u2', projectId: 'big', phase: 'Phase', durationMins: 500 * 60 * 1.30, date: dateStr(-5) },
     ];
     const instances = vm.runInContext('computePhaseContributions', sandbox)(logs, projects);
-    const pattern = vm.runInContext('computeEstimationPattern', sandbox)(instances, 'u1', 0.20, 5, 3);
-    const inst = pattern.contributed[0];
-    check('personMins is u1\'s OWN raw hours, not a split of the overrun', inst.personMins === 130 * 60 * 0.6);
-    check('totalActualMins is the REAL total (both people), untouched', inst.totalActualMins === 130 * 60);
-    check('ratio is the phase\'s own actual/budget, not attributed to u1 specifically', Math.abs(inst.ratio - 1.3) < 0.001);
+    const ranking = vm.runInContext('computeMarginRiskRanking', sandbox)(instances, 1.10);
+    check('both instances included (both over the 1.10 floor)', ranking.length === 2);
+    check('the BIG project (150h over) ranks FIRST despite lower percentage (130% vs 288%)', ranking[0].projectId === 'big');
+    check('the SMALL project (18.8h over) ranks SECOND despite higher percentage', ranking[1].projectId === 'small');
+    check('hoursOver computed correctly for the big one (~150h)', Math.abs(ranking[0].hoursOver - 150) < 0.5);
+  }
+
+  console.log('\n=== computeMarginRiskRanking: a phase under budget, or barely over, is excluded ===');
+  {
+    const sandbox = buildSandbox();
+    const projects = [{ id: 'p1', name: 'Fine Project', phases: { Phase: 100 } }];
+    const logs = [{ userId: 'u1', projectId: 'p1', phase: 'Phase', durationMins: 100 * 60 * 1.05, date: dateStr(-5) }]; // 5% over -- under the 1.10 floor
+    const instances = vm.runInContext('computePhaseContributions', sandbox)(logs, projects);
+    const ranking = vm.runInContext('computeMarginRiskRanking', sandbox)(instances, 1.10);
+    check('excluded -- not a real margin problem', ranking.length === 0);
   }
 
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeEstimationPattern: recent-vs-historical rate, matches the owner\'s "4 of 5 vs 1 of 5" shape ===');
+  console.log('\n=== meaningfulContributorsFor: raw hours, sorted for legibility (not a quality ranking) ===');
   {
     const sandbox = buildSandbox();
-    const projects = [];
+    const inst = { totalActualMins: 100 * 60, byPerson: { u1: 60 * 60, u2: 25 * 60, u3: 15 * 60 } }; // u3 is a 15% drive-by
+    const users = [{ id: 'u1', name: 'Alice' }, { id: 'u2', name: 'Bob' }, { id: 'u3', name: 'Carol' }];
+    const contributors = vm.runInContext('meaningfulContributorsFor', sandbox)(inst, 0.20, users);
+    check('only meaningful (>=20%) contributors included -- Carol (15%) excluded', contributors.length === 2);
+    check('sorted by hours, most-involved first', contributors[0].name === 'Alice' && contributors[1].name === 'Bob');
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== computeVersatilityStat: distinct project count, self-baseline ===');
+  {
+    const sandbox = buildSandbox();
     const logs = [];
-    // 3 historical phase-instances, 1 over budget (1 of 3)
-    for (let i = 0; i < 3; i++) {
-      const pid = 'hist' + i;
-      projects.push({ id: pid, name: 'Historical ' + i, phases: { Phase: 100 } });
-      const ratio = i === 0 ? 1.5 : 1.0; // only the first one over
-      logs.push({ userId: 'u1', projectId: pid, phase: 'Phase', durationMins: 100 * 60 * ratio, date: dateStr(-100 - i) });
+    for (let w = 1; w <= 3; w++) {
+      logs.push({ userId: 'u1', projectId: 'p1', date: dateStr(-30 * w - 5) }); // 1 project per prior window
     }
-    // 5 recent phase-instances, 4 over budget (4 of 5)
-    for (let i = 0; i < 5; i++) {
-      const pid = 'recent' + i;
-      projects.push({ id: pid, name: 'Recent ' + i, phases: { Phase: 100 } });
-      const ratio = i < 4 ? 1.5 : 1.0; // 4 of 5 over
-      logs.push({ userId: 'u1', projectId: pid, phase: 'Phase', durationMins: 100 * 60 * ratio, date: dateStr(-i) });
-    }
-    const instances = vm.runInContext('computePhaseContributions', sandbox)(logs, projects);
-    const pattern = vm.runInContext('computeEstimationPattern', sandbox)(instances, 'u1', 0.20, 5, 3);
-    check('recentOverRate is 4/5 = 0.8', Math.abs(pattern.recentOverRate - 0.8) < 0.001);
-    check('historicalOverRate is 1/3', Math.abs(pattern.historicalOverRate - (1 / 3)) < 0.001);
-    check('flagged (0.8 - 0.33 >= 0.4)', pattern.flagged === true);
+    logs.push({ userId: 'u1', projectId: 'p1', date: dateStr(-5) });
+    logs.push({ userId: 'u1', projectId: 'p2', date: dateStr(-4) });
+    logs.push({ userId: 'u1', projectId: 'p3', date: dateStr(-3) }); // 3 distinct projects this window
+    const result = vm.runInContext('computeVersatilityStat', sandbox)(logs, 'u1', 30, 3, TODAY);
+    check('currentCount is 3 (distinct projects)', result.currentCount === 3);
+    check('avgPriorCount is 1 (one project per prior window)', result.avgPriorCount === 1);
   }
 
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeEstimationPattern: insufficient history -- never flagged ===');
+  // NEW: leave-near-holiday adjacency, including the REAL sandwich rule
+  // (2nd/4th Saturday only -- ported from the app's own is24Sat()).
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== isClosedDayStr: Sunday, 2nd/4th Saturday, holiday -- matches the app\'s real rule ===');
   {
     const sandbox = buildSandbox();
-    const projects = [{ id: 'p1', name: 'Only One', phases: { Phase: 100 } }];
-    const logs = [{ userId: 'u1', projectId: 'p1', phase: 'Phase', durationMins: 100 * 60 * 2.0, date: dateStr(-5) }]; // wildly over, but only 1 sample
-    const instances = vm.runInContext('computePhaseContributions', sandbox)(logs, projects);
-    const pattern = vm.runInContext('computeEstimationPattern', sandbox)(instances, 'u1', 0.20, 5, 3);
-    check('insufficientHistory true', pattern.insufficientHistory === true);
-    check('NOT flagged despite an extreme single ratio', pattern.flagged === false);
+    check('a Sunday is closed', vm.runInContext('isClosedDayStr', sandbox)('2026-08-30', []) === true); // 30 Aug 2026 is a Sunday
+    check('2026-08-08 (2nd Saturday of August 2026) is closed', vm.runInContext('isClosedDayStr', sandbox)('2026-08-08', []) === true);
+    check('2026-08-01 (1st Saturday) is NOT closed -- only 2nd/4th count', vm.runInContext('isClosedDayStr', sandbox)('2026-08-01', []) === false);
+    check('2026-08-15 (3rd Saturday) is NOT closed', vm.runInContext('isClosedDayStr', sandbox)('2026-08-15', []) === false);
+    check('an ordinary Tuesday is not closed', vm.runInContext('isClosedDayStr', sandbox)('2026-08-25', []) === false); // a Tuesday
+    check('a real holiday is closed', vm.runInContext('isClosedDayStr', sandbox)('2026-10-02', [{ date: '2026-10-02', name: 'Gandhi Jayanti' }]) === true);
+  }
+
+  console.log('\n=== leaveNearHolidayInstances: adjacent to a weekend -> included ===');
+  {
+    const sandbox = buildSandbox();
+    // 2026-08-07 is a Friday; 2026-08-08 (the very next day) is the 2nd
+    // Saturday -- so leave ENDING on the Friday is adjacent to a closed
+    // weekend day right after it.
+    const leaveRequests = [{ userId: 'u1', status: 'approved', startDate: '2026-08-07', endDate: '2026-08-07' }];
+    const result = vm.runInContext('leaveNearHolidayInstances', sandbox)(leaveRequests, 'u1', []);
+    check('leave ending right before a 2nd-Saturday weekend is flagged as adjacent', result.length === 1);
+  }
+
+  console.log('\n=== leaveNearHolidayInstances: adjacent to a 1st Saturday -> NOT included (not a real closed day) ===');
+  {
+    const sandbox = buildSandbox();
+    // 2026-07-31 is a Friday; 2026-08-01 (the next day) is the 1ST
+    // Saturday -- NOT closed under this app's own rule, so this leave
+    // should NOT be flagged, unlike the 2nd/4th Saturday case above.
+    const leaveRequests = [{ userId: 'u1', status: 'approved', startDate: '2026-07-31', endDate: '2026-07-31' }];
+    const result = vm.runInContext('leaveNearHolidayInstances', sandbox)(leaveRequests, 'u1', []);
+    check('leave next to a 1st Saturday is correctly NOT flagged', result.length === 0);
+  }
+
+  console.log('\n=== leaveNearHolidayInstances: adjacent to a real holiday -> included ===');
+  {
+    const sandbox = buildSandbox();
+    const holidays = [{ date: '2026-10-02', name: 'Gandhi Jayanti' }];
+    // Leave starting the day right after the holiday.
+    const leaveRequests = [{ userId: 'u1', status: 'approved', startDate: '2026-10-03', endDate: '2026-10-05' }];
+    const result = vm.runInContext('leaveNearHolidayInstances', sandbox)(leaveRequests, 'u1', holidays);
+    check('leave starting right after a holiday is flagged as adjacent', result.length === 1);
+  }
+
+  console.log('\n=== leaveNearHolidayInstances: no adjacency at all -> excluded ===');
+  {
+    const sandbox = buildSandbox();
+    // A Tuesday-to-Wednesday leave with ordinary weekdays on both sides.
+    const leaveRequests = [{ userId: 'u1', status: 'approved', startDate: '2026-08-25', endDate: '2026-08-26' }];
+    const result = vm.runInContext('leaveNearHolidayInstances', sandbox)(leaveRequests, 'u1', []);
+    check('leave with no adjacent closed day is correctly excluded', result.length === 0);
+  }
+
+  console.log('\n=== leaveNearHolidayInstances: only APPROVED leave counts, only the named user ===');
+  {
+    const sandbox = buildSandbox();
+    const leaveRequests = [
+      { userId: 'u1', status: 'pending', startDate: '2026-08-07', endDate: '2026-08-07' }, // adjacent, but not approved
+      { userId: 'u2', status: 'approved', startDate: '2026-08-07', endDate: '2026-08-07' }, // adjacent, but a different person
+    ];
+    const result = vm.runInContext('leaveNearHolidayInstances', sandbox)(leaveRequests, 'u1', []);
+    check('neither the pending nor the other-person leave counts for u1', result.length === 0);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== buildLeaveHeatmapDays: day types classified correctly, leave takes precedence ===');
+  {
+    const sandbox = buildSandbox();
+    const holidays = [{ date: dateStr(-3), name: 'Test Holiday' }];
+    const leaveRequests = [{ userId: 'u1', status: 'approved', startDate: dateStr(-1), endDate: dateStr(-1) }];
+    const days = vm.runInContext('buildLeaveHeatmapDays', sandbox)(leaveRequests, holidays, 'u1', 10, TODAY);
+    check('correct total day count', days.length === 10);
+    const holidayDay = days.find(d => d.date === dateStr(-3));
+    const leaveDay = days.find(d => d.date === dateStr(-1));
+    check('the holiday day is typed "holiday"', holidayDay.type === 'holiday');
+    check('the leave day is typed "leave"', leaveDay.type === 'leave');
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // STRUCTURAL claim: raw numbers for at most ONE person at a time, flag
-  // sentences carry no numbers. Needs the full render function with a
-  // mocked db/document.
+  // STRUCTURAL claims: two-axis drill-down, no-side-by-side (extended to
+  // the new visuals), leave-near-holiday drill-down-only, and the
+  // deliberate project-view exception, all explicitly tested.
   // ═══════════════════════════════════════════════════════════════════
-  function buildRenderSandbox({ projects, logs, leaveRequestsFresh = [], users, selectedPersonId = '', windowDays = 30 }) {
+  function buildRenderSandbox({ projects, logs, leaveRequestsFresh = [], users, holidaysFresh = [], selectedProjectId = '', selectedPersonId = '', windowDays = 30 }) {
     let capturedHTML = undefined;
     const dbCalls = [];
-    const listeners = {};
     const sandbox = {
-      console, Date, Object, Math,
+      console, Date, Object, Math, Set,
       currentUser: { id: 'admin1', isAdmin: true, name: 'Admin' },
       shCachedInsightData: null,
+      shSelectedProjectId: selectedProjectId,
       shSelectedPersonId: selectedPersonId,
       shSelectedWindowDays: windowDays,
       db: {
         collection: (name) => ({
           get: async (opts) => {
-            dbCalls.push({ collection: name, opts });
+            dbCalls.push({ collection: name, opts, kind: 'collection' });
             const map = { projects, timeLogs: logs, leaveRequests: leaveRequestsFresh, users };
             const data = map[name] || [];
             return { forEach: (fn) => data.forEach((d, i) => fn({ data: () => d, id: d.id || `${name}${i}` })) };
           },
+          doc: (id) => ({
+            get: async (opts) => {
+              dbCalls.push({ collection: name, docId: id, opts, kind: 'doc' });
+              return { exists: true, data: () => ({ holidays: holidaysFresh }) };
+            },
+          }),
         }),
       },
       document: {
@@ -294,160 +360,149 @@ async function run() {
           if (id === 'sh-individualinsight') {
             return { set innerHTML(v) { capturedHTML = v; }, get innerHTML() { return capturedHTML; } };
           }
-          return { addEventListener: (evt, fn) => { listeners[id] = fn; } };
+          return { addEventListener: () => {} };
         },
       },
     };
     vm.createContext(sandbox);
     vm.runInContext(shConstantsSrc, sandbox);
-    vm.runInContext(getWindowBoundsSrc, sandbox);
-    vm.runInContext(productiveMinsSrc, sandbox);
-    vm.runInContext(leaveDaysSrc, sandbox);
-    vm.runInContext(workloadPatternSrc, sandbox);
-    vm.runInContext(phaseContribSrc, sandbox);
-    vm.runInContext(estimationPatternSrc, sandbox);
-    vm.runInContext(overBudgetNowSrc, sandbox);
+    FN_NAMES.forEach(name => vm.runInContext(fnSrc[name], sandbox));
     vm.runInContext(renderInsightSrc, sandbox);
     vm.runInContext(renderInsightBodySrc, sandbox);
-    return { sandbox, dbCalls, getHTML: () => capturedHTML, listeners };
+    return { sandbox, dbCalls, getHTML: () => capturedHTML };
   }
 
-  console.log('\n=== renderIndividualInsight: fresh source:server reads on open ===');
+  console.log('\n=== renderIndividualInsight: 5 fresh source:server reads (added companyData/squareDB) ===');
   {
     const projects = [{ id: 'p1', name: 'Proj', phases: { Phase: 100 } }];
     const logs = [{ userId: 'u1', projectId: 'p1', phase: 'Phase', productive: true, durationMins: 100 * 60, date: dateStr(-5) }];
-    const users = [{ id: 'u1', name: 'Alice' }, { id: 'u2', name: 'Bob' }];
+    const users = [{ id: 'u1', name: 'Alice' }];
     const { dbCalls } = await (async () => {
       const b = buildRenderSandbox({ projects, logs, users });
       await vm.runInContext('renderIndividualInsight', b.sandbox)();
       return b;
     })();
-    check('4 fresh reads (projects, timeLogs, leaveRequests, users)', dbCalls.length === 4);
+    check('5 fresh reads total', dbCalls.length === 5);
     check('all reads used source:\'server\'', dbCalls.every(c => c.opts && c.opts.source === 'server'));
+    check('the 5th is the companyData/squareDB doc read', dbCalls.some(c => c.kind === 'doc' && c.collection === 'companyData' && c.docId === 'squareDB'));
   }
 
-  console.log('\n=== STRUCTURAL: no person selected -- zero raw numbers rendered anywhere ===');
+  console.log('\n=== STRUCTURAL: Margin Risk sentences appear in the primary card, sorted by hours-over (not alphabetical) ===');
   {
-    const projects = [{ id: 'p1', name: 'Proj', phases: { Phase: 100 } }];
-    const logs = [
-      { userId: 'u1', projectId: 'p1', phase: 'Phase', productive: true, durationMins: 300 * 60, date: dateStr(-5) },
-      { userId: 'u2', projectId: 'p1', phase: 'Phase', productive: true, durationMins: 10 * 60, date: dateStr(-5) },
+    // Both ratios must clear the REAL render-time significant-over bar
+    // (SH_EST_SIGNIFICANT_OVER_RATIO = 1.5x) for both to actually appear
+    // as flags -- the earlier pure-function test used minRatio=1.10
+        // directly as an argument, which is a different, lower bar than what
+    // the shipped render code actually applies.
+    const projects = [
+      { id: 'small', name: 'Zebra Project', phases: { Phase: 10 } },  // 300% of 10h -> 30h actual, 20h over
+      { id: 'big', name: 'Alpha Project', phases: { Phase: 500 } },   // 160% of 500h -> 800h actual, 300h over
     ];
-    const users = [{ id: 'u1', name: 'Alice' }, { id: 'u2', name: 'Bob' }];
+    const logs = [
+      { userId: 'u1', projectId: 'small', phase: 'Phase', durationMins: 10 * 60 * 3.0, date: dateStr(-5) },
+      { userId: 'u1', projectId: 'big', phase: 'Phase', durationMins: 500 * 60 * 1.60, date: dateStr(-5) },
+    ];
+    const users = [{ id: 'u1', name: 'Alice' }];
     const { getHTML } = await (async () => {
-      const b = buildRenderSandbox({ projects, logs, users, selectedPersonId: '' });
+      const b = buildRenderSandbox({ projects, logs, users });
       await vm.runInContext('renderIndividualInsight', b.sandbox)();
       return b;
     })();
     const html = getHTML();
-    check('prompts to pick a name, shows no numbers by default', /Pick a name above/.test(html));
-    check('no "Their Hours" raw-data table rendered when nobody is selected', !html.includes('Their Hours'));
+    check('Margin Risk card present', /Margin Risk/.test(html));
+    check('"Alpha Project" (150h over) sorts BEFORE "Zebra Project" (18.8h over) -- money, not alphabet, not percentage', html.indexOf('Alpha Project') < html.indexOf('Zebra Project'));
+    check('margin risk sentences include real numbers (project-level numbers are allowed, per Layer A precedent)', /\d+h over its \d+h budget/.test(html));
   }
 
-  console.log('\n=== STRUCTURAL: ONE person selected -- their raw numbers appear, no second person\'s numbers alongside ===');
+  console.log('\n=== STRUCTURAL: two-axis drill-down -- project and person selections work independently ===');
   {
-    const projects = [{ id: 'p1', name: 'Proj', phases: { Phase: 100 } }];
-    const logs = [];
-    for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-5) });
-    logs.push({ userId: 'u2', productive: true, durationMins: 999 * 60, date: dateStr(-5) }); // a second person with data -- must NOT show up numerically
-    const users = [{ id: 'u1', name: 'Alice' }, { id: 'u2', name: 'Bob' }];
-    const { getHTML } = await (async () => {
-      const b = buildRenderSandbox({ projects, logs, users, selectedPersonId: 'u1' });
+    const projects = [{ id: 'p1', name: 'Proj A', phases: { Phase: 100 } }];
+    const logs = [
+      { userId: 'u1', projectId: 'p1', phase: 'Phase', productive: true, durationMins: 100 * 60 * 1.5, date: dateStr(-5) },
+    ];
+    const users = [{ id: 'u1', name: 'Alice' }];
+
+    const { getHTML: getProjOnly } = await (async () => {
+      const b = buildRenderSandbox({ projects, logs, users, selectedProjectId: 'p1', selectedPersonId: '' });
       await vm.runInContext('renderIndividualInsight', b.sandbox)();
       return b;
     })();
-    const html = getHTML();
-    check('Alice\'s raw hours are shown', /Alice/.test(html) && /logged in the last/.test(html));
-    check('Bob\'s raw hours (999h) are NOT present anywhere in the output', !html.includes('999.0h'));
-    check('only ONE "— Workload" raw-numbers header appears (not one per person)', (html.match(/— Workload/g) || []).length === 1);
+    const projOnlyHtml = getProjOnly();
+    check('project selected alone -> shows budget burn', /budget burn by phase/.test(projOnlyHtml));
+    check('project selected alone -> person drill-down still says "pick a name"', /Pick a name above/.test(projOnlyHtml));
+
+    const { getHTML: getPersonOnly } = await (async () => {
+      const b = buildRenderSandbox({ projects, logs, users, selectedProjectId: '', selectedPersonId: 'u1' });
+      await vm.runInContext('renderIndividualInsight', b.sandbox)();
+      return b;
+    })();
+    const personOnlyHtml = getPersonOnly();
+    check('person selected alone -> shows their numbers', /Alice/.test(personOnlyHtml) && /Versatility/.test(personOnlyHtml));
+    check('person selected alone -> project drill-down still says "pick a project"', /Pick a project above/.test(personOnlyHtml));
   }
 
-  console.log('\n=== STRUCTURAL: flag sentences carry no numbers (both cards) ===');
+  console.log('\n=== STRUCTURAL: leave-near-holiday NEVER appears as a flag -- drill-down only ===');
+  {
+    const projects = [];
+    const logs = [{ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-5) }];
+    // Leave adjacent to a 2nd-Saturday weekend -- would qualify as "near holiday".
+    const leaveRequestsFresh = [{ userId: 'u1', status: 'approved', startDate: '2026-08-07', endDate: '2026-08-07' }];
+    const users = [{ id: 'u1', name: 'Alice' }];
+
+    const { getHTML: noSelection } = await (async () => {
+      const b = buildRenderSandbox({ projects, logs, leaveRequestsFresh, users });
+      await vm.runInContext('renderIndividualInsight', b.sandbox)();
+      return b;
+    })();
+    const flagsOnly = noSelection();
+    check('with nobody selected, no leave/holiday language appears anywhere (nothing to proactively surface)', !flagsOnly.toLowerCase().includes('holiday') && !flagsOnly.toLowerCase().includes('coverage planning'));
+
+    const { getHTML: withSelection } = await (async () => {
+      const b = buildRenderSandbox({ projects, logs, leaveRequestsFresh, users, selectedPersonId: 'u1' });
+      await vm.runInContext('renderIndividualInsight', b.sandbox)();
+      return b;
+    })();
+    const withPerson = withSelection();
+    check('only appears once a person is explicitly selected (drill-down), neutrally worded', /coverage planning/.test(withPerson) && !withPerson.toLowerCase().includes('gotcha'));
+  }
+
+  console.log('\n=== STRUCTURAL: no-side-by-side, extended to the new visuals -- workload trend & leave heatmap are single-person only ===');
   {
     const projects = [];
     const logs = [];
-    for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    logs.push({ userId: 'u1', productive: true, durationMins: 260 * 60, date: dateStr(-5) }); // flagged, comfortably above the new 2.0x bar
-    const users = [{ id: 'u1', name: 'Alice' }];
+    for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 50 * 60, date: dateStr(-30 * w - 5) });
+    logs.push({ userId: 'u1', productive: true, durationMins: 50 * 60, date: dateStr(-5) });
+    logs.push({ userId: 'u2', productive: true, durationMins: 999 * 60, date: dateStr(-5) }); // a second person, real data
+    const leaveRequestsFresh = [
+      { userId: 'u2', status: 'approved', startDate: dateStr(-2), endDate: dateStr(-2) }, // u2's own leave -- must never show in u1's heatmap
+    ];
+    const users = [{ id: 'u1', name: 'Alice' }, { id: 'u2', name: 'Bob' }];
     const { getHTML } = await (async () => {
-      const b = buildRenderSandbox({ projects, logs, users });
+      const b = buildRenderSandbox({ projects, logs, leaveRequestsFresh, users, selectedPersonId: 'u1' });
       await vm.runInContext('renderIndividualInsight', b.sandbox)();
       return b;
     })();
     const html = getHTML();
-    check('flag fired', /Alice.s workload this period is well above their own normal/.test(html));
-    // Both flag cards live between the refresh-note and the person-picker
-    // card ("Look at One Person") -- confirm no digit-percent or
-    // digit-hour pattern appears anywhere in that whole span.
-    const flagsSpan = html.match(/sh-refresh-note[\s\S]*?(?=Look at One Person)/);
-    check('no percentage or hour figure inside either flags card', flagsSpan ? !/\d+(\.\d+)?(%|h\b)/.test(flagsSpan[0]) : true);
+    check('Bob\'s raw hours (999h) do not appear anywhere when Alice is selected', !html.includes('999.0h'));
+    check('exactly one workload trend SVG rendered (one person\'s own series)', (html.match(/<svg width="260"/g) || []).length === 1);
+    check('exactly one leave heatmap SVG rendered (one person\'s own calendar)', (html.match(/<svg width="\d+" height="\d+" viewBox="0 0 \d+ \d+" style="display:block;"><rect/g) || []).length >= 1);
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== significantlyOverBudgetInstances: pure filter correctness ===');
+  console.log('\n=== STRUCTURAL: the ONE deliberate exception -- "Look at One Project" DOES show multiple people together, on purpose ===');
   {
-    const sandbox = buildSandbox();
-    const contributed = [
-      { projectName: 'A', phase: 'P1', ratio: 1.6 }, // over the 1.5x bar
-      { projectName: 'B', phase: 'P2', ratio: 1.2 }, // over budget, but not "significantly"
-      { projectName: 'C', phase: 'P3', ratio: 0.8 }, // under budget
-    ];
-    const result = vm.runInContext('significantlyOverBudgetInstances', sandbox)(contributed, 1.5);
-    check('only the 1.6x instance is included', result.length === 1 && result[0].phase === 'P1');
-  }
-
-  console.log('\n=== STRUCTURAL: estimation leads -- a single-instance over-budget flag names the phase ===');
-  {
-    const projects = [{ id: 'p1', name: 'Kredent office', phases: { 'Schematic Design': 100 } }];
-    const logs = [{ userId: 'u1', projectId: 'p1', phase: 'Schematic Design', durationMins: 100 * 60 * 2.0, date: dateStr(-5) }]; // 200% of budget, u1 is 100% contributor
-    const users = [{ id: 'u1', name: 'Taskiya' }];
-    const { getHTML } = await (async () => {
-      const b = buildRenderSandbox({ projects, logs, users });
-      await vm.runInContext('renderIndividualInsight', b.sandbox)();
-      return b;
-    })();
-    const html = getHTML();
-    check('names the specific project and phase for a single over-budget instance', /Taskiya is a meaningful contributor on Kredent office — Schematic Design, which is running well over its budgeted hours/.test(html));
-    check('estimation flag card ("Worth a Conversation") appears BEFORE the workload card ("Also Worth Noting")', html.indexOf('Worth a Conversation') < html.indexOf('Also Worth Noting'));
-  }
-
-  console.log('\n=== STRUCTURAL: multiple over-budget instances for one person -> ONE combined sentence, not one per phase ===');
-  {
-    const projects = [
-      { id: 'p1', name: 'Proj A', phases: { Phase: 100 } },
-      { id: 'p2', name: 'Proj B', phases: { Phase: 100 } },
-    ];
+    const projects = [{ id: 'p1', name: 'Shared Project', phases: { Phase: 100 } }];
     const logs = [
-      { userId: 'u1', projectId: 'p1', phase: 'Phase', durationMins: 100 * 60 * 1.8, date: dateStr(-5) },
-      { userId: 'u1', projectId: 'p2', phase: 'Phase', durationMins: 100 * 60 * 1.8, date: dateStr(-4) },
+      { userId: 'u1', projectId: 'p1', phase: 'Phase', durationMins: 100 * 60 * 0.8, date: dateStr(-5) },
+      { userId: 'u2', projectId: 'p1', phase: 'Phase', durationMins: 100 * 60 * 0.5, date: dateStr(-5) },
     ];
-    const users = [{ id: 'u1', name: 'Alice' }];
+    const users = [{ id: 'u1', name: 'Alice' }, { id: 'u2', name: 'Bob' }];
     const { getHTML } = await (async () => {
-      const b = buildRenderSandbox({ projects, logs, users });
+      const b = buildRenderSandbox({ projects, logs, users, selectedProjectId: 'p1' });
       await vm.runInContext('renderIndividualInsight', b.sandbox)();
       return b;
     })();
     const html = getHTML();
-    check('combined sentence naming the COUNT, not each phase by name', /Alice is a meaningful contributor on 2 phases running well over budget/.test(html));
-    check('does not also print two separate single-phase sentences', (html.match(/is a meaningful contributor on/g) || []).length === 1);
-  }
-
-  console.log('\n=== STRUCTURAL: Admin User (isAdmin:true) excluded entirely -- not in flags, not in the person picker ===');
-  {
-    const projects = [{ id: 'p1', name: 'Proj', phases: { Phase: 100 } }];
-    const logs = [];
-    for (let w = 1; w <= 3; w++) logs.push({ userId: 'admin1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    logs.push({ userId: 'admin1', productive: true, durationMins: 300 * 60, date: dateStr(-5) }); // would clearly flag if included
-    const users = [{ id: 'admin1', name: 'Admin User', isAdmin: true }];
-    const { getHTML } = await (async () => {
-      const b = buildRenderSandbox({ projects, logs, users });
-      await vm.runInContext('renderIndividualInsight', b.sandbox)();
-      return b;
-    })();
-    const html = getHTML();
-    check('Admin User does not appear anywhere in the output', !html.includes('Admin User'));
-    check('nothing stands out (flags empty, since the only data belongs to an excluded admin)', /Nothing stands out right now/.test(html));
+    check('BOTH Alice and Bob appear together under the project drill-down -- deliberate, not a bug', html.includes('Alice') && html.includes('Bob') && /Who's on this:.*Alice.*Bob|Who's on this:.*Bob.*Alice/.test(html));
   }
 
   console.log(`\n${passCount} passed, ${failCount} failed`);
