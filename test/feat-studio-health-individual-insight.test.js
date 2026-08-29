@@ -49,8 +49,8 @@ function extractConstLine(source, name) {
   return source.slice(idx, end + 1);
 }
 const shConstantsSrc = [
-  'SH_WORKLOAD_WINDOWS', 'SH_PRIOR_WINDOW_COUNT', 'SH_EST_MIN_CONTRIBUTION_PCT',
-  'SH_EST_RECENT_COUNT', 'SH_EST_MIN_HISTORICAL_COUNT',
+  'SH_WORKLOAD_WINDOWS', 'SH_PRIOR_WINDOW_COUNT', 'SH_WORKLOAD_SPIKE_RATIO', 'SH_WORKLOAD_DROP_RATIO',
+  'SH_EST_MIN_CONTRIBUTION_PCT', 'SH_EST_RECENT_COUNT', 'SH_EST_MIN_HISTORICAL_COUNT', 'SH_EST_SIGNIFICANT_OVER_RATIO',
 ].map(name => extractConstLine(fullScript, name)).join('\n');
 
 const getWindowBoundsSrc = extractFunction(fullScript, 'getWindowBounds');
@@ -59,6 +59,7 @@ const leaveDaysSrc = extractFunction(fullScript, 'approvedLeaveDaysInWindow');
 const workloadPatternSrc = extractFunction(fullScript, 'computeWorkloadPattern');
 const phaseContribSrc = extractFunction(fullScript, 'computePhaseContributions');
 const estimationPatternSrc = extractFunction(fullScript, 'computeEstimationPattern');
+const overBudgetNowSrc = extractFunction(fullScript, 'significantlyOverBudgetInstances');
 const renderInsightSrc = extractFunction(fullScript, 'renderIndividualInsight');
 const renderInsightBodySrc = extractFunction(fullScript, 'renderIndividualInsightBody');
 
@@ -69,7 +70,7 @@ function check(label, cond) {
   if (cond) { console.log(`  PASS: ${label}`); passCount++; }
   else { console.log(`  FAIL: ${label}`); failCount++; }
 }
-const allSrc = [getWindowBoundsSrc, productiveMinsSrc, leaveDaysSrc, workloadPatternSrc, phaseContribSrc, estimationPatternSrc, renderInsightSrc, renderInsightBodySrc].join('\n');
+const allSrc = [getWindowBoundsSrc, productiveMinsSrc, leaveDaysSrc, workloadPatternSrc, phaseContribSrc, estimationPatternSrc, overBudgetNowSrc, renderInsightSrc, renderInsightBodySrc].join('\n');
 check('no .set( anywhere', !allSrc.includes('.set('));
 check('no .update( anywhere', !allSrc.includes('.update('));
 check('no .add( anywhere', !allSrc.includes('.add('));
@@ -90,6 +91,7 @@ function buildSandbox() {
   vm.runInContext(workloadPatternSrc, sandbox);
   vm.runInContext(phaseContribSrc, sandbox);
   vm.runInContext(estimationPatternSrc, sandbox);
+  vm.runInContext(overBudgetNowSrc, sandbox);
   return sandbox;
 }
 
@@ -103,7 +105,7 @@ function dateStr(offsetDaysFromToday) {
 
 async function run() {
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeWorkloadPattern: flags ABOVE own normal, not vs. a shared target ===');
+  console.log('\n=== computeWorkloadPattern: flags a genuinely EXTREME spike (>=2.0x), not moderate variation ===');
   {
     const sandbox = buildSandbox();
     const logs = [];
@@ -111,35 +113,51 @@ async function run() {
     for (let w = 1; w <= 3; w++) {
       logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
     }
-    // current 30-day window: 180h -- well above their own normal (1.8x)
-    logs.push({ userId: 'u1', productive: true, durationMins: 180 * 60, date: dateStr(-5) });
+    // current 30-day window: 260h -- 2.6x their own normal, comfortably past the 2.0x bar
+    logs.push({ userId: 'u1', productive: true, durationMins: 260 * 60, date: dateStr(-5) });
     const result = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
     check('flagged', result.flagged === true);
     check('direction is "above"', result.direction === 'above');
-    check('currentMins reflects the real logged total', result.currentMins === 180 * 60);
+    check('currentMins reflects the real logged total', result.currentMins === 260 * 60);
   }
 
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeWorkloadPattern: flags BELOW own normal ===');
+  console.log('\n=== computeWorkloadPattern: flags a genuinely EXTREME drop (<=0.4x) ===');
   {
     const sandbox = buildSandbox();
     const logs = [];
     for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    logs.push({ userId: 'u1', productive: true, durationMins: 40 * 60, date: dateStr(-5) }); // 0.4x -- well below
+    logs.push({ userId: 'u1', productive: true, durationMins: 30 * 60, date: dateStr(-5) }); // 0.3x -- comfortably below the 0.4x bar
     const result = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
     check('flagged', result.flagged === true);
     check('direction is "below"', result.direction === 'below');
   }
 
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeWorkloadPattern: NOT flagged when close to own normal ===');
+  // THE ACTUAL BUG THIS RE-TUNING FIXES: the real-data review found
+  // Souvik at 1.09x his own normal (9% above -- an ordinary week)
+  // getting flagged under the old 1.3x/0.7x band. Confirm that specific
+  // real shape is now silent.
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== computeWorkloadPattern: the Souvik case (9% above normal) -- NOT flagged, was the bug ===');
   {
     const sandbox = buildSandbox();
     const logs = [];
     for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    logs.push({ userId: 'u1', productive: true, durationMins: 105 * 60, date: dateStr(-5) }); // 1.05x -- ordinary variation
+    logs.push({ userId: 'u1', productive: true, durationMins: 109 * 60, date: dateStr(-5) }); // exactly the real 9%-above case
     const result = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
-    check('NOT flagged', result.flagged === false);
+    check('NOT flagged -- an ordinary week, not noise anymore', result.flagged === false);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== computeWorkloadPattern: NOT flagged for moderate (not extreme) variation, e.g. 1.5x ===');
+  {
+    const sandbox = buildSandbox();
+    const logs = [];
+    for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
+    logs.push({ userId: 'u1', productive: true, durationMins: 150 * 60, date: dateStr(-5) }); // 1.5x -- a busy stretch, still within the wider quiet zone
+    const result = vm.runInContext('computeWorkloadPattern', sandbox)(logs, 'u1', 30, 3, TODAY);
+    check('NOT flagged -- 1.5x is a real busy period, not an extreme one under the new bar', result.flagged === false);
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -288,6 +306,7 @@ async function run() {
     vm.runInContext(workloadPatternSrc, sandbox);
     vm.runInContext(phaseContribSrc, sandbox);
     vm.runInContext(estimationPatternSrc, sandbox);
+    vm.runInContext(overBudgetNowSrc, sandbox);
     vm.runInContext(renderInsightSrc, sandbox);
     vm.runInContext(renderInsightBodySrc, sandbox);
     return { sandbox, dbCalls, getHTML: () => capturedHTML, listeners };
@@ -344,12 +363,12 @@ async function run() {
     check('only ONE "— Workload" raw-numbers header appears (not one per person)', (html.match(/— Workload/g) || []).length === 1);
   }
 
-  console.log('\n=== STRUCTURAL: flag sentences carry no numbers ===');
+  console.log('\n=== STRUCTURAL: flag sentences carry no numbers (both cards) ===');
   {
     const projects = [];
     const logs = [];
     for (let w = 1; w <= 3; w++) logs.push({ userId: 'u1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
-    logs.push({ userId: 'u1', productive: true, durationMins: 200 * 60, date: dateStr(-5) }); // flagged, well above
+    logs.push({ userId: 'u1', productive: true, durationMins: 260 * 60, date: dateStr(-5) }); // flagged, comfortably above the new 2.0x bar
     const users = [{ id: 'u1', name: 'Alice' }];
     const { getHTML } = await (async () => {
       const b = buildRenderSandbox({ projects, logs, users });
@@ -358,10 +377,77 @@ async function run() {
     })();
     const html = getHTML();
     check('flag fired', /Alice.s workload this period is well above their own normal/.test(html));
-    // The workload flag sentence template itself has no numeric interpolation --
-    // confirm no digit-percent or digit-hour pattern appears inside the flag card specifically.
-    const flagCardMatch = html.match(/Patterns Worth a Look[\s\S]*?<\/div>\s*<\/div>\s*<div class="card">/);
-    check('no percentage or hour figure inside the flags card', flagCardMatch ? !/\d+(\.\d+)?(%|h\b)/.test(flagCardMatch[0]) : true);
+    // Both flag cards live between the refresh-note and the person-picker
+    // card ("Look at One Person") -- confirm no digit-percent or
+    // digit-hour pattern appears anywhere in that whole span.
+    const flagsSpan = html.match(/sh-refresh-note[\s\S]*?(?=Look at One Person)/);
+    check('no percentage or hour figure inside either flags card', flagsSpan ? !/\d+(\.\d+)?(%|h\b)/.test(flagsSpan[0]) : true);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== significantlyOverBudgetInstances: pure filter correctness ===');
+  {
+    const sandbox = buildSandbox();
+    const contributed = [
+      { projectName: 'A', phase: 'P1', ratio: 1.6 }, // over the 1.5x bar
+      { projectName: 'B', phase: 'P2', ratio: 1.2 }, // over budget, but not "significantly"
+      { projectName: 'C', phase: 'P3', ratio: 0.8 }, // under budget
+    ];
+    const result = vm.runInContext('significantlyOverBudgetInstances', sandbox)(contributed, 1.5);
+    check('only the 1.6x instance is included', result.length === 1 && result[0].phase === 'P1');
+  }
+
+  console.log('\n=== STRUCTURAL: estimation leads -- a single-instance over-budget flag names the phase ===');
+  {
+    const projects = [{ id: 'p1', name: 'Kredent office', phases: { 'Schematic Design': 100 } }];
+    const logs = [{ userId: 'u1', projectId: 'p1', phase: 'Schematic Design', durationMins: 100 * 60 * 2.0, date: dateStr(-5) }]; // 200% of budget, u1 is 100% contributor
+    const users = [{ id: 'u1', name: 'Taskiya' }];
+    const { getHTML } = await (async () => {
+      const b = buildRenderSandbox({ projects, logs, users });
+      await vm.runInContext('renderIndividualInsight', b.sandbox)();
+      return b;
+    })();
+    const html = getHTML();
+    check('names the specific project and phase for a single over-budget instance', /Taskiya is a meaningful contributor on Kredent office — Schematic Design, which is running well over its budgeted hours/.test(html));
+    check('estimation flag card ("Worth a Conversation") appears BEFORE the workload card ("Also Worth Noting")', html.indexOf('Worth a Conversation') < html.indexOf('Also Worth Noting'));
+  }
+
+  console.log('\n=== STRUCTURAL: multiple over-budget instances for one person -> ONE combined sentence, not one per phase ===');
+  {
+    const projects = [
+      { id: 'p1', name: 'Proj A', phases: { Phase: 100 } },
+      { id: 'p2', name: 'Proj B', phases: { Phase: 100 } },
+    ];
+    const logs = [
+      { userId: 'u1', projectId: 'p1', phase: 'Phase', durationMins: 100 * 60 * 1.8, date: dateStr(-5) },
+      { userId: 'u1', projectId: 'p2', phase: 'Phase', durationMins: 100 * 60 * 1.8, date: dateStr(-4) },
+    ];
+    const users = [{ id: 'u1', name: 'Alice' }];
+    const { getHTML } = await (async () => {
+      const b = buildRenderSandbox({ projects, logs, users });
+      await vm.runInContext('renderIndividualInsight', b.sandbox)();
+      return b;
+    })();
+    const html = getHTML();
+    check('combined sentence naming the COUNT, not each phase by name', /Alice is a meaningful contributor on 2 phases running well over budget/.test(html));
+    check('does not also print two separate single-phase sentences', (html.match(/is a meaningful contributor on/g) || []).length === 1);
+  }
+
+  console.log('\n=== STRUCTURAL: Admin User (isAdmin:true) excluded entirely -- not in flags, not in the person picker ===');
+  {
+    const projects = [{ id: 'p1', name: 'Proj', phases: { Phase: 100 } }];
+    const logs = [];
+    for (let w = 1; w <= 3; w++) logs.push({ userId: 'admin1', productive: true, durationMins: 100 * 60, date: dateStr(-30 * w - 5) });
+    logs.push({ userId: 'admin1', productive: true, durationMins: 300 * 60, date: dateStr(-5) }); // would clearly flag if included
+    const users = [{ id: 'admin1', name: 'Admin User', isAdmin: true }];
+    const { getHTML } = await (async () => {
+      const b = buildRenderSandbox({ projects, logs, users });
+      await vm.runInContext('renderIndividualInsight', b.sandbox)();
+      return b;
+    })();
+    const html = getHTML();
+    check('Admin User does not appear anywhere in the output', !html.includes('Admin User'));
+    check('nothing stands out (flags empty, since the only data belongs to an excluded admin)', /Nothing stands out right now/.test(html));
   }
 
   console.log(`\n${passCount} passed, ${failCount} failed`);

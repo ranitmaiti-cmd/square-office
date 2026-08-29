@@ -3608,9 +3608,28 @@ async function renderStudioHealth() {
 
 const SH_WORKLOAD_WINDOWS = [7, 30]; // selectable window sizes, in days
 const SH_PRIOR_WINDOW_COUNT = 3;     // how many equal-length prior windows form "their own normal"
+// V16.12 (tuned against real data, 2026-08-28): raised HARD from the
+// original 1.3x/0.7x -- that band fired on ordinary week-to-week
+// variation (Souvik at 1.09x his own normal got flagged -- noise, not
+// signal). A workload flag now means "genuinely unusual for THIS
+// person," not "this week was a bit different": normal +-30% swings
+// (0.7x-1.3x) stay fully silent, and the quiet zone is wider still
+// (0.4x-2.0x) so only a real sustained drop (possible disengagement) or
+// spike (burnout risk) fires.
+const SH_WORKLOAD_SPIKE_RATIO = 2.0; // >= double their own normal
+const SH_WORKLOAD_DROP_RATIO = 0.4;  // <= 40% of their own normal
 const SH_EST_MIN_CONTRIBUTION_PCT = 0.20; // meaningful-contributor threshold -- no drive-by dilution
 const SH_EST_RECENT_COUNT = 5;            // "last N" phase-instances, per the owner's own example shape
 const SH_EST_MIN_HISTORICAL_COUNT = 3;    // minimum historical sample before drawing any comparison
+// V16.12: the PRIMARY estimation signal -- a meaningful contributor on a
+// phase that's ALREADY significantly over budget, right now, independent
+// of whether enough history exists for the recency-vs-historical pattern
+// below. This is the Taskiya-shaped case from the real-data review: one
+// phase-instance was enough to be worth a look, it didn't need 5+3
+// samples to matter. Deliberately a higher bar than Layer A's 10%
+// aggregate-bias tolerance -- an individual "worth a conversation" flag
+// should mean more than a phase running a little hot.
+const SH_EST_SIGNIFICANT_OVER_RATIO = 1.5;
 
 let shCachedInsightData = null; // { projects, logs, leaveRequestsFresh, allUsers } -- set once per fetch, re-rendered from on selector changes
 let shSelectedPersonId = '';
@@ -3680,8 +3699,8 @@ function computeWorkloadPattern(logs, userId, windowDays, priorWindowCount, toda
   let flagged = false, direction = null;
   if (avgPriorMins > 0) {
     const ratio = currentMins / avgPriorMins;
-    if (ratio >= 1.3) { flagged = true; direction = 'above'; }
-    else if (ratio <= 0.7) { flagged = true; direction = 'below'; }
+    if (ratio >= SH_WORKLOAD_SPIKE_RATIO) { flagged = true; direction = 'above'; }
+    else if (ratio <= SH_WORKLOAD_DROP_RATIO) { flagged = true; direction = 'below'; }
   }
   return { currentMins, avgPriorMins, flagged, direction, insufficientHistory: false, currentWindow: current };
 }
@@ -3742,6 +3761,18 @@ function computeEstimationPattern(phaseInstances, userId, minContributionPct, re
   return { contributed, recent, historical, flagged, insufficientHistory: false, recentOverRate, historicalOverRate };
 }
 
+// V16.12: the PRIMARY estimation signal, pure. A meaningful contributor
+// on a phase-instance that's ALREADY significantly over budget, right
+// now -- doesn't wait on enough history to exist for the recency pattern
+// above. This is deliberately the lead signal (see the real-data
+// review): a single over-budget phase with a real contributor on it is
+// worth a look on its own, unlike computeEstimationPattern()'s
+// comparison, which structurally can't say anything until 5+3 samples
+// exist.
+function significantlyOverBudgetInstances(contributed, overBudgetRatio) {
+  return contributed.filter(x => x.ratio > overBudgetRatio);
+}
+
 async function renderIndividualInsight() {
   const container = document.getElementById('sh-individualinsight');
   if (!container || !currentUser?.isAdmin) return;
@@ -3778,24 +3809,45 @@ function renderIndividualInsightBody() {
   const today = new Date();
 
   const phaseInstances = computePhaseContributions(logs, projects);
-  const peopleWithData = allUsers.filter(u => logs.some(l => l.userId === u.id));
+  // V16.12: admin accounts excluded entirely -- not a team workload data
+  // point, confirmed noise on real data (Admin User's own incidental
+  // hours flagged as "well above normal" with nothing behind it).
+  const peopleWithData = allUsers.filter(u => !u.isAdmin && logs.some(l => l.userId === u.id));
 
-  const flagSentences = [];
+  // V16.12: estimation leads -- this is the PRIMARY, top-of-page signal.
+  // Combines both estimation sources: phases significantly over budget
+  // RIGHT NOW (the Taskiya-shaped case, fires on a single instance, no
+  // history required) and the recency-vs-historical pattern (needs 5+3
+  // samples, a slower-forming signal). Workload is collected separately,
+  // below, and rendered second and quieter -- it's real but was mostly
+  // noise at the old threshold; now it only fires on genuinely extreme
+  // deviation, so it stays secondary by design, not just by accident.
+  const estimationFlagSentences = [];
+  const workloadFlagSentences = [];
   const patternsByPerson = {};
   peopleWithData.forEach(u => {
     const wl = computeWorkloadPattern(logs, u.id, shSelectedWindowDays, SH_PRIOR_WINDOW_COUNT, today);
     const est = computeEstimationPattern(phaseInstances, u.id, SH_EST_MIN_CONTRIBUTION_PCT, SH_EST_RECENT_COUNT, SH_EST_MIN_HISTORICAL_COUNT);
-    patternsByPerson[u.id] = { workload: wl, estimation: est };
-    if (wl.flagged) {
-      flagSentences.push({ name: u.name, text: `${u.name}'s workload this period is well ${wl.direction} their own normal — worth a look.` });
+    const overBudgetNow = significantlyOverBudgetInstances(est.contributed, SH_EST_SIGNIFICANT_OVER_RATIO);
+    patternsByPerson[u.id] = { workload: wl, estimation: est, overBudgetNow };
+
+    if (overBudgetNow.length === 1) {
+      const x = overBudgetNow[0];
+      estimationFlagSentences.push({ name: u.name, text: `${u.name} is a meaningful contributor on ${x.projectName} — ${x.phase}, which is running well over its budgeted hours — worth a conversation.` });
+    } else if (overBudgetNow.length > 1) {
+      estimationFlagSentences.push({ name: u.name, text: `${u.name} is a meaningful contributor on ${overBudgetNow.length} phases running well over budget — worth a conversation.` });
     }
     if (est.flagged) {
       const recentOverCount = est.recent.filter(x => x.ratio > 1.10).length;
       const historicalOverCount = est.historical.filter(x => x.ratio > 1.10).length;
-      flagSentences.push({ name: u.name, text: `Phases ${u.name} has meaningfully worked on have run over budget in ${recentOverCount} of their last ${est.recent.length}, versus ${historicalOverCount} of ${est.historical.length} historically — worth a conversation.` });
+      estimationFlagSentences.push({ name: u.name, text: `Phases ${u.name} has meaningfully worked on have run over budget in ${recentOverCount} of their last ${est.recent.length}, versus ${historicalOverCount} of ${est.historical.length} historically — worth a conversation.` });
+    }
+    if (wl.flagged) {
+      workloadFlagSentences.push({ name: u.name, text: `${u.name}'s workload this period is well ${wl.direction} their own normal — worth a look.` });
     }
   });
-  flagSentences.sort((a, b) => a.name.localeCompare(b.name)); // alphabetical, NEVER by magnitude
+  estimationFlagSentences.sort((a, b) => a.name.localeCompare(b.name)); // alphabetical, NEVER by magnitude
+  workloadFlagSentences.sort((a, b) => a.name.localeCompare(b.name));
 
   const peopleOptions = peopleWithData
     .slice().sort((a, b) => a.name.localeCompare(b.name))
@@ -3824,23 +3876,29 @@ function renderIndividualInsightBody() {
       if (est.historical.length) estRows += `<tr class="sh-proj-group"><td colspan="5">Historical</td></tr>` + rowsFor(est.historical);
     }
 
+    // V16.12: estimation leads in the drill-down too, same ordering as
+    // the flags above -- workload comes after, not before.
     selectedPersonHTML = `
-      <div style="margin-bottom:16px;"><strong>${u.name}</strong> — Workload</div>
-      ${workloadHTML}
-      <div style="margin:16px 0 8px;"><strong>${u.name}</strong> — Phases meaningfully worked on (≥20% of that phase's hours), their raw numbers, no attribution math</div>
+      <div style="margin-bottom:16px;"><strong>${u.name}</strong> — Phases meaningfully worked on (≥20% of that phase's hours), their raw numbers, no attribution math</div>
       <table class="sh-table">
         <thead><tr><th>Project — Phase</th><th style="text-align:right">Their Hours</th><th style="text-align:right">Total Hours</th><th style="text-align:right">Budget</th><th style="text-align:right">%</th></tr></thead>
         <tbody>${estRows}</tbody>
       </table>
       ${est.insufficientHistory ? '<p style="color:#8A7E74;font-size:12px;margin-top:8px;">Not enough phase history yet (need ' + SH_EST_RECENT_COUNT + ' recent + ' + SH_EST_MIN_HISTORICAL_COUNT + ' historical) to compare a pattern.</p>' : ''}
+      <div style="margin:20px 0 8px;"><strong>${u.name}</strong> — Workload</div>
+      ${workloadHTML}
     `;
   }
 
   container.innerHTML = `
     <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shiiRefreshLink" style="color:#A96E35;">refresh</a></div>
     <div class="card">
-      <div class="card-title">🔎 Patterns Worth a Look — workload and estimation, vs. each person's own history</div>
-      ${flagSentences.length ? flagSentences.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f.text}</div></div>`).join('') : '<div class="sh-flag-none">Nothing stands out right now.</div>'}
+      <div class="card-title">🔎 Worth a Conversation — meaningful contributors on phases running significantly over budget</div>
+      ${estimationFlagSentences.length ? estimationFlagSentences.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f.text}</div></div>`).join('') : '<div class="sh-flag-none">Nothing stands out right now.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">📊 Also Worth Noting — workload well outside someone's own normal</div>
+      ${workloadFlagSentences.length ? workloadFlagSentences.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f.text}</div></div>`).join('') : '<div class="sh-flag-none">Nothing extreme right now.</div>'}
     </div>
     <div class="card">
       <div class="card-title">👤 Look at One Person</div>
