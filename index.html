@@ -391,6 +391,21 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .sh-table td.sh-num{text-align:right;font-variant-numeric:tabular-nums;}
 .sh-proj-group{font-weight:700;color:#5C4F42;background:#F7F4EF;}
 .sh-refresh-note{font-size:11px;color:#8A7E74;margin-bottom:14px;display:flex;align-items:center;gap:6px;}
+/* V16.14: Employee Review -- objective FACT rows (neutral, no color-
+   coding by design, unlike .phase-bar-fill's over/near/ok palette) and
+   the human rubric grid. Reuses .ap-star (defined earlier in this file,
+   for the existing Appraisal) verbatim for the 6-criteria star input --
+   same visual component, not redefined here. */
+.sh-fact-row{padding:10px 0;border-bottom:1px solid #EDE9E3;}
+.sh-fact-row:last-child{border-bottom:none;}
+.sh-fact-label{font-size:12px;font-weight:700;color:#5C4F42;margin-bottom:3px;}
+.sh-fact-value{font-size:13px;color:#3D332A;line-height:1.5;}
+.sh-fact-pending{font-size:12px;color:#B0A89E;font-style:italic;}
+.sh-rubric-grid{display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;margin-bottom:14px;}
+.sh-rubric-label{font-size:13px;color:#3D332A;}
+.sh-rater-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;}
+.sh-rater-table th{background:#EDE9E3;padding:6px 10px;text-align:left;font-weight:700;color:#5C4F42;border-bottom:2px solid #E0D8CE;}
+.sh-rater-table td{padding:6px 10px;border-bottom:1px solid #EDE9E3;color:#3D332A;}
 </style>
 
 <!-- Firebase SDK v10 - WORKING VERSION -->
@@ -804,6 +819,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
           <div class="sh-tab active" data-shtab="projecthealth">Project Health</div>
           <div class="sh-tab" data-shtab="submissionlog">Submission Log</div>
           <div class="sh-tab" data-shtab="individualinsight">Individual Insight</div>
+          <div class="sh-tab" data-shtab="employeereview">Employee Review</div>
         </div>
         <div class="sh-tabcontent active" id="sh-projecthealth"></div>
         <div class="sh-tabcontent" id="sh-submissionlog">
@@ -813,6 +829,11 @@ textarea.form-control{min-height:70px;resize:vertical;}
              Populated entirely by renderIndividualInsight() -- structurally
              empty here, same pattern as #sh-projecthealth. -->
         <div class="sh-tabcontent" id="sh-individualinsight"></div>
+        <!-- V16.14: Employee Review -- the honest replacement for the
+             dormant Appraisal (renderAppraisal()/appraisalData UNTOUCHED
+             in this build; retiring it is a separate follow-up step).
+             Populated entirely by renderEmployeeReview(). -->
+        <div class="sh-tabcontent" id="sh-employeereview"></div>
       </div>
 
     </div><!-- /content -->
@@ -4166,6 +4187,342 @@ function renderIndividualInsightBody() {
 }
 
 // ═══════════════════════════════════════════════════════
+// V16.14: Studio Health -- EMPLOYEE REVIEW. The honest replacement for
+// the dormant Appraisal (renderAppraisal()/appraisalData/the appraisal
+// nav item are UNTOUCHED by this build -- confirmed via git diff before
+// commit; retiring them is a deliberate separate follow-up step, not
+// bundled here). See FINDINGS-2026-08-10.md for the read-only Appraisal
+// deep-dive this replaces: 8-component weighted composite, employee-
+// facing narrative, a full ranked leaderboard, ZERO real appraisalData
+// ever written, employees structurally unable to reach the page at all.
+//
+// Two panels, never merged into one number -- that's the exact flaw
+// being fixed. OBJECTIVE PANEL: pure-read facts, identical method for
+// everyone, reusing Individual Insight's own pure functions directly
+// (computeWorkloadPattern/computeVersatilityStat/computeEstimationPattern)
+// rather than reimplementing them -- one source of truth for what
+// "workload" or "versatility" means across this entire Studio Health
+// feature. HUMAN RUBRIC: this build's ONLY write, saveReview() -- see
+// its own header below for the safety discipline.
+//
+// Period reuses the existing top-level getQuarter() (index.html, used
+// by Hours Tracker) -- NOT the near-identical getApQtr() nested inside
+// renderAppraisal(), which this build deliberately never touches.
+// computeWorkloadPattern()/computeVersatilityStat() are rolling-window
+// functions, not calendar-quarter-aware -- reused here with a ~91-day
+// window anchored at the quarter's own end date as a pragmatic quarter
+// proxy, not exact day-for-day boundaries. Documented here plainly
+// rather than silently presented as more precise than it is.
+// ═══════════════════════════════════════════════════════
+
+const SH_REVIEW_CRITERIA = [
+  { key: 'designQuality', label: 'Design quality' },
+  { key: 'judgment', label: 'Judgment / problem-solving' },
+  { key: 'clientHandling', label: 'Client handling / communication' },
+  { key: 'initiative', label: 'Initiative / ownership' },
+  { key: 'reliability', label: 'Reliability under pressure' },
+  { key: 'mentoring', label: 'Mentoring / helping others' },
+];
+const SH_REVIEW_WINDOW_DAYS = 91;     // ~one quarter -- see file header for the approximation this is
+const SH_REVIEW_PRIOR_WINDOWS = 1;    // one prior quarter-length window as "their own norm" -- quarters are long, 3 (Individual Insight's default) would reach back a full year
+const SH_CONSISTENCY_CV_THRESHOLD = 0.6; // descriptive label boundary ONLY -- never a flag, never good/bad
+
+let shCachedReviewData = null; // { projects, logs, allUsers, allReviews }
+let shReviewSelectedPersonId = '';
+let shReviewQtrOffset = 0;
+
+// Pure: the last day of a getQuarter()-shaped quarter's final month --
+// used as the reference "today" for reusing computeWorkloadPattern()/
+// computeVersatilityStat() unchanged (see file header).
+function quarterEndDate(qtr) {
+  const last = qtr.months[2];
+  return new Date(last.year, last.month + 1, 0);
+}
+
+function quarterPeriodKey(qtr) {
+  return `${qtr.shortLabel}-FY${qtr.fyYear}`;
+}
+
+// Pure: coefficient of variation (stdev/mean) of a person's DAILY
+// productive minutes over [start, end) -- steadiness, not level (that's
+// Workload's own job). Buckets every non-Sunday calendar day in range
+// (a missing day counts as 0), so both "erratic swings between huge and
+// tiny days" and "sporadic bursts with long silent gaps" show up the
+// same way, as a high CV. Deliberately descriptive, never good/bad --
+// an intense, uneven creative workflow isn't wrong for being uneven.
+function computeLoggingConsistency(logs, userId, start, end) {
+  const dailyTotals = {};
+  logs.filter(l => l.userId === userId && l.productive && l.date >= start && l.date < end)
+    .forEach(l => { dailyTotals[l.date] = (dailyTotals[l.date] || 0) + (l.durationMins || 0); });
+
+  const days = [];
+  let d = new Date(start + 'T00:00:00');
+  const endD = new Date(end + 'T00:00:00');
+  while (d < endD) {
+    if (d.getDay() !== 0) days.push(dailyTotals[toLocalDateStr(d)] || 0); // Sundays excluded -- a simple, holiday-list-independent proxy
+    d.setDate(d.getDate() + 1);
+  }
+  if (days.length === 0) return { cv: null, insufficientData: true };
+  const mean = days.reduce((s, v) => s + v, 0) / days.length;
+  if (mean === 0) return { cv: null, insufficientData: true };
+  const variance = days.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / days.length;
+  return { cv: Math.sqrt(variance) / mean, insufficientData: false };
+}
+
+// Pure: assembles the whole Objective Panel for one person+quarter,
+// reusing Individual Insight's own pure functions unchanged.
+function computeObjectivePanelFacts(logs, projects, userId, qtr) {
+  const qEnd = quarterEndDate(qtr);
+  const workload = computeWorkloadPattern(logs, userId, SH_REVIEW_WINDOW_DAYS, SH_REVIEW_PRIOR_WINDOWS, qEnd);
+  const versatility = computeVersatilityStat(logs, userId, SH_REVIEW_WINDOW_DAYS, SH_REVIEW_PRIOR_WINDOWS, qEnd);
+  const phaseInstances = computePhaseContributions(logs, projects);
+  const estimation = computeEstimationPattern(phaseInstances, userId, SH_EST_MIN_CONTRIBUTION_PCT, SH_EST_RECENT_COUNT, SH_EST_MIN_HISTORICAL_COUNT);
+  const qWindow = getWindowBounds(SH_REVIEW_WINDOW_DAYS, 0, qEnd);
+  const consistency = computeLoggingConsistency(logs, userId, qWindow.start, qWindow.end);
+  return { workload, versatility, estimation, consistency };
+}
+
+// V16.14: Employee Review's ONLY write, and the first write in Studio
+// Health. Mirrors saveLeaveRequest()'s exact shape -- one targeted doc,
+// {merge:true}, no full-collection diff, and confirmed NOT registered
+// in computeCollectionDiffs() (still hardcoded to exactly
+// timeLogs/planEntries/projects -- unchanged, checked again for this
+// build) -- the entire clobber class this file has spent so much effort
+// on doesn't apply here by construction, same reasoning as
+// leaveRequests/the submissions design. reviewId already encodes
+// personId+raterId+period, so two different raters reviewing the same
+// person in the same period are two structurally separate documents --
+// never the same doc, never a merge collision, no schema change needed
+// when a second rater is added later. Verifies source:'server'
+// immediately after -- this is the first write in this whole feature
+// area, it earns the same scrutiny every other real write in this
+// engagement gets, not less.
+async function saveReview(reviewId, data) {
+  await db.collection('reviews').doc(reviewId).set(data, { merge: true });
+  const verifySnap = await db.collection('reviews').doc(reviewId).get({ source: 'server' });
+  if (!verifySnap.exists) throw new Error('Save did not land -- doc missing on server verify');
+  return verifySnap.data();
+}
+
+async function renderEmployeeReview() {
+  const container = document.getElementById('sh-employeereview');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  try {
+    const [projSnap, logSnap, userSnap, reviewSnap] = await Promise.all([
+      db.collection('projects').get({ source: 'server' }),
+      db.collection('timeLogs').get({ source: 'server' }),
+      db.collection('users').get({ source: 'server' }),
+      db.collection('reviews').get({ source: 'server' }),
+    ]);
+    const projects = []; projSnap.forEach(d => projects.push({ ...d.data(), id: d.id }));
+    const logs = []; logSnap.forEach(d => logs.push({ ...d.data(), id: d.id }));
+    const allUsers = []; userSnap.forEach(d => allUsers.push({ id: d.id, name: d.data().name, isAdmin: d.data().isAdmin }));
+    const allReviews = []; reviewSnap.forEach(d => allReviews.push({ ...d.data(), id: d.id }));
+    shCachedReviewData = { projects, logs, allUsers, allReviews };
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+  renderEmployeeReviewBody();
+}
+
+function renderEmployeeReviewBody() {
+  const container = document.getElementById('sh-employeereview');
+  const data = shCachedReviewData;
+  if (!container || !data) return;
+  const { projects, logs, allUsers, allReviews } = data;
+
+  const qtr = getQuarter(shReviewQtrOffset);
+  const period = quarterPeriodKey(qtr);
+  const peopleWithData = allUsers.filter(u => !u.isAdmin);
+  const peopleOptions = peopleWithData
+    .slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map(u => `<option value="${u.id}" ${u.id === shReviewSelectedPersonId ? 'selected' : ''}>${u.name}</option>`).join('');
+
+  let bodyHTML = '<div class="sh-flag-none">Pick a name above to see their objective panel and rubric.</div>';
+  if (shReviewSelectedPersonId) {
+    const u = peopleWithData.find(p => p.id === shReviewSelectedPersonId);
+    if (u) {
+      const facts = computeObjectivePanelFacts(logs, projects, u.id, qtr);
+
+      // ── Objective Panel HTML -- facts, neutral, no color-coding ──
+      let workloadFact;
+      if (facts.workload.insufficientHistory) {
+        workloadFact = `${(facts.workload.currentMins / 60).toFixed(1)}h logged this quarter. Not enough prior-quarter history yet to compare against their own norm.`;
+      } else {
+        workloadFact = `${(facts.workload.currentMins / 60).toFixed(1)}h logged this quarter, versus their own average of ${(facts.workload.avgPriorMins / 60).toFixed(1)}h over the prior quarter-length window.`;
+      }
+      let versatilityFact;
+      if (facts.versatility.insufficientHistory) {
+        versatilityFact = `Active on ${facts.versatility.currentCount} project${facts.versatility.currentCount === 1 ? '' : 's'} this quarter. Not enough prior history yet to compare.`;
+      } else {
+        versatilityFact = `Active on ${facts.versatility.currentCount} project${facts.versatility.currentCount === 1 ? '' : 's'} this quarter, versus their own average of ${facts.versatility.avgPriorCount.toFixed(1)}. Could mean versatile utility across projects, or spread thin — worth understanding why, not a verdict either way.`;
+      }
+      let estimationFact;
+      if (facts.estimation.insufficientHistory) {
+        estimationFact = `Not enough phase history yet (need ${SH_EST_RECENT_COUNT} recent + ${SH_EST_MIN_HISTORICAL_COUNT} historical meaningfully-contributed phases) to compare an estimation pattern.`;
+      } else {
+        const recentOverCount = facts.estimation.recent.filter(x => x.ratio > 1.10).length;
+        const historicalOverCount = facts.estimation.historical.filter(x => x.ratio > 1.10).length;
+        estimationFact = `Phases meaningfully worked on ran over budget in ${recentOverCount} of the last ${facts.estimation.recent.length}, versus ${historicalOverCount} of ${facts.estimation.historical.length} historically.` +
+          (facts.estimation.flagged ? ' A pattern worth exploring — project-level overruns aren\'t automatically an individual failing (see Margin Risk for the project view).' : '');
+      }
+      let consistencyFact;
+      if (facts.consistency.insufficientData) {
+        consistencyFact = `Not enough logged activity this quarter to describe a pattern.`;
+      } else {
+        const label = facts.consistency.cv < SH_CONSISTENCY_CV_THRESHOLD ? 'relatively steady' : 'notably variable';
+        consistencyFact = `Daily logged hours were ${label} day-to-day this quarter. Neither is inherently better — steady and bursty are both legitimate working patterns.`;
+      }
+
+      const objectiveHTML = `
+        <div class="sh-fact-row"><div class="sh-fact-label">Workload vs. own norm</div><div class="sh-fact-value">${workloadFact}</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Versatility</div><div class="sh-fact-value">${versatilityFact}</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Estimation reliability</div><div class="sh-fact-value">${estimationFact}</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Logging consistency</div><div class="sh-fact-value">${consistencyFact}</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Attendance / punctuality</div><div class="sh-fact-pending">Pending — needs the deferred attendance-capture build.</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">On-time delivery contribution</div><div class="sh-fact-pending">Pending — needs the Submission Log (not yet built).</div></div>
+      `;
+
+      // ── Human Rubric HTML -- this rater's input + existing raters ──
+      const reviewsForPerson = allReviews.filter(r => r.personId === u.id && r.period === period);
+      const myReviewId = `review-${u.id}-${currentUser.id}-${period}`;
+      const myExisting = reviewsForPerson.find(r => r.id === myReviewId) || null;
+
+      const starsHTML = SH_REVIEW_CRITERIA.map(c => {
+        const existingVal = myExisting ? (myExisting.criteria || {})[c.key] : null;
+        const stars = [1, 2, 3, 4, 5].map(n =>
+          `<div class="ap-star${existingVal && n <= existingVal ? ' active' : ''}" data-crit="${c.key}" data-val="${n}">${n}</div>`
+        ).join('');
+        return `<div class="sh-rubric-label">${c.label}</div><div class="ap-score-pills" id="shrevStars_${c.key}">${stars}</div>`;
+      }).join('');
+
+      const otherRaterRows = reviewsForPerson.filter(r => r.id !== myReviewId).map(r => `
+        <tr><td>${r.raterName}</td>${SH_REVIEW_CRITERIA.map(c => `<td>${(r.criteria || {})[c.key] ?? '—'}</td>`).join('')}<td>${r.notes ? r.notes.slice(0, 60) : ''}</td></tr>
+      `).join('');
+      const raterTableHTML = reviewsForPerson.length ? `
+        <table class="sh-rater-table">
+          <thead><tr><th>Rater</th>${SH_REVIEW_CRITERIA.map(c => `<th>${c.label}</th>`).join('')}<th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>${currentUser.name} (you)</strong></td>${SH_REVIEW_CRITERIA.map(c => `<td>${myExisting ? ((myExisting.criteria || {})[c.key] ?? '—') : '—'}</td>`).join('')}<td>${myExisting && myExisting.notes ? myExisting.notes.slice(0, 60) : ''}</td></tr>
+            ${otherRaterRows}
+          </tbody>
+        </table>` : '';
+
+      const rubricHTML = `
+        <div class="sh-rubric-grid">${starsHTML}</div>
+        <textarea class="ap-note-input" id="shrevNotes" placeholder="Optional note — context for this period..." style="height:60px;">${myExisting ? (myExisting.notes || '') : ''}</textarea>
+        <div class="ap-scorecard-footer" style="margin-top:10px;">
+          <button class="ap-save-scorecard" id="shrevSaveBtn">${myExisting ? 'Update Review' : 'Save Review'}</button>
+          <span class="ap-save-status" id="shrevSaveStatus">${myExisting ? `Saved ${new Date(myExisting.updatedAt).toLocaleDateString('en-IN')}` : 'Not yet saved'}</span>
+        </div>
+        ${raterTableHTML}
+      `;
+
+      bodyHTML = `
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">📋 Objective Panel — ${u.name}, ${qtr.label}</div>
+          ${objectiveHTML}
+        </div>
+        <div class="card">
+          <div class="card-title">⭐ Human Rubric — ${u.name}, ${qtr.label}</div>
+          ${rubricHTML}
+        </div>
+      `;
+    }
+  }
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shrevRefreshLink" style="color:#A96E35;">refresh</a></div>
+    <div class="card">
+      <div class="card-title">👤 Employee Review</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <select class="form-control" id="shrevPersonPicker" style="max-width:220px;">
+          <option value="">Select a person…</option>
+          ${peopleOptions}
+        </select>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="ap-qtr-btn" id="shrevQtrPrev">◀</button>
+          <strong style="font-size:13px;color:#3D332A;">${qtr.label}</strong>
+          <button class="ap-qtr-btn" id="shrevQtrNext" ${shReviewQtrOffset === 0 ? 'disabled style="opacity:0.35;cursor:not-allowed;"' : ''}>▶</button>
+        </div>
+      </div>
+    </div>
+    ${bodyHTML}
+  `;
+
+  // Local UI state for the rubric (not yet saved) -- lost on re-render,
+  // matching the pattern that Save writes immediately, there's no
+  // separate "draft" persistence layer for this first, deliberately
+  // simple version.
+  const critValues = {};
+  if (shReviewSelectedPersonId) {
+    const u = peopleWithData.find(p => p.id === shReviewSelectedPersonId);
+    const period2 = quarterPeriodKey(qtr);
+    const existing = u ? allReviews.find(r => r.id === `review-${u.id}-${currentUser.id}-${period2}`) : null;
+    SH_REVIEW_CRITERIA.forEach(c => { critValues[c.key] = existing ? (existing.criteria || {})[c.key] || 0 : 0; });
+  }
+
+  document.querySelectorAll('.ap-star[data-crit]').forEach(star => {
+    star.addEventListener('click', function () {
+      const crit = this.dataset.crit;
+      const val = parseInt(this.dataset.val, 10);
+      critValues[crit] = val;
+      document.querySelectorAll(`#shrevStars_${crit} .ap-star`).forEach(s => {
+        s.classList.toggle('active', parseInt(s.dataset.val, 10) <= val);
+      });
+    });
+  });
+
+  const personPicker = document.getElementById('shrevPersonPicker');
+  if (personPicker) personPicker.addEventListener('change', (e) => { shReviewSelectedPersonId = e.target.value; renderEmployeeReviewBody(); });
+  const qtrPrev = document.getElementById('shrevQtrPrev');
+  if (qtrPrev) qtrPrev.addEventListener('click', () => { shReviewQtrOffset--; renderEmployeeReviewBody(); });
+  const qtrNext = document.getElementById('shrevQtrNext');
+  if (qtrNext) qtrNext.addEventListener('click', () => { if (shReviewQtrOffset < 0) { shReviewQtrOffset++; renderEmployeeReviewBody(); } });
+  const refreshLink = document.getElementById('shrevRefreshLink');
+  if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderEmployeeReview(); });
+
+  const saveBtn = document.getElementById('shrevSaveBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const u = peopleWithData.find(p => p.id === shReviewSelectedPersonId);
+      if (!u) return;
+      const period3 = quarterPeriodKey(qtr);
+      const reviewId = `review-${u.id}-${currentUser.id}-${period3}`;
+      const existing = allReviews.find(r => r.id === reviewId);
+      const notes = (document.getElementById('shrevNotes') || {}).value || '';
+      const statusEl = document.getElementById('shrevSaveStatus');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        const saved = await saveReview(reviewId, {
+          id: reviewId,
+          personId: u.id,
+          raterId: currentUser.id,
+          raterName: currentUser.name,
+          period: period3,
+          criteria: critValues,
+          notes,
+          createdAt: existing ? existing.createdAt : new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        saveBtn.textContent = '✓ Saved';
+        if (statusEl) { statusEl.textContent = `Saved ${new Date(saved.updatedAt).toLocaleDateString('en-IN')} · verified on server`; statusEl.classList.add('ok'); }
+      } catch (e) {
+        saveBtn.textContent = 'Save Review';
+        if (statusEl) statusEl.textContent = `Save failed: ${e.message}`;
+        console.error('[employee-review] save failed:', e);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════
 // INIT — Load data then set up login
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
@@ -4760,6 +5117,7 @@ document.querySelectorAll('.sh-tab').forEach(tab => {
     tab.classList.add('active');
     document.getElementById('sh-' + tab.dataset.shtab).classList.add('active');
     if (tab.dataset.shtab === 'individualinsight') renderIndividualInsight();
+    if (tab.dataset.shtab === 'employeereview') renderEmployeeReview();
   });
 });
 });
