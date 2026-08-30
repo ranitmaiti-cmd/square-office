@@ -822,9 +822,13 @@ textarea.form-control{min-height:70px;resize:vertical;}
           <div class="sh-tab" data-shtab="employeereview">Employee Review</div>
         </div>
         <div class="sh-tabcontent active" id="sh-projecthealth"></div>
-        <div class="sh-tabcontent" id="sh-submissionlog">
-          <div class="sh-empty">Coming soon — a submission log for delivery rhythm and package history, independent of phase budgets.</div>
-        </div>
+        <!-- V16.15: Submission Log -- delivery-tracking log (committed vs.
+             actual dates, revision chains). Populated entirely by
+             renderSubmissionLog(). saveSubmission() is the ONLY write in
+             this feature; see its own header comment for the KPI-schema
+             confirmations (on-time rate, slippage, rework, rhythm,
+             hours-per-submission all deferred to a second pass). -->
+        <div class="sh-tabcontent" id="sh-submissionlog"></div>
         <!-- V16.11: Individual Insight (Workload + Estimation-vs-actual).
              Populated entirely by renderIndividualInsight() -- structurally
              empty here, same pattern as #sh-projecthealth. -->
@@ -4523,6 +4527,269 @@ function renderEmployeeReviewBody() {
 }
 
 // ═══════════════════════════════════════════════════════
+// V16.15: Studio Health -- SUBMISSION LOG (Layer B). The delivery-
+// tracking log: what packages went out, when they were promised, when
+// they actually shipped, and how many times each one got reworked.
+// Independent of phases -- related to a project only via projectId.
+//
+// The keystone for the objective project/business KPIs (on-time rate,
+// slippage, rework rate, delivery rhythm, hours-per-submission) -- but
+// this build is deliberately the LOG ONLY. None of those KPIs are
+// computed here; the schema below is designed so none of them need a
+// schema change when their turn comes:
+//   - on-time rate: actualDate <= committedDate, per doc -- both fields
+//     already exist.
+//   - slippage: avg(actualDate - committedDate) where late -- same two
+//     fields.
+//   - rework: count of docs sharing a parentSubmissionId (or the max
+//     revisionNumber reached) per original -- this is exactly what the
+//     parent-link design below exists to make a single flat query, not
+//     a chain-walk.
+//   - delivery rhythm: group by projectId + actualDate/committedDate --
+//     no new field needed.
+//   - hours-per-submission: NOT precisely attributable (no timeLogs
+//     entry is tagged to a specific package) -- when built, must be
+//     computed as the project's total logged hours between the
+//     PREVIOUS submission's actualDate and this one's, labeled
+//     "approximate hours in this delivery window," never presented as
+//     precise per-submission cost. Same no-fake-precision discipline as
+//     Estimation Reliability's raw-hours-not-attribution-math rule.
+//
+// Same pure-read-list + one-write shape as Employee Review:
+// saveSubmission() is the ONLY write here, mirrors saveLeaveRequest()/
+// saveReview() exactly -- targeted .doc(id).set(data,{merge:true}), one
+// doc, one action. Confirmed NOT registered in computeCollectionDiffs()
+// (still hardcoded to exactly timeLogs/planEntries/projects) -- the
+// clobber class doesn't apply here by construction, same reasoning as
+// every other Studio Health write so far. source:'server' verify
+// immediately after every write, throws rather than silently succeeding
+// if the verify comes back missing.
+//
+// REWORK REPRESENTATION: one document per delivery EVENT, not one
+// mutating doc per package -- every KPI above wants per-event
+// granularity (its own committed/actual date pair), so collapsing
+// revisions into a single doc with overwritten dates would destroy the
+// history those KPIs need. parentSubmissionId always points at the
+// ORIGINAL submission's id (revisionNumber=1), never at the
+// immediately-prior revision -- so "every cycle for this package" is
+// one flat query (id===originalId || parentSubmissionId===originalId),
+// never a chain-walk.
+// ═══════════════════════════════════════════════════════
+
+let shCachedSubmissionData = null; // { projects, submissions }
+let shSubFormMode = 'new';    // 'new' | 'edit' | 'revise'
+let shSubFormTargetId = '';   // for 'edit': the doc being edited; for 'revise': the doc being revised FROM
+
+// Pure: groups a flat submissions array into { [projectId]: { projectName,
+// chains: { [originalId]: [docs sorted by revisionNumber] } } } -- the
+// log's own display shape. A "chain" is every revision of one package.
+function groupSubmissionsByProject(submissions) {
+  const byProject = {};
+  submissions.forEach(s => {
+    if (!byProject[s.projectId]) byProject[s.projectId] = { projectName: s.projectName, chains: {} };
+    const originalId = s.parentSubmissionId || s.id;
+    if (!byProject[s.projectId].chains[originalId]) byProject[s.projectId].chains[originalId] = [];
+    byProject[s.projectId].chains[originalId].push(s);
+  });
+  Object.values(byProject).forEach(p => {
+    Object.values(p.chains).forEach(chain => chain.sort((a, b) => (a.revisionNumber || 1) - (b.revisionNumber || 1)));
+  });
+  return byProject;
+}
+
+// Pure: given the id of a submission being revised, finds its ORIGINAL
+// (walking up at most one hop, since parentSubmissionId always points
+// straight at the original -- never a multi-hop chain to walk) and the
+// next revisionNumber -- the MAX across the whole chain plus one, not
+// just this doc's own revisionNumber plus one, so reviving from an
+// older revision in the chain still produces the correct next number.
+function computeNextRevision(allSubmissions, submissionId) {
+  const doc = allSubmissions.find(s => s.id === submissionId);
+  if (!doc) return null;
+  const originalId = doc.parentSubmissionId || doc.id;
+  const chain = allSubmissions.filter(s => s.id === originalId || s.parentSubmissionId === originalId);
+  const maxRev = chain.reduce((m, s) => Math.max(m, s.revisionNumber || 1), 1);
+  return { originalId, nextRevisionNumber: maxRev + 1, projectId: doc.projectId, projectName: doc.projectName, packageName: doc.packageName };
+}
+
+// V16.15: Submission Log's ONLY write. See file header for the safety
+// discipline -- mirrors saveReview()/saveLeaveRequest() exactly.
+async function saveSubmission(id, data) {
+  await db.collection('submissions').doc(id).set(data, { merge: true });
+  const verifySnap = await db.collection('submissions').doc(id).get({ source: 'server' });
+  if (!verifySnap.exists) throw new Error('Save did not land -- doc missing on server verify');
+  return verifySnap.data();
+}
+
+async function renderSubmissionLog() {
+  const container = document.getElementById('sh-submissionlog');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  try {
+    const [projSnap, subSnap] = await Promise.all([
+      db.collection('projects').get({ source: 'server' }),
+      db.collection('submissions').get({ source: 'server' }),
+    ]);
+    const projects = []; projSnap.forEach(d => projects.push({ ...d.data(), id: d.id }));
+    const submissions = []; subSnap.forEach(d => submissions.push({ ...d.data(), id: d.id }));
+    shCachedSubmissionData = { projects, submissions };
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+  renderSubmissionLogBody();
+}
+
+function renderSubmissionLogBody() {
+  const container = document.getElementById('sh-submissionlog');
+  const data = shCachedSubmissionData;
+  if (!container || !data) return;
+  const { projects, submissions } = data;
+
+  const projectOptions = projects.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .map(p => `<option value="${p.id}">${p.name || p.id}</option>`).join('');
+
+  // ── Form pre-fill, depending on mode ────────────────────────────
+  let formTitle = '➕ Log a Submission';
+  let prefill = { projectId: '', packageName: '', committedDate: '', actualDate: '', status: 'pending', notes: '' };
+  if (shSubFormMode === 'edit') {
+    const doc = submissions.find(s => s.id === shSubFormTargetId);
+    if (doc) { formTitle = `✏️ Editing — ${doc.packageName} (Rev ${doc.revisionNumber})`; prefill = { ...doc }; }
+  } else if (shSubFormMode === 'revise') {
+    const next = computeNextRevision(submissions, shSubFormTargetId);
+    if (next) { formTitle = `🔁 New Revision — ${next.packageName} (Rev ${next.nextRevisionNumber})`; prefill = { projectId: next.projectId, packageName: next.packageName, committedDate: '', actualDate: '', status: 'pending', notes: '' }; }
+  }
+
+  const formHTML = `
+    <div class="card">
+      <div class="card-title">${formTitle}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+        <select class="form-control" id="shsubProject">
+          <option value="">Select a project…</option>
+          ${projects.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(p => `<option value="${p.id}" ${p.id === prefill.projectId ? 'selected' : ''}>${p.name || p.id}</option>`).join('')}
+        </select>
+        <input class="form-control" id="shsubPackage" placeholder="Package name" value="${prefill.packageName || ''}">
+        <input class="form-control" type="date" id="shsubCommitted" placeholder="Committed date" value="${prefill.committedDate || ''}">
+        <input class="form-control" type="date" id="shsubActual" placeholder="Actual date" value="${prefill.actualDate || ''}">
+        <select class="form-control" id="shsubStatus">
+          <option value="pending" ${prefill.status === 'pending' ? 'selected' : ''}>Pending</option>
+          <option value="submitted" ${prefill.status === 'submitted' ? 'selected' : ''}>Submitted</option>
+        </select>
+      </div>
+      <textarea class="ap-note-input" id="shsubNotes" placeholder="Optional notes..." style="height:50px;">${prefill.notes || ''}</textarea>
+      <div class="ap-scorecard-footer" style="margin-top:10px;">
+        <button class="ap-save-scorecard" id="shsubSaveBtn">${shSubFormMode === 'new' ? 'Save' : shSubFormMode === 'revise' ? 'Save New Revision' : 'Update'}</button>
+        ${shSubFormMode !== 'new' ? '<button class="btn btn-ghost btn-sm" id="shsubCancelBtn">Cancel</button>' : ''}
+        <span class="ap-save-status" id="shsubSaveStatus"></span>
+      </div>
+    </div>`;
+
+  // ── List view, grouped by project then by chain ─────────────────
+  const byProject = groupSubmissionsByProject(submissions);
+  let listHTML = '<div class="sh-flag-none">No submissions logged yet.</div>';
+  const projectIds = Object.keys(byProject).sort((a, b) => byProject[a].projectName.localeCompare(byProject[b].projectName));
+  if (projectIds.length) {
+    listHTML = `<table class="sh-table"><thead><tr><th>Package</th><th>Rev</th><th>Committed</th><th>Actual</th><th>Status</th><th></th></tr></thead><tbody>`;
+    projectIds.forEach(pid => {
+      const proj = byProject[pid];
+      listHTML += `<tr class="sh-proj-group"><td colspan="6">${proj.projectName}</td></tr>`;
+      Object.values(proj.chains).forEach(chain => {
+        chain.forEach((s, idx) => {
+          const isLatest = idx === chain.length - 1;
+          listHTML += `<tr>
+            <td>${s.packageName}</td>
+            <td class="sh-num">${s.revisionNumber || 1}</td>
+            <td class="sh-num">${s.committedDate || '—'}</td>
+            <td class="sh-num">${s.actualDate || '—'}</td>
+            <td class="sh-num">${s.status}</td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-ghost btn-sm" data-edit="${s.id}">Edit</button>
+              ${isLatest ? `<button class="btn btn-ghost btn-sm" data-revise="${s.id}">Revise</button>` : ''}
+            </td>
+          </tr>`;
+        });
+      });
+    });
+    listHTML += `</tbody></table>`;
+  }
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shsubRefreshLink" style="color:#A96E35;">refresh</a></div>
+    ${formHTML}
+    <div class="card">
+      <div class="card-title">📜 Submission Log</div>
+      ${listHTML}
+    </div>
+  `;
+
+  const refreshLink = document.getElementById('shsubRefreshLink');
+  if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderSubmissionLog(); });
+
+  document.querySelectorAll('[data-edit]').forEach(btn => {
+    btn.addEventListener('click', () => { shSubFormMode = 'edit'; shSubFormTargetId = btn.dataset.edit; renderSubmissionLogBody(); });
+  });
+  document.querySelectorAll('[data-revise]').forEach(btn => {
+    btn.addEventListener('click', () => { shSubFormMode = 'revise'; shSubFormTargetId = btn.dataset.revise; renderSubmissionLogBody(); });
+  });
+  const cancelBtn = document.getElementById('shsubCancelBtn');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => { shSubFormMode = 'new'; shSubFormTargetId = ''; renderSubmissionLogBody(); });
+
+  const saveBtn = document.getElementById('shsubSaveBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const projectId = document.getElementById('shsubProject').value;
+      const proj = projects.find(p => p.id === projectId);
+      const packageName = document.getElementById('shsubPackage').value.trim();
+      const committedDate = document.getElementById('shsubCommitted').value;
+      const actualDate = document.getElementById('shsubActual').value || null;
+      const status = document.getElementById('shsubStatus').value;
+      const notes = document.getElementById('shsubNotes').value;
+      const statusEl = document.getElementById('shsubSaveStatus');
+      if (!projectId || !packageName || !committedDate) { if (statusEl) statusEl.textContent = 'Project, package name, and committed date are required.'; return; }
+
+      let id, revisionNumber, parentSubmissionId, createdAt;
+      const nowIso = new Date().toISOString();
+      if (shSubFormMode === 'edit') {
+        const existing = submissions.find(s => s.id === shSubFormTargetId);
+        id = shSubFormTargetId;
+        revisionNumber = existing ? existing.revisionNumber : 1;
+        parentSubmissionId = existing ? existing.parentSubmissionId : null;
+        createdAt = existing ? existing.createdAt : nowIso;
+      } else if (shSubFormMode === 'revise') {
+        const next = computeNextRevision(submissions, shSubFormTargetId);
+        id = genId();
+        revisionNumber = next ? next.nextRevisionNumber : 2;
+        parentSubmissionId = next ? next.originalId : shSubFormTargetId;
+        createdAt = nowIso;
+      } else {
+        id = genId();
+        revisionNumber = 1;
+        parentSubmissionId = null;
+        createdAt = nowIso;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        await saveSubmission(id, {
+          id, projectId, projectName: proj ? proj.name : '', packageName,
+          revisionNumber, parentSubmissionId, committedDate, actualDate, status, notes,
+          createdAt, createdBy: currentUser.name, updatedAt: nowIso,
+        });
+        shSubFormMode = 'new'; shSubFormTargetId = '';
+        await renderSubmissionLog(); // fresh reload -- shows the new/updated row immediately
+      } catch (e) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+        if (statusEl) statusEl.textContent = `Save failed: ${e.message}`;
+        console.error('[submission-log] save failed:', e);
+      }
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════
 // INIT — Load data then set up login
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
@@ -5116,6 +5383,7 @@ document.querySelectorAll('.sh-tab').forEach(tab => {
     document.querySelectorAll('.sh-tabcontent').forEach(c => c.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById('sh-' + tab.dataset.shtab).classList.add('active');
+    if (tab.dataset.shtab === 'submissionlog') renderSubmissionLog();
     if (tab.dataset.shtab === 'individualinsight') renderIndividualInsight();
     if (tab.dataset.shtab === 'employeereview') renderEmployeeReview();
   });
