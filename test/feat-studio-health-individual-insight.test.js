@@ -56,13 +56,13 @@ function extractConstLine(source, name) {
 const shConstantsSrc = [
   'SH_WORKLOAD_WINDOWS', 'SH_PRIOR_WINDOW_COUNT', 'SH_WORKLOAD_SPIKE_RATIO', 'SH_WORKLOAD_DROP_RATIO',
   'SH_EST_MIN_CONTRIBUTION_PCT', 'SH_EST_RECENT_COUNT', 'SH_EST_MIN_HISTORICAL_COUNT', 'SH_EST_SIGNIFICANT_OVER_RATIO',
-  'SH_TREND_WEEKS', 'SH_HEATMAP_DAYS',
+  'SH_TREND_WEEKS', 'SH_HEATMAP_DAYS', 'SH_VERSATILITY_MIN_PCT',
 ].map(name => extractConstLine(fullScript, name)).join('\n');
 
 const FN_NAMES = [
   'toLocalDateStr', 'getWindowBounds', 'productiveMinsInWindow', 'approvedLeaveDaysInWindow', 'computeWorkloadPattern',
   'computePhaseContributions', 'computeEstimationPattern', 'computeMarginRiskRanking', 'meaningfulContributorsFor',
-  'distinctProjectCount', 'computeVersatilityStat', 'isClosedDayStr', 'addDaysToDateStr', 'leaveNearHolidayInstances',
+  'meaningfulProjectCount', 'computeVersatilityStat', 'isClosedDayStr', 'addDaysToDateStr', 'leaveNearHolidayInstances',
   'buildLeaveHeatmapDays', 'computeWorkloadTrend', 'renderWorkloadTrendSVG', 'renderLeaveHeatmapSVG',
 ];
 const fnSrc = {};
@@ -80,7 +80,7 @@ function check(label, cond) {
 const allSrc = Object.values(fnSrc).concat([renderInsightSrc, renderInsightBodySrc]).join('\n');
 check('no .set( anywhere', !allSrc.includes('.set('));
 check('no .update( anywhere', !allSrc.includes('.update('));
-check('no Firestore .add( anywhere (Set.add() in distinctProjectCount is a plain JS Set, not a write, and is excluded from this check)', !allSrc.replace(/set\.add\(/g, '').includes('.add('));
+check('no Firestore .add( anywhere (plain JS Set.add(), if any, would be excluded here -- none of these functions use one)', !allSrc.replace(/set\.add\(/g, '').includes('.add('));
 check('no .delete( anywhere', !allSrc.includes('.delete('));
 check('no .batch( anywhere', !allSrc.includes('.batch('));
 check('renderIndividualInsight reads with source:\'server\'', renderInsightSrc.includes(`source: 'server'`));
@@ -97,6 +97,10 @@ function buildSandbox() {
   FN_NAMES.forEach(name => vm.runInContext(fnSrc[name], sandbox));
   return sandbox;
 }
+
+// Real extracted value, not retyped -- so the fixture tracks index.html's
+// actual SH_VERSATILITY_MIN_PCT constant if it's ever retuned again.
+const SH_VERSATILITY_MIN_PCT_VAL = vm.runInContext('SH_VERSATILITY_MIN_PCT', buildSandbox());
 
 const TODAY = new Date('2026-08-28T12:00:00Z'); // a Friday
 function dateStr(offsetDaysFromToday) {
@@ -228,19 +232,115 @@ async function run() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  console.log('\n=== computeVersatilityStat: distinct project count, self-baseline ===');
+  // V16.17: meaningfulProjectCount()/computeVersatilityStat() -- real-
+  // data investigation (2026-08-30) found the OLD distinctProjectCount()
+  // (any project with >=1 logged minute, no threshold, no productive
+  // check) badly inflated: Angana showed "11 projects" over a quarter
+  // when only 3 were a meaningful chunk of her own time. Fix: a project
+  // counts only if this person's PRODUCTIVE minutes on it are
+  // >= SH_VERSATILITY_MIN_PCT (10%) of their own total productive
+  // project minutes in the window -- self-baselined against their OWN
+  // total, not the project's total (deliberately a different, lower
+  // threshold than the estimation metric's 20%-of-the-PHASE's-hours --
+  // see the SH_VERSATILITY_MIN_PCT comment in index.html for why).
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== meaningfulProjectCount: the >=10% boundary, exact ===');
+  {
+    const sandbox = buildSandbox();
+    // Total = 100 mins. Case 1: A=91, B=9 -- B sits at exactly 9%, excluded.
+    const logsExcluded = [
+      { userId: 'u1', projectId: 'pA', productive: true, durationMins: 91, date: dateStr(-5) },
+      { userId: 'u1', projectId: 'pB', productive: true, durationMins: 9, date: dateStr(-4) },
+    ];
+    check('a project at exactly 9% of the person\'s own project time is excluded', vm.runInContext('meaningfulProjectCount', sandbox)(logsExcluded, 'u1', dateStr(-30), dateStr(1), SH_VERSATILITY_MIN_PCT_VAL) === 1);
+    // Case 2: A=89, B=11 -- B sits at exactly 11%, included.
+    const logsIncluded = [
+      { userId: 'u1', projectId: 'pA', productive: true, durationMins: 89, date: dateStr(-5) },
+      { userId: 'u1', projectId: 'pB', productive: true, durationMins: 11, date: dateStr(-4) },
+    ];
+    check('a project at exactly 11% of the person\'s own project time is included', vm.runInContext('meaningfulProjectCount', sandbox)(logsIncluded, 'u1', dateStr(-30), dateStr(1), SH_VERSATILITY_MIN_PCT_VAL) === 2);
+    // Case 3: exactly at the 10% boundary itself -- >= is inclusive.
+    const logsBoundary = [
+      { userId: 'u1', projectId: 'pA', productive: true, durationMins: 90, date: dateStr(-5) },
+      { userId: 'u1', projectId: 'pB', productive: true, durationMins: 10, date: dateStr(-4) },
+    ];
+    check('a project at EXACTLY 10% is included (>= is inclusive)', vm.runInContext('meaningfulProjectCount', sandbox)(logsBoundary, 'u1', dateStr(-30), dateStr(1), SH_VERSATILITY_MIN_PCT_VAL) === 2);
+  }
+
+  console.log('\n=== meaningfulProjectCount: only PRODUCTIVE minutes count, on both sides of the ratio ===');
+  {
+    const sandbox = buildSandbox();
+    // Project A: 50 productive mins (this person's only real project work).
+    // Project B: 500 NON-productive mins logged against it (e.g. an admin
+    // note tagged to a project) -- must not count as involvement, and
+    // must not dilute the denominator either (old bug: distinctProjectCount
+    // had no productive check at all, so B would have counted as a full
+    // "touched" project on its own).
+    const logs = [
+      { userId: 'u1', projectId: 'pA', productive: true, durationMins: 50, date: dateStr(-5) },
+      { userId: 'u1', projectId: 'pB', productive: false, durationMins: 500, date: dateStr(-4) },
+    ];
+    const count = vm.runInContext('meaningfulProjectCount', sandbox)(logs, 'u1', dateStr(-30), dateStr(1), SH_VERSATILITY_MIN_PCT_VAL);
+    check('the non-productive-only project does not count at all', count === 1);
+  }
+
+  console.log('\n=== computeVersatilityStat: current count AND own-average use the SAME thresholded definition ===');
   {
     const sandbox = buildSandbox();
     const logs = [];
+    // Each of 3 prior windows: 1 meaningful project (900 mins, ~90%) +
+    // 2 drive-by touches (50 mins each, ~5% each -- excluded). Old
+    // (unthresholded) behavior would have averaged 3 projects/window;
+    // the fix must average 1/window, matching the current side's own
+    // thresholding, not a raw count.
     for (let w = 1; w <= 3; w++) {
-      logs.push({ userId: 'u1', projectId: 'p1', date: dateStr(-30 * w - 5) }); // 1 project per prior window
+      const base = -30 * w - 5;
+      logs.push({ userId: 'u1', projectId: 'pMain', productive: true, durationMins: 900, date: dateStr(base) });
+      logs.push({ userId: 'u1', projectId: 'pDrive1', productive: true, durationMins: 50, date: dateStr(base + 1) });
+      logs.push({ userId: 'u1', projectId: 'pDrive2', productive: true, durationMins: 50, date: dateStr(base + 2) });
     }
-    logs.push({ userId: 'u1', projectId: 'p1', date: dateStr(-5) });
-    logs.push({ userId: 'u1', projectId: 'p2', date: dateStr(-4) });
-    logs.push({ userId: 'u1', projectId: 'p3', date: dateStr(-3) }); // 3 distinct projects this window
-    const result = vm.runInContext('computeVersatilityStat', sandbox)(logs, 'u1', 30, 3, TODAY);
-    check('currentCount is 3 (distinct projects)', result.currentCount === 3);
-    check('avgPriorCount is 1 (one project per prior window)', result.avgPriorCount === 1);
+    // Current window: same shape -- 1 meaningful + 2 drive-bys.
+    logs.push({ userId: 'u1', projectId: 'pMain', productive: true, durationMins: 900, date: dateStr(-5) });
+    logs.push({ userId: 'u1', projectId: 'pDrive1', productive: true, durationMins: 50, date: dateStr(-4) });
+    logs.push({ userId: 'u1', projectId: 'pDrive2', productive: true, durationMins: 50, date: dateStr(-3) });
+    const result = vm.runInContext('computeVersatilityStat', sandbox)(logs, 'u1', 30, 3, TODAY, SH_VERSATILITY_MIN_PCT_VAL);
+    check('currentCount reflects the threshold (1 meaningful, not 3 touched)', result.currentCount === 1);
+    check('avgPriorCount ALSO reflects the same threshold (1/window, not 3/window) -- no current-vs-avg definition mismatch', result.avgPriorCount === 1);
+  }
+
+  console.log('\n=== Angana-style real case: many touches -> few meaningful ===');
+  {
+    const sandbox = buildSandbox();
+    // Mirrors the real 91-day investigation shape (2026-08-30): 3 big
+    // projects (35%/26%/24%, ~85% of her time combined) + 5 small
+    // drive-by touches trailing off from ~6% down to ~0.5%. 8 projects
+    // touched, only 3 meaningful.
+    const mins = [350, 260, 240, 60, 40, 30, 15, 5]; // sums to 1000
+    const logs = mins.map((m, i) => ({ userId: 'u1', projectId: 'p' + i, productive: true, durationMins: m, date: dateStr(-5 - i) }));
+    const count = vm.runInContext('meaningfulProjectCount', sandbox)(logs, 'u1', dateStr(-30), dateStr(1), SH_VERSATILITY_MIN_PCT_VAL);
+    check('8 projects touched, only the 3 meaningful ones (>=10%) count', count === 3);
+  }
+
+  console.log('\n=== Suravi-style real case: several real month-long commitments, ALL clear 10% ===');
+  {
+    const sandbox = buildSandbox();
+    // Mirrors the real 30-day investigation shape: 5 substantial
+    // commitments (~25%/17%/15%/13%/11%) + 4 smaller touches (~6%/6%/5%/3%)
+    // -- the threshold must NOT collapse genuinely multi-project
+    // involvement down to just the top one.
+    const mins = [3820, 2510, 2330, 1920, 1650, 890, 870, 750, 400]; // sums to 15140 (mirrors real hours x100)
+    const logs = mins.map((m, i) => ({ userId: 'u1', projectId: 'p' + i, productive: true, durationMins: m, date: dateStr(-5 - i) }));
+    const count = vm.runInContext('meaningfulProjectCount', sandbox)(logs, 'u1', dateStr(-30), dateStr(1), SH_VERSATILITY_MIN_PCT_VAL);
+    check('9 projects touched, 5 real commitments all clear 10% and count -- not collapsed to 1', count === 5);
+  }
+
+  console.log('\n=== computeVersatilityStat: framing unchanged -- still no flagged/direction field ===');
+  {
+    const sandbox = buildSandbox();
+    const logs = [{ userId: 'u1', projectId: 'p1', productive: true, durationMins: 100, date: dateStr(-5) }];
+    const result = vm.runInContext('computeVersatilityStat', sandbox)(logs, 'u1', 30, 3, TODAY, SH_VERSATILITY_MIN_PCT_VAL);
+    check('no "flagged" field -- the threshold fixes the NUMBER, not the interpretation', !('flagged' in result));
+    check('no "direction" field either', !('direction' in result));
   }
 
   // ═══════════════════════════════════════════════════════════════

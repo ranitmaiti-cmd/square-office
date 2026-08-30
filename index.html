@@ -3688,6 +3688,23 @@ const SH_EST_MIN_HISTORICAL_COUNT = 3;    // minimum historical sample before dr
 const SH_EST_SIGNIFICANT_OVER_RATIO = 1.5;
 const SH_TREND_WEEKS = 12;   // workload trend sparkline: last N weeks, one person's own series only
 const SH_HEATMAP_DAYS = 120; // leave-near-holiday heatmap: last N days, one person's own calendar only
+// V16.17 (real-data investigation, 2026-08-30): Versatility's meaningful-
+// contribution threshold. Deliberately its OWN constant, not a reuse of
+// SH_EST_MIN_CONTRIBUTION_PCT (0.20) -- that one measures a different
+// question (% of a PHASE's total hours, "was this person a major driver
+// of this phase") and is scoped per phase-instance, not per project.
+// This one measures "was this a meaningful chunk of THEIR OWN project
+// time" -- self-baselined against the person's own total, exactly like
+// every other Individual Insight/Employee Review signal, never an
+// external/absolute cutoff. Set lower than the estimation threshold on
+// purpose: real data showed 20% over-punishes people who are genuinely,
+// substantially active across several projects at once (Suravi's real
+// 25%/17%/15%/13%/11% split would collapse to just 1 project at a 20%
+// bar, erasing 4 real month-long commitments) while 10% still removes
+// the drive-by-help inflation (Angana's 11 touched projects -> 3
+// meaningful ones over a quarter, the other 8 all under 10%, one as low
+// as 0.3%).
+const SH_VERSATILITY_MIN_PCT = 0.10;
 
 let shCachedInsightData = null; // { projects, logs, leaveRequestsFresh, allUsers, holidaysFresh } -- set once per fetch, re-rendered from on selector changes
 let shSelectedProjectId = '';
@@ -3868,27 +3885,51 @@ function meaningfulContributorsFor(phaseInstance, minContributionPct, allUsers) 
     .sort((a, b) => b.hours - a.hours);
 }
 
-// Pure: distinct active-project count for one person within [start, end).
-function distinctProjectCount(logs, userId, start, end) {
-  const set = new Set();
-  logs.filter(l => l.userId === userId && l.projectId && l.date >= start && l.date < end).forEach(l => set.add(l.projectId));
-  return set.size;
+// Pure: MEANINGFUL active-project count for one person within
+// [start, end) -- V16.17, replaces the old raw distinctProjectCount()
+// (any project with >=1 logged minute, no threshold, and no productive
+// check -- confirmed by real-data investigation to badly inflate on
+// drive-by help: Angana showed "11 projects" over a quarter when only 3
+// were a meaningful chunk of her own time, the other 8 ranging down to
+// a single 0.3%-of-her-time touch). A project now counts only if this
+// person's PRODUCTIVE minutes on it are >= minPct of their own total
+// productive project minutes in the window -- self-baselined against
+// their OWN total, not the project's total (see the SH_VERSATILITY_MIN_PCT
+// comment for why this differs from the estimation metric's threshold).
+// Non-productive entries (e.g. a project-tagged admin note) no longer
+// count toward involvement at all, on either side of the ratio.
+function meaningfulProjectCount(logs, userId, start, end, minPct) {
+  const perProject = {};
+  let personTotal = 0;
+  logs.filter(l => l.userId === userId && l.projectId && l.productive && l.date >= start && l.date < end)
+    .forEach(l => {
+      const mins = l.durationMins || 0;
+      perProject[l.projectId] = (perProject[l.projectId] || 0) + mins;
+      personTotal += mins;
+    });
+  if (personTotal === 0) return 0;
+  return Object.values(perProject).filter(mins => mins / personTotal >= minPct).length;
 }
 
-// Pure: Versatility -- current-window distinct-project count vs. the
+// Pure: Versatility -- current-window MEANINGFUL-project count vs. the
 // average of SH_PRIOR_WINDOW_COUNT prior windows, same self-baseline
-// shape as computeWorkloadPattern(). Deliberately does NOT set a
-// flagged/direction outcome -- this is framed as a pattern to interpret
-// (potentially positive, could also mean spread thin), not a proactive
-// alert, so it's shown only as a stat in the person drill-down, never as
-// its own flag sentence.
-function computeVersatilityStat(logs, userId, windowDays, priorWindowCount, today) {
+// shape as computeWorkloadPattern(). V16.17: both the current count and
+// the prior-window average now use the same meaningfulProjectCount()
+// definition (minPct-thresholded) -- deliberately not a thresholded
+// current count compared against an unthresholded historical average,
+// which would silently reintroduce the same inflation on the "own avg"
+// side that this fix removes from the current side. Deliberately does
+// NOT set a flagged/direction outcome -- this is framed as a pattern to
+// interpret (potentially positive, could also mean spread thin), not a
+// proactive alert, so it's shown only as a stat in the person drill-down,
+// never as its own flag sentence.
+function computeVersatilityStat(logs, userId, windowDays, priorWindowCount, today, minPct) {
   const current = getWindowBounds(windowDays, 0, today);
-  const currentCount = distinctProjectCount(logs, userId, current.start, current.end);
+  const currentCount = meaningfulProjectCount(logs, userId, current.start, current.end, minPct);
   const priorCounts = [];
   for (let i = 1; i <= priorWindowCount; i++) {
     const w = getWindowBounds(windowDays, i, today);
-    priorCounts.push(distinctProjectCount(logs, userId, w.start, w.end));
+    priorCounts.push(meaningfulProjectCount(logs, userId, w.start, w.end, minPct));
   }
   const hasPriorData = priorCounts.some(c => c > 0);
   if (!hasPriorData) return { currentCount, avgPriorCount: null, insufficientHistory: true };
@@ -4057,7 +4098,7 @@ function renderIndividualInsightBody() {
   peopleWithData.forEach(u => {
     const wl = computeWorkloadPattern(logs, u.id, shSelectedWindowDays, SH_PRIOR_WINDOW_COUNT, today);
     const est = computeEstimationPattern(phaseInstances, u.id, SH_EST_MIN_CONTRIBUTION_PCT, SH_EST_RECENT_COUNT, SH_EST_MIN_HISTORICAL_COUNT);
-    const vs = computeVersatilityStat(logs, u.id, shSelectedWindowDays, SH_PRIOR_WINDOW_COUNT, today);
+    const vs = computeVersatilityStat(logs, u.id, shSelectedWindowDays, SH_PRIOR_WINDOW_COUNT, today, SH_VERSATILITY_MIN_PCT);
     patternsByPerson[u.id] = { workload: wl, estimation: est, versatility: vs };
     if (wl.flagged) {
       secondarySentences.push({ name: u.name, text: `${u.name}'s workload this period is well ${wl.direction} their own normal — worth a look.` });
@@ -4322,7 +4363,7 @@ function renderFractionDotsHTML(filledCount, total) {
 function computeObjectivePanelFacts(logs, projects, userId, qtr) {
   const qEnd = quarterEndDate(qtr);
   const workload = computeWorkloadPattern(logs, userId, SH_REVIEW_WINDOW_DAYS, SH_REVIEW_PRIOR_WINDOWS, qEnd);
-  const versatility = computeVersatilityStat(logs, userId, SH_REVIEW_WINDOW_DAYS, SH_REVIEW_PRIOR_WINDOWS, qEnd);
+  const versatility = computeVersatilityStat(logs, userId, SH_REVIEW_WINDOW_DAYS, SH_REVIEW_PRIOR_WINDOWS, qEnd, SH_VERSATILITY_MIN_PCT);
   const phaseInstances = computePhaseContributions(logs, projects);
   const estimation = computeEstimationPattern(phaseInstances, userId, SH_EST_MIN_CONTRIBUTION_PCT, SH_EST_RECENT_COUNT, SH_EST_MIN_HISTORICAL_COUNT);
   const qWindow = getWindowBounds(SH_REVIEW_WINDOW_DAYS, 0, qEnd);

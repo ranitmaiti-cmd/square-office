@@ -57,7 +57,7 @@ function extractConstLine(source, name) {
 const shConstantsSrc = [
   'SH_EST_MIN_CONTRIBUTION_PCT', 'SH_EST_RECENT_COUNT', 'SH_EST_MIN_HISTORICAL_COUNT',
   'SH_REVIEW_WINDOW_DAYS', 'SH_REVIEW_PRIOR_WINDOWS', 'SH_CONSISTENCY_CV_THRESHOLD',
-  'SH_WORKLOAD_SPIKE_RATIO', 'SH_WORKLOAD_DROP_RATIO',
+  'SH_WORKLOAD_SPIKE_RATIO', 'SH_WORKLOAD_DROP_RATIO', 'SH_VERSATILITY_MIN_PCT',
 ].map(name => extractConstLine(fullScript, name)).join('\n');
 // SH_REVIEW_CRITERIA is an array literal, not a simple const expression -- extract separately.
 const critIdx = fullScript.indexOf('const SH_REVIEW_CRITERIA = [');
@@ -66,7 +66,7 @@ const shCriteriaSrc = fullScript.slice(critIdx, critEnd);
 
 const FN_NAMES = [
   'toLocalDateStr', 'getWindowBounds', 'productiveMinsInWindow', 'computeWorkloadPattern',
-  'computePhaseContributions', 'computeEstimationPattern', 'distinctProjectCount', 'computeVersatilityStat',
+  'computePhaseContributions', 'computeEstimationPattern', 'meaningfulProjectCount', 'computeVersatilityStat',
   'quarterEndDate', 'quarterPeriodKey', 'computeLoggingConsistency', 'computeObjectivePanelFacts', 'saveReview',
   'renderFactBarHTML', 'renderFractionDotsHTML',
 ];
@@ -99,6 +99,7 @@ check('renderAppraisal() itself is completely unchanged by this feature (still g
 })());
 check('renderEmployeeReview()/Body() never reference appraisalData/apAdminScores', !renderReviewSrc.includes('appraisalData') && !renderReviewBodySrc.includes('appraisalData') && !renderReviewSrc.includes('apAdminScores') && !renderReviewBodySrc.includes('apAdminScores'));
 check('the objective panel reuses computeWorkloadPattern/computeVersatilityStat/computeEstimationPattern by NAME, not reimplemented', fnSrc.computeObjectivePanelFacts.includes('computeWorkloadPattern(') && fnSrc.computeObjectivePanelFacts.includes('computeVersatilityStat(') && fnSrc.computeObjectivePanelFacts.includes('computeEstimationPattern('));
+check('V16.17: the objective panel passes SH_VERSATILITY_MIN_PCT through to computeVersatilityStat() -- same thresholded definition as Individual Insight, not a second unthresholded copy', fnSrc.computeObjectivePanelFacts.includes('SH_VERSATILITY_MIN_PCT'));
 
 function buildSandbox() {
   const sandbox = { console, Date, Object, Math, Set };
@@ -164,6 +165,31 @@ async function run() {
     const facts = vm.runInContext('computeObjectivePanelFacts', sandbox)(logs, projects, 'u1', qtr);
     check('returns all four live facts', 'workload' in facts && 'versatility' in facts && 'estimation' in facts && 'consistency' in facts);
     check('workload fact reflects the real logged minutes', facts.workload.currentMins === 50 * 60);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== V16.17: computeObjectivePanelFacts -- Versatility uses the SAME meaningful-contribution threshold as Individual Insight ===');
+  {
+    const sandbox = buildSandbox();
+    const qtr = vm.runInContext('getQuarter', sandbox)(0);
+    const qEnd = vm.runInContext('quarterEndDate', sandbox)(qtr);
+    const anchorDate = (offsetDays) => vm.runInContext('toLocalDateStr', sandbox)(new Date(qEnd.getTime() - offsetDays * 86400000));
+    // One person, one meaningful project (900 mins, 90%) + one drive-by
+    // touch (100 mins, 10% -- sits exactly at the boundary, included) +
+    // a second drive-by well under the boundary (10 mins, ~1%, excluded
+    // once the third project is added). Total for this check: verifies
+    // the raw distinctProjectCount()-style "any touch counts" behavior
+    // is gone from the Objective Panel too, not just Individual Insight.
+    const projects = [{ id: 'p1', name: 'Proj' }];
+    const logs = [
+      { userId: 'u1', projectId: 'pMain', productive: true, durationMins: 890, date: anchorDate(5) },
+      { userId: 'u1', projectId: 'pDriveby', productive: true, durationMins: 110, date: anchorDate(4) },
+      { userId: 'u1', projectId: 'pTiny1', productive: true, durationMins: 10, date: anchorDate(3) },
+      { userId: 'u1', projectId: 'pTiny2', productive: true, durationMins: 10, date: anchorDate(2) },
+      { userId: 'u1', projectId: 'pTiny3', productive: true, durationMins: 10, date: anchorDate(1) },
+    ];
+    const facts = vm.runInContext('computeObjectivePanelFacts', sandbox)(logs, projects, 'u1', qtr);
+    check('5 projects touched, only the 2 that clear >=10% of this person\'s own project time count', facts.versatility.currentCount === 2);
   }
 
   // ═══════════════════════════════════════════════════════════════════
