@@ -401,6 +401,25 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .sh-fact-label{font-size:12px;font-weight:700;color:#5C4F42;margin-bottom:3px;}
 .sh-fact-value{font-size:13px;color:#3D332A;line-height:1.5;}
 .sh-fact-pending{font-size:12px;color:#B0A89E;font-style:italic;}
+/* V16.16: Employee Review point-form facts + neutral fact visuals.
+   .sh-fact-points is the crisp "label: point · point · point" line that
+   replaced the old paragraph .sh-fact-value. .sh-fact-dir is a small
+   neutral callout pill for a fact's directional/framing note -- reuses
+   .sh-flag-mark's exact amber "worth a look" palette (attention, not
+   alarm), never the red/green judgment palette below. The bar/dots are
+   FACT visuals only (this-quarter vs own-average, or a plain fraction)
+   -- modeled on .phase-bar-wrap's proportions for visual consistency,
+   but deliberately a single neutral fill color throughout, never the
+   ok/near/over palette -- no verdict is being rendered here. */
+.sh-fact-points{font-size:13px;color:#3D332A;line-height:1.5;}
+.sh-fact-dir{display:inline-block;background:#F0E6D6;color:#8A5828;font-size:11px;font-weight:600;padding:1px 7px;border-radius:10px;}
+.sh-fact-bar-wrap{position:relative;background:#E0D8CE;border-radius:4px;height:7px;margin-top:7px;max-width:320px;}
+.sh-fact-bar-fill{position:absolute;top:0;left:0;height:7px;border-radius:4px;background:#C9A876;transition:width 0.4s;}
+.sh-fact-bar-marker{position:absolute;top:-3px;width:2px;height:13px;background:#5C4F42;border-radius:1px;}
+.sh-fact-bar-legend{font-size:10px;color:#8A7E74;margin-top:3px;}
+.sh-fact-dots{display:flex;gap:4px;margin-top:7px;}
+.sh-fact-dot{width:8px;height:8px;border-radius:50%;background:#E0D8CE;flex-shrink:0;}
+.sh-fact-dot.filled{background:#C9A876;}
 .sh-rubric-grid{display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;margin-bottom:14px;}
 .sh-rubric-label{font-size:13px;color:#3D332A;}
 .sh-rater-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;}
@@ -4273,6 +4292,31 @@ function computeLoggingConsistency(logs, userId, start, end) {
   return { cv: Math.sqrt(variance) / mean, insufficientData: false };
 }
 
+// Pure: a single "current vs own-average" bar -- one fill sized to
+// `current`, plus a thin marker line at `avg`'s position on the same
+// scale. One neutral color throughout (see the CSS comment above
+// .sh-fact-bar-wrap) -- this renders a FACT, not a verdict, so there is
+// deliberately no over/near/ok-style palette here. Returns '' when
+// there's nothing comparable to draw (both values non-positive).
+function renderFactBarHTML(current, avg) {
+  if (current <= 0 && avg <= 0) return '';
+  const max = Math.max(current, avg, 0.01) * 1.15;
+  const curPct = Math.min(100, (current / max) * 100);
+  const avgPct = Math.min(100, (avg / max) * 100);
+  return `<div class="sh-fact-bar-wrap"><div class="sh-fact-bar-fill" style="width:${curPct.toFixed(1)}%"></div><div class="sh-fact-bar-marker" style="left:${avgPct.toFixed(1)}%" title="Own average"></div></div><div class="sh-fact-bar-legend">▮ this quarter &nbsp; | &nbsp; own average</div>`;
+}
+
+// Pure: a row of dots rendering a fraction (e.g. phases run over
+// budget this window) -- filled vs hollow, same neutral color as the
+// bar above. Purely a scannable restatement of a number already in the
+// point-form text next to it, not a new judgment on its own.
+function renderFractionDotsHTML(filledCount, total) {
+  if (total <= 0) return '';
+  let dots = '';
+  for (let i = 0; i < total; i++) dots += `<span class="sh-fact-dot${i < filledCount ? ' filled' : ''}"></span>`;
+  return `<div class="sh-fact-dots">${dots}</div>`;
+}
+
 // Pure: assembles the whole Objective Panel for one person+quarter,
 // reusing Individual Insight's own pure functions unchanged.
 function computeObjectivePanelFacts(logs, projects, userId, qtr) {
@@ -4351,43 +4395,55 @@ function renderEmployeeReviewBody() {
     if (u) {
       const facts = computeObjectivePanelFacts(logs, projects, u.id, qtr);
 
-      // ── Objective Panel HTML -- facts, neutral, no color-coding ──
-      let workloadFact;
+      // ── Objective Panel HTML -- crisp point-form facts, neutral bar/
+      // dot visuals where a "current vs own-average" or a fraction is
+      // actually the shape of the fact. No color-coding, no verdict --
+      // see the CSS comment above .sh-fact-bar-wrap and the header
+      // comments on renderFactBarHTML()/renderFractionDotsHTML().
+      let workloadPoints, workloadBar = '';
       if (facts.workload.insufficientHistory) {
-        workloadFact = `${(facts.workload.currentMins / 60).toFixed(1)}h logged this quarter. Not enough prior-quarter history yet to compare against their own norm.`;
+        workloadPoints = `${(facts.workload.currentMins / 60).toFixed(0)}h this quarter · <span class="sh-fact-dir">not enough prior history to compare</span>`;
       } else {
-        workloadFact = `${(facts.workload.currentMins / 60).toFixed(1)}h logged this quarter, versus their own average of ${(facts.workload.avgPriorMins / 60).toFixed(1)}h over the prior quarter-length window.`;
+        const curH = facts.workload.currentMins / 60, avgH = facts.workload.avgPriorMins / 60;
+        const dir = curH < avgH * 0.97 ? '↓ below own norm' : curH > avgH * 1.03 ? '↑ above own norm' : '→ in line with own norm';
+        workloadPoints = `${curH.toFixed(0)}h this quarter · own avg ${avgH.toFixed(0)}h · <span class="sh-fact-dir">${dir}</span>`;
+        workloadBar = renderFactBarHTML(curH, avgH);
       }
-      let versatilityFact;
+      let versatilityPoints, versatilityBar = '';
+      const vCount = facts.versatility.currentCount, vPlural = vCount === 1 ? '' : 's';
       if (facts.versatility.insufficientHistory) {
-        versatilityFact = `Active on ${facts.versatility.currentCount} project${facts.versatility.currentCount === 1 ? '' : 's'} this quarter. Not enough prior history yet to compare.`;
+        versatilityPoints = `${vCount} project${vPlural} this quarter · <span class="sh-fact-dir">not enough prior history to compare</span>`;
       } else {
-        versatilityFact = `Active on ${facts.versatility.currentCount} project${facts.versatility.currentCount === 1 ? '' : 's'} this quarter, versus their own average of ${facts.versatility.avgPriorCount.toFixed(1)}. Could mean versatile utility across projects, or spread thin — worth understanding why, not a verdict either way.`;
+        const vAvg = facts.versatility.avgPriorCount;
+        const dir = vCount > vAvg * 1.03 ? 'broader than usual — worth understanding' : vCount < vAvg * 0.97 ? 'narrower than usual' : 'in line with usual';
+        versatilityPoints = `${vCount} project${vPlural} · own avg ${vAvg.toFixed(1)} · <span class="sh-fact-dir">${dir}</span>`;
+        versatilityBar = renderFactBarHTML(vCount, vAvg);
       }
-      let estimationFact;
+      let estimationPoints, estimationDots = '';
       if (facts.estimation.insufficientHistory) {
-        estimationFact = `Not enough phase history yet (need ${SH_EST_RECENT_COUNT} recent + ${SH_EST_MIN_HISTORICAL_COUNT} historical meaningfully-contributed phases) to compare an estimation pattern.`;
+        estimationPoints = `<span class="sh-fact-dir">not enough history yet</span> · need ${SH_EST_RECENT_COUNT} recent + ${SH_EST_MIN_HISTORICAL_COUNT} historical`;
       } else {
         const recentOverCount = facts.estimation.recent.filter(x => x.ratio > 1.10).length;
         const historicalOverCount = facts.estimation.historical.filter(x => x.ratio > 1.10).length;
-        estimationFact = `Phases meaningfully worked on ran over budget in ${recentOverCount} of the last ${facts.estimation.recent.length}, versus ${historicalOverCount} of ${facts.estimation.historical.length} historically.` +
-          (facts.estimation.flagged ? ' A pattern worth exploring — project-level overruns aren\'t automatically an individual failing (see Margin Risk for the project view).' : '');
+        estimationPoints = `over budget ${recentOverCount}/${facts.estimation.recent.length} recent · ${historicalOverCount}/${facts.estimation.historical.length} historical` +
+          (facts.estimation.flagged ? ' · <span class="sh-fact-dir">worth exploring — not automatically individual (see Margin Risk)</span>' : '');
+        estimationDots = renderFractionDotsHTML(recentOverCount, facts.estimation.recent.length);
       }
-      let consistencyFact;
+      let consistencyPoints;
       if (facts.consistency.insufficientData) {
-        consistencyFact = `Not enough logged activity this quarter to describe a pattern.`;
+        consistencyPoints = `<span class="sh-fact-dir">not enough activity this quarter</span> to describe a pattern`;
       } else {
-        const label = facts.consistency.cv < SH_CONSISTENCY_CV_THRESHOLD ? 'relatively steady' : 'notably variable';
-        consistencyFact = `Daily logged hours were ${label} day-to-day this quarter. Neither is inherently better — steady and bursty are both legitimate working patterns.`;
+        const label = facts.consistency.cv < SH_CONSISTENCY_CV_THRESHOLD ? 'steady' : 'variable';
+        consistencyPoints = `${label} day-to-day · <span class="sh-fact-dir">neither good nor bad</span>`;
       }
 
       const objectiveHTML = `
-        <div class="sh-fact-row"><div class="sh-fact-label">Workload vs. own norm</div><div class="sh-fact-value">${workloadFact}</div></div>
-        <div class="sh-fact-row"><div class="sh-fact-label">Versatility</div><div class="sh-fact-value">${versatilityFact}</div></div>
-        <div class="sh-fact-row"><div class="sh-fact-label">Estimation reliability</div><div class="sh-fact-value">${estimationFact}</div></div>
-        <div class="sh-fact-row"><div class="sh-fact-label">Logging consistency</div><div class="sh-fact-value">${consistencyFact}</div></div>
-        <div class="sh-fact-row"><div class="sh-fact-label">Attendance / punctuality</div><div class="sh-fact-pending">Pending — needs the deferred attendance-capture build.</div></div>
-        <div class="sh-fact-row"><div class="sh-fact-label">On-time delivery contribution</div><div class="sh-fact-pending">Pending — needs the Submission Log (not yet built).</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Workload</div><div class="sh-fact-points">${workloadPoints}</div>${workloadBar}</div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Versatility</div><div class="sh-fact-points">${versatilityPoints}</div>${versatilityBar}</div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Estimation</div><div class="sh-fact-points">${estimationPoints}</div>${estimationDots}</div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Logging</div><div class="sh-fact-points">${consistencyPoints}</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Attendance</div><div class="sh-fact-pending">pending — needs the attendance-capture build</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">On-time delivery</div><div class="sh-fact-pending">pending — needs the Submission Log</div></div>
       `;
 
       // ── Human Rubric HTML -- this rater's input + existing raters ──

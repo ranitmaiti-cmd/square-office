@@ -57,6 +57,7 @@ function extractConstLine(source, name) {
 const shConstantsSrc = [
   'SH_EST_MIN_CONTRIBUTION_PCT', 'SH_EST_RECENT_COUNT', 'SH_EST_MIN_HISTORICAL_COUNT',
   'SH_REVIEW_WINDOW_DAYS', 'SH_REVIEW_PRIOR_WINDOWS', 'SH_CONSISTENCY_CV_THRESHOLD',
+  'SH_WORKLOAD_SPIKE_RATIO', 'SH_WORKLOAD_DROP_RATIO',
 ].map(name => extractConstLine(fullScript, name)).join('\n');
 // SH_REVIEW_CRITERIA is an array literal, not a simple const expression -- extract separately.
 const critIdx = fullScript.indexOf('const SH_REVIEW_CRITERIA = [');
@@ -67,6 +68,7 @@ const FN_NAMES = [
   'toLocalDateStr', 'getWindowBounds', 'productiveMinsInWindow', 'computeWorkloadPattern',
   'computePhaseContributions', 'computeEstimationPattern', 'distinctProjectCount', 'computeVersatilityStat',
   'quarterEndDate', 'quarterPeriodKey', 'computeLoggingConsistency', 'computeObjectivePanelFacts', 'saveReview',
+  'renderFactBarHTML', 'renderFractionDotsHTML',
 ];
 const fnSrc = {};
 FN_NAMES.forEach(name => { fnSrc[name] = extractFunction(fullScript, name); });
@@ -326,7 +328,66 @@ async function run() {
     check('all 6 criteria labels appear', /Design quality/.test(html) && /Mentoring/.test(html));
     check('both raters (Ranit and Indira) appear in the comparison table', /Ranit/.test(html) && /Indira/.test(html));
     check('objective facts render neutrally -- no "poor/excellent/good" grade language anywhere', !/\b(excellent|poor)\b/i.test(html));
-    check('pending metrics show their placeholder text, not fabricated numbers', /Pending — needs the deferred attendance-capture build/.test(html) && /Pending — needs the Submission Log/.test(html));
+    check('pending metrics show their placeholder text, not fabricated numbers', /pending — needs the attendance-capture build/.test(html) && /pending — needs the Submission Log/.test(html));
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=== V16.16: renderFactBarHTML -- neutral current-vs-avg bar, no judgment palette ===');
+  {
+    const sandbox = buildSandbox();
+    const bar = vm.runInContext('renderFactBarHTML', sandbox)(100, 200);
+    check('renders a fill + a marker', bar.includes('sh-fact-bar-fill') && bar.includes('sh-fact-bar-marker'));
+    check('fill width reflects the smaller "current" value (100 vs avg 200)', /width:(\d+(\.\d+)?)%/.exec(bar)[1] < 60);
+    check('never uses the ok/near/over judgment classes', !/\b(ok|near|over)\b/.test(bar.replace(/sh-fact-bar-wrap|sh-fact-bar-fill|sh-fact-bar-marker|sh-fact-bar-legend/g, '')));
+    check('never uses the red/green judgment colors (#6E8F52/#C0554A/#C4874A)', !/(6E8F52|C0554A|C4874A)/i.test(bar));
+
+    const zeroCase = vm.runInContext('renderFactBarHTML', sandbox)(0, 0);
+    check('both-zero case returns nothing rather than a NaN-width bar', zeroCase === '');
+
+    const noAvgCase = vm.runInContext('renderFactBarHTML', sandbox)(50, 0);
+    check('current-only (no avg yet) still renders without NaN', !noAvgCase.includes('NaN'));
+  }
+
+  console.log('\n=== V16.16: renderFractionDotsHTML -- plain fraction restatement, no color-coding ===');
+  {
+    const sandbox = buildSandbox();
+    const dots = vm.runInContext('renderFractionDotsHTML', sandbox)(2, 5);
+    check('renders exactly 5 dots', (dots.match(/<span class="sh-fact-dot/g) || []).length === 5);
+    check('exactly 2 of the 5 are filled', (dots.match(/filled/g) || []).length === 2);
+    check('zero total returns nothing', vm.runInContext('renderFractionDotsHTML', sandbox)(0, 0) === '');
+  }
+
+  console.log('\n=== V16.16: STRUCTURAL -- objective panel is crisp point-form, not prose paragraphs ===');
+  {
+    const period = (() => {
+      const s = buildSandbox();
+      const qtr = vm.runInContext('getQuarter', s)(0);
+      return vm.runInContext('quarterPeriodKey', s)(qtr);
+    })();
+    // A person with enough history on both sides for workload/versatility
+    // to render their comparative (non-"insufficient") branch, so the
+    // bar/dir-badge markup actually appears in this render.
+    const projects = [{ id: 'p1', name: 'Proj', phases: { Phase: 100 } }];
+    const logs = [];
+    const qEndAnchor = (() => { const s = buildSandbox(); return vm.runInContext('quarterEndDate', s)(vm.runInContext('getQuarter', s)(0)); })();
+    for (let w = 0; w < 28; w++) { // 196 days back -- reaches into BOTH the current 91-day window and the prior 91-day window (92-182 days back), so avgPriorMins is non-null and the comparative branch (bar + dir badge) actually renders
+      const d = new Date(qEndAnchor.getTime() - w * 7 * 86400000);
+      const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      logs.push({ userId: 'u1', projectId: 'p1', phase: 'Phase', productive: true, durationMins: 6 * 60, date: ds });
+    }
+    const users = [{ id: 'u1', name: 'Alice' }];
+    const { getHTML } = await (async () => {
+      const b = buildRenderSandbox({ projects, logs, users, selectedPersonId: 'u1' });
+      await vm.runInContext('renderEmployeeReview', b.sandbox)();
+      return b;
+    })();
+    const html = getHTML();
+    check('Workload/Versatility/Estimation/Logging labels are short, crisp labels (not the old long prose labels)', /sh-fact-label">Workload</.test(html) && /sh-fact-label">Versatility</.test(html) && !/Workload vs\. own norm/.test(html));
+    check('points are middot-joined single lines, not multi-sentence prose', /sh-fact-points/.test(html) && /·/.test(html));
+    check('no leftover long-form sentence fragments from the old paragraph copy', !/versus their own average of/.test(html) && !/Not enough prior-quarter history yet to compare against their own norm/.test(html));
+    check('a neutral directional badge renders for workload (own avg comparison found)', /sh-fact-dir">/.test(html));
+    check('a fact bar renders for the comparative facts', /sh-fact-bar-wrap/.test(html));
+    check('rubric stays a separate, prominent card -- still uses .ap-star, untouched by this pass', /ap-star/.test(html) && /Human Rubric/.test(html));
   }
 
   console.log(`\n${passCount} passed, ${failCount} failed`);
