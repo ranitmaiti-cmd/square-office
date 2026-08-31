@@ -1239,7 +1239,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-31.1'; // V16.20/V16.19: self-report supersede fix (orphan-recovery Save now closes the original session doc it replaces) + sweep re-flag race guard (isStillFlaggableOnServer re-verifies inProgress immediately before all 3 stale-sweeps write reconciliationNeeded:true) -- diffMode/save/delete paths otherwise untouched
+const APP_VERSION = '2026-08-31.2'; // V17: budget-distribution feature -- Distribute-from-total control (template picker + total-hours input) in the project modal, fills the existing phase inputs via distributeBudgetByTemplate() (largest-remainder rounding), Manage Templates modal for editing/adding templates. Reuses saveProject() verbatim as the sole write path; budgetTemplates lives on companyData/squareDB (same pattern as holidays), no new field on project docs, diffMode/backstop untouched
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
