@@ -834,24 +834,42 @@ textarea.form-control{min-height:70px;resize:vertical;}
            slot in later without restructuring this page. -->
       <div class="page admin-only" id="page-studiohealth">
         <h2 class="page-title">❖ Studio Health</h2>
+        <!-- V16.18 (Studio Health v1 ship, 2026-08-30): Project Health
+             (Layer A) and Submission Log are HELD BACK from this ship --
+             dormant, not deleted. Their code/CSS/tabcontent divs/test
+             files are all still fully in place below, just unreferenced
+             from the tab bar, so their fetches never fire (confirmed: the
+             ONLY other caller of renderStudioHealth() is its own now-
+             unreachable refresh link; renderSubmissionLog() is only ever
+             called from the tab-click line for a tab that no longer
+             exists in this bar). Re-exposing either later is exactly
+             re-adding its one <div class="sh-tab" ...> line below and
+             restoring its content div's "active" state if it should be
+             the default again -- nothing else needs to change. Original
+             tab-bar markup, for that restore:
+               <div class="sh-tab active" data-shtab="projecthealth">Project Health</div>
+               <div class="sh-tab" data-shtab="submissionlog">Submission Log</div>
+        -->
         <div class="sh-tabs">
-          <div class="sh-tab active" data-shtab="projecthealth">Project Health</div>
-          <div class="sh-tab" data-shtab="submissionlog">Submission Log</div>
-          <div class="sh-tab" data-shtab="individualinsight">Individual Insight</div>
+          <div class="sh-tab active" data-shtab="individualinsight">Individual Insight</div>
           <div class="sh-tab" data-shtab="employeereview">Employee Review</div>
         </div>
-        <div class="sh-tabcontent active" id="sh-projecthealth"></div>
+        <div class="sh-tabcontent" id="sh-projecthealth"></div>
         <!-- V16.15: Submission Log -- delivery-tracking log (committed vs.
              actual dates, revision chains). Populated entirely by
              renderSubmissionLog(). saveSubmission() is the ONLY write in
              this feature; see its own header comment for the KPI-schema
              confirmations (on-time rate, slippage, rework, rhythm,
-             hours-per-submission all deferred to a second pass). -->
+             hours-per-submission all deferred to a second pass).
+             V16.18: tab held back from this ship, see comment above --
+             div stays here unreferenced, never rendered into. -->
         <div class="sh-tabcontent" id="sh-submissionlog"></div>
         <!-- V16.11: Individual Insight (Workload + Estimation-vs-actual).
              Populated entirely by renderIndividualInsight() -- structurally
-             empty here, same pattern as #sh-projecthealth. -->
-        <div class="sh-tabcontent" id="sh-individualinsight"></div>
+             empty here, same pattern as #sh-projecthealth.
+             V16.18: now the default active tab on Studio Health v1's ship
+             (Project Health held back, see the top-of-page comment). -->
+        <div class="sh-tabcontent active" id="sh-individualinsight"></div>
         <!-- V16.14: Employee Review -- the honest replacement for the
              dormant Appraisal (renderAppraisal()/appraisalData UNTOUCHED
              in this build; retiring it is a separate follow-up step).
@@ -5492,7 +5510,14 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='manage')       renderManage();
     if(page==='hourstracker') renderHoursTracker();
     if(page==='appraisal')   renderAppraisal();
-    if(page==='studiohealth') renderStudioHealth();
+    // V16.18: Studio Health v1 ships with Individual Insight as the
+    // default tab (Project Health/Layer A held back -- see the comment
+    // atop #page-studiohealth). Deliberately renderIndividualInsight()
+    // here, NOT renderStudioHealth() -- the old call would still fetch
+    // and render Layer A's data into its now-unreachable #sh-projecthealth
+    // div on every single Studio Health page open, silently, even though
+    // no tab exists to ever show it.
+    if(page==='studiohealth') renderIndividualInsight();
   });
 
 // V16.10/V16.11: Studio Health tab-switching -- local to this page, same
