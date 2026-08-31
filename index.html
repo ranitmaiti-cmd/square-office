@@ -3677,9 +3677,36 @@ const SH_PRIOR_WINDOW_COUNT = 3;     // how many equal-length prior windows form
 // spike (burnout risk) fires.
 const SH_WORKLOAD_SPIKE_RATIO = 2.0; // >= double their own normal
 const SH_WORKLOAD_DROP_RATIO = 0.4;  // <= 40% of their own normal
-const SH_EST_MIN_CONTRIBUTION_PCT = 0.20; // meaningful-contributor threshold -- no drive-by dilution
-const SH_EST_RECENT_COUNT = 5;            // "last N" phase-instances, per the owner's own example shape
-const SH_EST_MIN_HISTORICAL_COUNT = 3;    // minimum historical sample before drawing any comparison
+const SH_EST_MIN_CONTRIBUTION_PCT = 0.20; // meaningful-contributor threshold -- no drive-by dilution.
+// Deliberately KEPT at 20% (not lowered to match Versatility's 10%) --
+// investigated directly against real data (2026-08-31) and confirmed NOT
+// the bottleneck here: sweeping 20%/15%/10% with the count threshold held
+// fixed produced the IDENTICAL "insufficient history" count at every
+// percentage (8/9 people, unchanged). Estimation asks a different question
+// than Versatility ("was this person responsible enough for this phase's
+// over/under-run to hold them to it," not "was this a meaningful chunk of
+// THEIR OWN time") -- correctly excludes drive-by touches (e.g. Angana's
+// real 6.6%-of-total phase), and it isn't what's excluding people.
+// V16.21 (real-data investigation, 2026-08-31): the count threshold --
+// need SH_EST_RECENT_COUNT + SH_EST_MIN_HISTORICAL_COUNT qualifying
+// phase-instances total -- was the ACTUAL bottleneck, not the
+// contribution-%. At the OLD 5+3 (8 total), 8 of 9 people showed "not
+// enough history" -- the metric almost never fired. Swept several count
+// combinations against real data with the 20% filter held fixed: 4+2 (6
+// total) dropped it to 5/9; 3+2 (5 total) to 4/9; 2+2 (4 total) rescued
+// NOBODY further than 3+2 did -- confirming 3+2 is the real floor of who
+// has genuine multi-phase history here, not an arbitrary stopping point.
+// Verified the 5 newly-qualifying people's actual computed patterns are
+// sane, not noise (real ratios, e.g. Tasmin's 100%/0% recent-vs-historical
+// split driven by real 243%/112%/120% overruns). People who still fall
+// short at 3+2 (Angana/Souvik/Taskiya) are genuinely short -- each has
+// only 1-2 qualifying phases ever, structurally incapable of reaching 5
+// regardless of threshold (see the budget-completeness finding logged
+// alongside this fix for a separate, non-threshold explanation of part of
+// why: ~48% of all logged phase-hours sit on projects with no budget
+// entered at all, invisible to this metric independent of any threshold).
+const SH_EST_RECENT_COUNT = 3;            // "last N" phase-instances
+const SH_EST_MIN_HISTORICAL_COUNT = 2;    // minimum historical sample before drawing any comparison
 // V16.13: the bar for a REAL margin problem -- reused for both the new
 // project-level Margin Risk ranking and the (still-kept) person-level
 // estimation recency-pattern's own internal over/under check. Kept as
