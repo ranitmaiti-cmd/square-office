@@ -202,7 +202,19 @@ async function run() {
     check('written entry has the expected self-report desc', /Self-reported \(timer left running/.test(getLastPushed().desc));
     check('localStorage.timerState was cleared (normal completion)', removedKeys.includes('timerState'));
     check('user got the normal thank-you alert, not the discard alert', alerts.some(a => /Thank you for self-reporting/.test(a)) && !alerts.some(a => /already closed automatically/.test(a)));
-    check('NO telemetry write (this was a real report, not a discard)', telemetryUpdates.length === 0);
+    // V16.19 (self-report supersede fix, separate from this file's own
+    // race guard): this genuinely-open happy path now ALSO writes to the
+    // original doc -- closing it as superseded by the self-report just
+    // written, so it's never left orphaned. That write lands in this same
+    // mock's telemetryUpdates array (same db.doc().update() shape as
+    // recordDuplicateDiscarded's own write) -- distinguish by content, not
+    // by absence: no DISCARD-shaped write (this wasn't a duplicate), but
+    // exactly one SUPERSEDE-shaped write. See
+    // test/fix-selfreport-supersede-original.test.js for that fix's own
+    // full coverage; this assertion just confirms the two fixes don't
+    // contradict each other on this shared code path.
+    check('NO discard-telemetry write (this was a real report, not a duplicate)', !telemetryUpdates.some(u => u.data.orphanDuplicateDiscarded === true));
+    check('exactly one supersede write, closing the original doc this self-report replaces', telemetryUpdates.filter(u => u.data.supersededBySelfReport === true).length === 1);
     check('autoSave() WAS called', getAutoSaveCalled());
   }
 
@@ -220,7 +232,12 @@ async function run() {
     });
     await vm.runInContext('__orphanSaveHandler', sandbox)();
     check('writes normally (cannot confirm resolution, so does not guess)', getPushedCount() === 1);
-    check('no telemetry (nothing was discarded)', telemetryUpdates.length === 0);
+    // V16.19: the supersede write is attempted server-side regardless of
+    // local-array presence (it's a targeted write by id, not dependent on
+    // the doc being loaded locally) -- see fix-selfreport-supersede-
+    // original.test.js's own "not in local array" case for full coverage.
+    // What this fixture is actually proving is unchanged: no DISCARD write.
+    check('no discard telemetry (nothing was discarded)', !telemetryUpdates.some(u => u.data.orphanDuplicateDiscarded === true));
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -253,7 +270,10 @@ async function run() {
     });
     await vm.runInContext('__orphanSaveHandler', sandbox)();
     check('writes normally (inProgress undefined !== strictly false)', getPushedCount() === 1);
-    check('no telemetry', telemetryUpdates.length === 0);
+    // V16.19: same reasoning as the two cases above -- the supersede write
+    // is expected here (state.sessionLogId is truthy), so absence-of-any-
+    // write is no longer the right check; absence of a DISCARD write is.
+    check('no discard telemetry', !telemetryUpdates.some(u => u.data.orphanDuplicateDiscarded === true));
   }
 
   // ═══════════════════════════════════════════════════════════════════
