@@ -1208,7 +1208,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-28.1'; // V16.9: reconciliation-flag-clear gap fix -- Complete Task, 8pm force auto-complete, and finalizeCurrentSession's capped branch now clear reconciliationNeeded on close, mirroring closeCurrentSessionNow's 2026-08-15.4 fix (diffMode/save/delete paths otherwise untouched)
+const APP_VERSION = '2026-08-31.1'; // V16.20/V16.19: self-report supersede fix (orphan-recovery Save now closes the original session doc it replaces) + sweep re-flag race guard (isStillFlaggableOnServer re-verifies inProgress immediately before all 3 stale-sweeps write reconciliationNeeded:true) -- diffMode/save/delete paths otherwise untouched
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
