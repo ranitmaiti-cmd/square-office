@@ -1208,7 +1208,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-28.1'; // V16.9: reconciliation-flag-clear gap fix -- Complete Task, 8pm force auto-complete, and finalizeCurrentSession's capped branch now clear reconciliationNeeded on close, mirroring closeCurrentSessionNow's 2026-08-15.4 fix (diffMode/save/delete paths otherwise untouched)
+const APP_VERSION = '2026-08-31.1'; // V16.20/V16.19: self-report supersede fix (orphan-recovery Save now closes the original session doc it replaces) + sweep re-flag race guard (isStillFlaggableOnServer re-verifies inProgress immediately before all 3 stale-sweeps write reconciliationNeeded:true) -- diffMode/save/delete paths otherwise untouched
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -7654,6 +7654,39 @@ document.getElementById('timerCompletePausedBtn').addEventListener('click', asyn
 // guard on heartbeatSession()). A session that never comes back gets
 // actually closed later by api/biometric-sync.js's EOD-close phase, capped
 // at that user's real biometric OUT time.
+// V16.20 (sweep re-flag race fix): re-verify inProgress immediately before
+// WRITING the reconciliationNeeded:true flag, not just at the sweep's
+// initial read -- mirrors the Glitch 3 fix's own "re-check at write time"
+// principle (see recordDuplicateDiscarded's header), applied to the other
+// side of the same class of race. The gap is real: a session can close
+// cleanly (closeCurrentSessionNow() writes reconciliationNeeded:false in
+// the SAME update as inProgress:false) in the window between one of these
+// sweeps reading its initial snapshot and this specific doc's write landing
+// -- and since a sweep write only ever touches reconciliationNeeded/
+// reconciliationNeededSince, never inProgress, a decision made from a
+// now-stale snapshot silently overwrites a flag the close just correctly
+// cleared. Real production case: Rai's 29 Aug session (mtdzurqe393bgg)
+// closed correctly at 08:57:52.166Z; reconciliationNeededSince shows
+// 08:57:53.488Z -- a sweep write landing 1.3s after the close, re-flagging
+// a doc that had just been resolved. Shared by all three sweep functions
+// below so they can't drift out of agreement on this check.
+async function isStillFlaggableOnServer(id) {
+  try {
+    const snap = await db.collection('timeLogs').doc(id).get({ source: 'server' });
+    // Fail closed toward NOT flagging when the doc vanished or is already
+    // closed -- same fail-closed direction as every other race guard in
+    // this file (Stage 0's delete guard, the Glitch 3 duplicate check):
+    // only act on a POSITIVE confirmation that flagging is still correct.
+    return !!(snap.exists && snap.data().inProgress === true);
+  } catch (e) {
+    // Can't verify -- fail closed by skipping rather than risk re-flagging
+    // a doc that may have just closed; a genuinely still-stale session gets
+    // picked back up by the next sweep run regardless.
+    console.warn(`[sweep-reflag-check] could not re-verify ${id} before writing, skipping this run:`, e.message);
+    return false;
+  }
+}
+
 async function cleanupStaleTimers() {
   try {
     const today = fmt(new Date());
@@ -7684,6 +7717,14 @@ async function cleanupStaleTimers() {
       // and watchdog use.
       if (lastSeenMs && (now - lastSeenMs) < STALE_HEARTBEAT_MS) {
         skipped.push(data.userName || data.userId || id);
+        continue;
+      }
+
+      // V16.20: re-verify right before writing -- this doc may have closed
+      // cleanly since the snapshot above was read.
+      if (!(await isStillFlaggableOnServer(id))) {
+        skipped.push(data.userName || data.userId || id);
+        console.log(`⏭️ ${id} closed since this sweep's read -- not re-flagging`);
         continue;
       }
 
@@ -7781,6 +7822,13 @@ async function finalizeStaleHeartbeatSessions() {
       if (!lastSeenMs) continue;
       if (now - lastSeenMs < STALE_HEARTBEAT_MS) continue; // fresh -- leave it alone
 
+      // V16.20: re-verify right before writing -- this doc may have closed
+      // cleanly since the snapshot above was read.
+      if (!(await isStillFlaggableOnServer(doc.id))) {
+        console.log(`⏭️ ${doc.id} closed since this sweep's read -- not re-flagging`);
+        continue;
+      }
+
       // V16 (flag-don't-truncate): flag only -- inProgress/endTime/
       // durationMins untouched. NOT clearing localStorage's timerState
       // pointer either: the session is still open (just flagged), so if
@@ -7852,7 +7900,7 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
   }
 
   const now = Date.now();
-  let flagged = 0, failed = 0, fresh = 0, noHeartbeat = 0, alreadyFlagged = 0;
+  let flagged = 0, failed = 0, fresh = 0, noHeartbeat = 0, alreadyFlagged = 0, closedSinceRead = 0;
   const failures = [];
 
   for (const doc of snap.docs) {
@@ -7863,6 +7911,16 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
     const lastSeenMs = extractLastSeenMs(data);
     if (!lastSeenMs) { noHeartbeat++; continue; }
     if (now - lastSeenMs < STALE_HEARTBEAT_MS) { fresh++; continue; } // fresh -- leave it alone, Fix 1 may be re-arming it
+
+    // V16.20: re-verify right before writing -- this doc may have closed
+    // cleanly since the snapshot above was read. Counted separately from
+    // `fresh` so a healthy run and a run that caught real races stay
+    // distinguishable in the log line below.
+    if (!(await isStillFlaggableOnServer(doc.id))) {
+      closedSinceRead++;
+      console.log(`⏭️ [sweep] ${doc.id} closed since this sweep's read -- not re-flagging`);
+      continue;
+    }
 
     // V14.3.30: per-document try/catch -- one failing write must not
     // abandon every remaining stale doc in this batch. Failures are
@@ -7888,10 +7946,10 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
     }
   }
 
-  const result = { status: 'ok', scanned: snap.size, flagged, alreadyFlagged, failed, fresh, noHeartbeat, durationMs: Date.now() - startedAt };
+  const result = { status: 'ok', scanned: snap.size, flagged, alreadyFlagged, failed, fresh, noHeartbeat, closedSinceRead, durationMs: Date.now() - startedAt };
   // V14.3.30: logs on EVERY run, unconditionally -- a healthy idle sweep
   // (nothing stale) and a sweep that never ran must never look the same.
-  console.log(`[sweep] ran -- scanned:${result.scanned} flagged:${flagged} alreadyFlagged:${alreadyFlagged} failed:${failed} fresh:${fresh} noHeartbeat:${noHeartbeat} (${result.durationMs}ms)`);
+  console.log(`[sweep] ran -- scanned:${result.scanned} flagged:${flagged} alreadyFlagged:${alreadyFlagged} failed:${failed} fresh:${fresh} noHeartbeat:${noHeartbeat} closedSinceRead:${closedSinceRead} (${result.durationMs}ms)`);
   if (failed > 0) console.error(`⚠️ [sweep] ${failed} document(s) failed this run, will retry next sweep:`, failures);
   if (flagged > 0) showNotificationToast('🚩 Sessions Flagged', `${flagged} abandoned session(s) across the team were flagged for reconciliation.`, 'warning');
 
@@ -8313,6 +8371,46 @@ document.getElementById('orphanSaveBtn').addEventListener('click', async () => {
 
   const projectName = state.linkedPlan?.project || 'Unknown Project';
   const startDate   = new Date(state.startedAt);
+
+  // V16.19 (self-report supersede fix): this self-report IS the resolution
+  // for the ORIGINAL session (state.sessionLogId) -- the duplicate-discard
+  // guard just above already handles the case where something ELSE closed
+  // it first, so by the time execution reaches here the original doc is
+  // still open and this write is genuinely superseding it, not duplicating
+  // a close. Without this, the original doc is left inProgress:true (and,
+  // if it was ever flagged, reconciliationNeeded:true) forever -- a
+  // permanently orphaned stub with no link to the honest total just
+  // entered. Real production case this fixes: Souvik's 28 Aug 63-min stub
+  // (mtcqxj56j5t0xh) sat open for 3 days, only found and closed by hand.
+  // Immediate, targeted write -- same "don't defer to autosave" reasoning
+  // as closeCurrentSessionNow(): a tab closed right after this click would
+  // leave the supersede half undone if it depended on the next diff cycle.
+  // durationMins is deliberately zeroed, not left at whatever the original
+  // doc's last heartbeat wrote -- the total just entered IS this period's
+  // real duration; leaving the stub's own stale minutes in place would
+  // double-count on top of it.
+  if (state.sessionLogId) {
+    const supersededUpdates = {
+      inProgress: false,
+      reconciliationNeeded: false,
+      durationMins: 0,
+      desc: 'Superseded by self-reported entry — no duration counted here to avoid double-counting',
+      recovered: true,
+      recoveredAt: new Date().toISOString(),
+      supersededBySelfReport: true,
+    };
+    db.collection('timeLogs').doc(state.sessionLogId).update(supersededUpdates)
+      .catch((e) => console.error('[orphan-save] failed to close superseded original doc (self-report itself still saved):', e.message));
+
+    // Mirror into the local array too -- same synchronous-mirror pattern as
+    // closeCurrentSessionNow() -- anything reading `timeLogs` right after
+    // this click (renderTimeLog, renderDashboard) should see the superseded
+    // doc as closed immediately, not after a reload.
+    const supersededIdx = timeLogs.findIndex((l) => l.id === state.sessionLogId);
+    if (supersededIdx >= 0) {
+      timeLogs[supersededIdx] = { ...timeLogs[supersededIdx], ...supersededUpdates };
+    }
+  }
 
   timeLogs.push({
     id:          genId(),
