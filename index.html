@@ -1348,7 +1348,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-31.2'; // V17: budget-distribution feature -- Distribute-from-total control (template picker + total-hours input) in the project modal, fills the existing phase inputs via distributeBudgetByTemplate() (largest-remainder rounding), Manage Templates modal for editing/adding templates. Reuses saveProject() verbatim as the sole write path; budgetTemplates lives on companyData/squareDB (same pattern as holidays), no new field on project docs, diffMode/backstop untouched
+const APP_VERSION = '2026-08-31.3'; // Studio Health v1 ship: admin-only Studio Health page, Individual Insight + Employee Review live (Project Health/Layer A and Submission Log held back, dormant not deleted -- their tab entries removed from .sh-tabs, their fetches don't fire on page open). Merges in main's reconciliation fixes (self-report supersede, sweep re-flag race guard) and the budget-distribution feature unchanged -- this ship ADDS to that work, does not touch it
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
