@@ -1061,11 +1061,42 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="form-group"><label class="form-label">Start Date</label><input type="date" class="form-control" id="pStart"></div>
       <div class="form-group"><label class="form-label">End Date</label><input type="date" class="form-control" id="pEnd"></div>
     </div>
-    <div style="font-weight:700;font-size:14px;margin-bottom:12px;margin-top:4px;">⏱️ Phase Budgets (hours)</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:4px;">
+      <div style="font-weight:700;font-size:14px;">⏱️ Phase Budgets (hours)</div>
+      <a href="#" id="pManageTemplatesLink" style="font-size:11px;color:#A96E35;">Manage Templates</a>
+    </div>
+    <!-- V17 (budget-distribution feature): fills the phase inputs below
+         from a total + a template -- never writes/saves anything itself.
+         The existing Save Project button is still the only commit. -->
+    <div style="background:#F7F4EF;padding:10px 12px;border-radius:8px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:#5C4F42;margin-bottom:6px;">Distribute from total</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select class="form-control" id="pDistributeTemplate" style="max-width:200px;"></select>
+        <input type="number" class="form-control" id="pDistributeTotal" placeholder="Total hours" min="0" step="1" style="max-width:120px;">
+        <button type="button" class="btn btn-ghost btn-sm" id="pDistributeBtn">Distribute →</button>
+      </div>
+      <div style="font-size:10px;color:#8A7E74;margin-top:5px;">Fills the fields below — review and adjust before saving.</div>
+    </div>
     <div id="phaseBudgetFields"></div>
     <div style="display:flex;gap:8px;margin-top:10px;">
       <button class="btn btn-primary" id="saveProjBtn">Save Project</button>
       <button class="btn btn-ghost" onclick="closeModal('projectModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Budget Templates Modal (admin) -- V17 (budget-distribution feature).
+     Edits a DRAFT copy (budgetTemplatesDraft), only committed to the live
+     budgetTemplates array + saved on "Save Templates" -- same
+     review-before-commit discipline as the Distribute control itself. -->
+<div class="modal-backdrop" id="budgetTemplatesModal">
+  <div class="modal-box wide">
+    <div class="modal-head"><h3>Manage Budget Templates</h3><button class="close-btn" onclick="closeModal('budgetTemplatesModal')">×</button></div>
+    <div id="budgetTemplatesFields"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button type="button" class="btn btn-ghost btn-sm" id="addBudgetTemplateBtn">+ Add Template</button>
+      <button type="button" class="btn btn-primary" id="saveBudgetTemplatesBtn">Save Templates</button>
+      <button class="btn btn-ghost" onclick="closeModal('budgetTemplatesModal')">Cancel</button>
     </div>
   </div>
 </div>
@@ -1317,7 +1348,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-28.1'; // V16.9: reconciliation-flag-clear gap fix -- Complete Task, 8pm force auto-complete, and finalizeCurrentSession's capped branch now clear reconciliationNeeded on close, mirroring closeCurrentSessionNow's 2026-08-15.4 fix (diffMode/save/delete paths otherwise untouched)
+const APP_VERSION = '2026-08-31.2'; // V17: budget-distribution feature -- Distribute-from-total control (template picker + total-hours input) in the project modal, fills the existing phase inputs via distributeBudgetByTemplate() (largest-remainder rounding), Manage Templates modal for editing/adding templates. Reuses saveProject() verbatim as the sole write path; budgetTemplates lives on companyData/squareDB (same pattern as holidays), no new field on project docs, diffMode/backstop untouched
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -1332,6 +1363,67 @@ let dataLoaded = false; // Prevent saves before load completes
 // ═══════════════════════════════════════════════════════
 const PHASES = ['Schematic Design','Final Design','Construction Documents','Material Selection & Coordination','Site Supervision','Project Management'];
 const MONTHS_L = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+// ═══════════════════════════════════════════════════════
+// V17 (budget-distribution feature, 2026-08-31): percentage templates for
+// distributing one total project budget across PHASES. Not invented --
+// pulled directly from real repeated project allocations: CLUB ONE WORLD/
+// BURDWAN RD/BELGACHHIYA EXP CENTRE share byte-identical percentages
+// (Standard Design-Build), and AVANA/Kredent office share another
+// (Design-Heavy) -- see FINDINGS-2026-08-10.md for the full comparison
+// across all 10 then-budgeted projects. Same storage pattern as
+// `holidays`: a field on the single companyData/squareDB doc, NOT a new
+// collection, NOT a new field on project docs themselves (see
+// distributeBudgetByTemplate()'s own header for why that matters).
+const DEFAULT_BUDGET_TEMPLATES = [
+  { id: 'standard-design-build', name: 'Standard Design-Build', pcts: {
+    'Schematic Design': 15, 'Final Design': 20, 'Construction Documents': 30,
+    'Material Selection & Coordination': 5, 'Site Supervision': 20, 'Project Management': 10,
+  } },
+  { id: 'design-heavy', name: 'Design-Heavy', pcts: {
+    'Schematic Design': 10, 'Final Design': 25, 'Construction Documents': 20,
+    'Material Selection & Coordination': 25, 'Site Supervision': 10, 'Project Management': 10,
+  } },
+];
+// Loaded from companyData/squareDB (falls back to the defaults above if
+// never configured there yet -- see the load site for the exact fallback).
+let budgetTemplates = [];
+// Working copy edited inside the Manage Templates modal -- only committed
+// to `budgetTemplates` (and saved) on "Save Templates". Keeps template
+// editing itself review-before-commit, same principle as Distribute
+// itself never auto-saving a project.
+let budgetTemplatesDraft = [];
+
+// Pure: largest-remainder distribution of `totalHours` across PHASES per a
+// template's percentages. Each phase = floor(total*pct/100); the leftover
+// hours lost to flooring (0 to PHASES.length-1 of them, since each phase
+// loses less than 1h) are handed out one-by-one to the phases with the
+// largest fractional remainder -- so the result sums to EXACTLY
+// totalHours, deterministic (PHASES' own fixed order breaks ties the same
+// way every time for the same input). This is a STARTING POINT only --
+// its only caller fills the existing phase inputs, never writes/saves
+// anything itself; saveProject() (unchanged) is still the sole write path
+// for whatever the owner reviews/adjusts and then explicitly saves.
+function distributeBudgetByTemplate(totalHours, templatePcts) {
+  const total = Math.max(0, Math.round(totalHours) || 0);
+  const floors = {};
+  const remainders = [];
+  let flooredSum = 0;
+  PHASES.forEach(ph => {
+    const pct = templatePcts[ph] || 0;
+    const raw = total * pct / 100;
+    const fl = Math.floor(raw);
+    floors[ph] = fl;
+    flooredSum += fl;
+    remainders.push({ ph, remainder: raw - fl });
+  });
+  let leftover = total - flooredSum;
+  remainders.sort((a, b) => b.remainder - a.remainder);
+  for (let i = 0; i < leftover && i < remainders.length; i++) {
+    floors[remainders[i].ph] += 1;
+  }
+  return floors;
+}
 
 let currentUser = null;
 
@@ -3052,7 +3144,7 @@ async function saveData() {
       // V14.2.40c FIX: Save main data using update() not set() so casLeft/medLeft
       // are NOT overwritten by auto-save. Leave balances only written by deduction logic.
       const dataToSave = {
-        clients, typologies, changeRequests, holidays,
+        clients, typologies, changeRequests, holidays, budgetTemplates,
         timestamp: saveTimestamp,
         instanceId: instanceId,
         savedBy: currentUser?.name || 'Unknown',
@@ -3195,6 +3287,10 @@ async function loadData() {
       
       changeRequests = data.changeRequests || [];
       holidays = data.holidays || [];
+      // V17: falls back to the built-in defaults only when squareDB has
+      // never had this field written -- an explicitly saved EMPTY array
+      // (every template deleted) stays empty, not silently repopulated.
+      budgetTemplates = data.budgetTemplates !== undefined ? data.budgetTemplates : DEFAULT_BUDGET_TEMPLATES;
       
       console.log('📥 Loaded from Firebase:', {
         projects: projectsData.length,
@@ -7399,6 +7495,11 @@ function openProjectModal(projId){
     pf.appendChild(row);
   });
   document.getElementById('saveProjBtn')._editId=projId;
+  // V17 (budget-distribution feature): reset the Distribute control every
+  // time the modal opens -- never carries a stale total/template selection
+  // from whatever project was last edited.
+  populateDistributeTemplateSelect();
+  document.getElementById('pDistributeTotal').value = '';
   openModal('projectModal');
 }
 document.getElementById('pClientSelect').addEventListener('change',function(){
@@ -7429,6 +7530,108 @@ document.getElementById('saveProjBtn').addEventListener('click', async function(
   // V14.2.37: Save project granularly first, then autoSave for rest
   await saveProject(data);
   autoSave(); closeModal('projectModal'); renderProjectsBudget();
+});
+
+// ═══════════════════════════════════════════════════════
+// V17 (budget-distribution feature): Distribute control + Manage
+// Templates modal. Distribute ONLY fills the existing phase inputs above
+// -- it never touches projectsData, never calls saveProject()/autoSave(),
+// never writes anything. The existing #saveProjBtn handler (unchanged,
+// directly above) is still the sole write path for whatever the owner
+// reviews/adjusts and explicitly saves.
+// ═══════════════════════════════════════════════════════
+function populateDistributeTemplateSelect() {
+  const sel = document.getElementById('pDistributeTemplate');
+  if (!sel) return;
+  sel.innerHTML = budgetTemplates.length
+    ? budgetTemplates.map(t => `<option value="${t.id}">${t.name}</option>`).join('')
+    : '<option value="">No templates -- add one via Manage Templates</option>';
+}
+
+document.getElementById('pDistributeBtn').addEventListener('click', () => {
+  const templateId = document.getElementById('pDistributeTemplate').value;
+  const template = budgetTemplates.find(t => t.id === templateId);
+  if (!template) { alert('Select a template first (or add one via Manage Templates).'); return; }
+  const total = parseInt(document.getElementById('pDistributeTotal').value, 10) || 0;
+  if (total <= 0) { alert('Enter a total budget in hours.'); return; }
+  const distributed = distributeBudgetByTemplate(total, template.pcts);
+  PHASES.forEach(ph => {
+    const input = document.getElementById('phase_' + ph.replace(/\s+/g, '_'));
+    if (input) input.value = distributed[ph];
+  });
+});
+
+function renderBudgetTemplatesFields() {
+  const container = document.getElementById('budgetTemplatesFields');
+  if (!container) return;
+  container.innerHTML = budgetTemplatesDraft.length ? budgetTemplatesDraft.map((t, idx) => {
+    const sum = PHASES.reduce((s, ph) => s + (t.pcts[ph] || 0), 0);
+    const phaseInputs = PHASES.map(ph => `
+      <div style="display:flex;flex-direction:column;">
+        <label style="font-size:10px;color:#8A7E74;">${ph}</label>
+        <input type="number" class="form-control bt-pct-input" data-idx="${idx}" data-phase="${ph}" min="0" max="100" step="1" value="${t.pcts[ph]||0}" style="padding:4px 6px;font-size:12px;">
+      </div>`).join('');
+    return `
+      <div class="card" style="margin-bottom:12px;padding:10px 12px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <input type="text" class="form-control bt-name-input" data-idx="${idx}" value="${t.name}" style="flex:1;font-weight:600;">
+          <span class="bt-sum-badge" data-idx="${idx}" style="font-size:11px;font-weight:700;color:${sum===100?'#6E8F52':'#C0554A'};">${sum}%</span>
+          <button type="button" class="btn btn-danger btn-sm bt-delete-btn" data-idx="${idx}">Delete</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">${phaseInputs}</div>
+      </div>`;
+  }).join('') : '<div class="sh-empty">No templates yet — add one below.</div>';
+
+  container.querySelectorAll('.bt-pct-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const idx = parseInt(inp.dataset.idx, 10);
+      budgetTemplatesDraft[idx].pcts[inp.dataset.phase] = parseInt(inp.value, 10) || 0;
+      const sum = PHASES.reduce((s, p) => s + (budgetTemplatesDraft[idx].pcts[p] || 0), 0);
+      const badge = container.querySelector(`.bt-sum-badge[data-idx="${idx}"]`);
+      if (badge) { badge.textContent = sum + '%'; badge.style.color = sum === 100 ? '#6E8F52' : '#C0554A'; }
+    });
+  });
+  container.querySelectorAll('.bt-name-input').forEach(inp => {
+    inp.addEventListener('input', () => { budgetTemplatesDraft[parseInt(inp.dataset.idx, 10)].name = inp.value; });
+  });
+  container.querySelectorAll('.bt-delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      budgetTemplatesDraft.splice(parseInt(btn.dataset.idx, 10), 1);
+      renderBudgetTemplatesFields();
+    });
+  });
+}
+
+document.getElementById('pManageTemplatesLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  // Deep-copy into the draft -- edits here never touch the live
+  // budgetTemplates array (or Firestore) until Save Templates commits them.
+  budgetTemplatesDraft = budgetTemplates.map(t => ({ id: t.id, name: t.name, pcts: { ...t.pcts } }));
+  renderBudgetTemplatesFields();
+  openModal('budgetTemplatesModal');
+});
+
+document.getElementById('addBudgetTemplateBtn').addEventListener('click', () => {
+  const blankPcts = {}; PHASES.forEach(ph => { blankPcts[ph] = 0; });
+  budgetTemplatesDraft.push({ id: genId(), name: 'New Template', pcts: blankPcts });
+  renderBudgetTemplatesFields();
+});
+
+document.getElementById('saveBudgetTemplatesBtn').addEventListener('click', () => {
+  // V17: enforce "must sum to 100%" here, at commit time -- Distribute
+  // itself trusts whatever's in budgetTemplates, so a bad template can
+  // only ever get there through this explicit, validated save.
+  for (const t of budgetTemplatesDraft) {
+    if (!t.name.trim()) { alert('Every template needs a name.'); return; }
+    const sum = PHASES.reduce((s, ph) => s + (t.pcts[ph] || 0), 0);
+    if (sum !== 100) { alert(`"${t.name}" sums to ${sum}%, not 100%. Fix it before saving.`); return; }
+  }
+  budgetTemplates = budgetTemplatesDraft.map(t => ({ id: t.id, name: t.name.trim(), pcts: { ...t.pcts } }));
+  // Same persistence path as holidays -- mutate the in-memory array, let
+  // the existing autoSave()->saveData() cycle write companyData/squareDB.
+  autoSave();
+  populateDistributeTemplateSelect();
+  closeModal('budgetTemplatesModal');
 });
 
 // ═══════════════════════════════════════════════════════
@@ -8477,6 +8680,7 @@ document.getElementById('importFileInput').addEventListener('change', (e) => {
       leaveRequests = backup.data.leaveRequests || [];
       changeRequests = backup.data.changeRequests || [];
       holidays = backup.data.holidays || [];
+      budgetTemplates = backup.data.budgetTemplates || budgetTemplates;
       
       await saveData();
       
@@ -9237,6 +9441,39 @@ document.getElementById('timerCompletePausedBtn').addEventListener('click', asyn
 // guard on heartbeatSession()). A session that never comes back gets
 // actually closed later by api/biometric-sync.js's EOD-close phase, capped
 // at that user's real biometric OUT time.
+// V16.20 (sweep re-flag race fix): re-verify inProgress immediately before
+// WRITING the reconciliationNeeded:true flag, not just at the sweep's
+// initial read -- mirrors the Glitch 3 fix's own "re-check at write time"
+// principle (see recordDuplicateDiscarded's header), applied to the other
+// side of the same class of race. The gap is real: a session can close
+// cleanly (closeCurrentSessionNow() writes reconciliationNeeded:false in
+// the SAME update as inProgress:false) in the window between one of these
+// sweeps reading its initial snapshot and this specific doc's write landing
+// -- and since a sweep write only ever touches reconciliationNeeded/
+// reconciliationNeededSince, never inProgress, a decision made from a
+// now-stale snapshot silently overwrites a flag the close just correctly
+// cleared. Real production case: Rai's 29 Aug session (mtdzurqe393bgg)
+// closed correctly at 08:57:52.166Z; reconciliationNeededSince shows
+// 08:57:53.488Z -- a sweep write landing 1.3s after the close, re-flagging
+// a doc that had just been resolved. Shared by all three sweep functions
+// below so they can't drift out of agreement on this check.
+async function isStillFlaggableOnServer(id) {
+  try {
+    const snap = await db.collection('timeLogs').doc(id).get({ source: 'server' });
+    // Fail closed toward NOT flagging when the doc vanished or is already
+    // closed -- same fail-closed direction as every other race guard in
+    // this file (Stage 0's delete guard, the Glitch 3 duplicate check):
+    // only act on a POSITIVE confirmation that flagging is still correct.
+    return !!(snap.exists && snap.data().inProgress === true);
+  } catch (e) {
+    // Can't verify -- fail closed by skipping rather than risk re-flagging
+    // a doc that may have just closed; a genuinely still-stale session gets
+    // picked back up by the next sweep run regardless.
+    console.warn(`[sweep-reflag-check] could not re-verify ${id} before writing, skipping this run:`, e.message);
+    return false;
+  }
+}
+
 async function cleanupStaleTimers() {
   try {
     const today = fmt(new Date());
@@ -9267,6 +9504,14 @@ async function cleanupStaleTimers() {
       // and watchdog use.
       if (lastSeenMs && (now - lastSeenMs) < STALE_HEARTBEAT_MS) {
         skipped.push(data.userName || data.userId || id);
+        continue;
+      }
+
+      // V16.20: re-verify right before writing -- this doc may have closed
+      // cleanly since the snapshot above was read.
+      if (!(await isStillFlaggableOnServer(id))) {
+        skipped.push(data.userName || data.userId || id);
+        console.log(`⏭️ ${id} closed since this sweep's read -- not re-flagging`);
         continue;
       }
 
@@ -9364,6 +9609,13 @@ async function finalizeStaleHeartbeatSessions() {
       if (!lastSeenMs) continue;
       if (now - lastSeenMs < STALE_HEARTBEAT_MS) continue; // fresh -- leave it alone
 
+      // V16.20: re-verify right before writing -- this doc may have closed
+      // cleanly since the snapshot above was read.
+      if (!(await isStillFlaggableOnServer(doc.id))) {
+        console.log(`⏭️ ${doc.id} closed since this sweep's read -- not re-flagging`);
+        continue;
+      }
+
       // V16 (flag-don't-truncate): flag only -- inProgress/endTime/
       // durationMins untouched. NOT clearing localStorage's timerState
       // pointer either: the session is still open (just flagged), so if
@@ -9435,7 +9687,7 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
   }
 
   const now = Date.now();
-  let flagged = 0, failed = 0, fresh = 0, noHeartbeat = 0, alreadyFlagged = 0;
+  let flagged = 0, failed = 0, fresh = 0, noHeartbeat = 0, alreadyFlagged = 0, closedSinceRead = 0;
   const failures = [];
 
   for (const doc of snap.docs) {
@@ -9446,6 +9698,16 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
     const lastSeenMs = extractLastSeenMs(data);
     if (!lastSeenMs) { noHeartbeat++; continue; }
     if (now - lastSeenMs < STALE_HEARTBEAT_MS) { fresh++; continue; } // fresh -- leave it alone, Fix 1 may be re-arming it
+
+    // V16.20: re-verify right before writing -- this doc may have closed
+    // cleanly since the snapshot above was read. Counted separately from
+    // `fresh` so a healthy run and a run that caught real races stay
+    // distinguishable in the log line below.
+    if (!(await isStillFlaggableOnServer(doc.id))) {
+      closedSinceRead++;
+      console.log(`⏭️ [sweep] ${doc.id} closed since this sweep's read -- not re-flagging`);
+      continue;
+    }
 
     // V14.3.30: per-document try/catch -- one failing write must not
     // abandon every remaining stale doc in this batch. Failures are
@@ -9471,10 +9733,10 @@ async function finalizeStaleHeartbeatSessionsAllUsers() {
     }
   }
 
-  const result = { status: 'ok', scanned: snap.size, flagged, alreadyFlagged, failed, fresh, noHeartbeat, durationMs: Date.now() - startedAt };
+  const result = { status: 'ok', scanned: snap.size, flagged, alreadyFlagged, failed, fresh, noHeartbeat, closedSinceRead, durationMs: Date.now() - startedAt };
   // V14.3.30: logs on EVERY run, unconditionally -- a healthy idle sweep
   // (nothing stale) and a sweep that never ran must never look the same.
-  console.log(`[sweep] ran -- scanned:${result.scanned} flagged:${flagged} alreadyFlagged:${alreadyFlagged} failed:${failed} fresh:${fresh} noHeartbeat:${noHeartbeat} (${result.durationMs}ms)`);
+  console.log(`[sweep] ran -- scanned:${result.scanned} flagged:${flagged} alreadyFlagged:${alreadyFlagged} failed:${failed} fresh:${fresh} noHeartbeat:${noHeartbeat} closedSinceRead:${closedSinceRead} (${result.durationMs}ms)`);
   if (failed > 0) console.error(`⚠️ [sweep] ${failed} document(s) failed this run, will retry next sweep:`, failures);
   if (flagged > 0) showNotificationToast('🚩 Sessions Flagged', `${flagged} abandoned session(s) across the team were flagged for reconciliation.`, 'warning');
 
@@ -9896,6 +10158,46 @@ document.getElementById('orphanSaveBtn').addEventListener('click', async () => {
 
   const projectName = state.linkedPlan?.project || 'Unknown Project';
   const startDate   = new Date(state.startedAt);
+
+  // V16.19 (self-report supersede fix): this self-report IS the resolution
+  // for the ORIGINAL session (state.sessionLogId) -- the duplicate-discard
+  // guard just above already handles the case where something ELSE closed
+  // it first, so by the time execution reaches here the original doc is
+  // still open and this write is genuinely superseding it, not duplicating
+  // a close. Without this, the original doc is left inProgress:true (and,
+  // if it was ever flagged, reconciliationNeeded:true) forever -- a
+  // permanently orphaned stub with no link to the honest total just
+  // entered. Real production case this fixes: Souvik's 28 Aug 63-min stub
+  // (mtcqxj56j5t0xh) sat open for 3 days, only found and closed by hand.
+  // Immediate, targeted write -- same "don't defer to autosave" reasoning
+  // as closeCurrentSessionNow(): a tab closed right after this click would
+  // leave the supersede half undone if it depended on the next diff cycle.
+  // durationMins is deliberately zeroed, not left at whatever the original
+  // doc's last heartbeat wrote -- the total just entered IS this period's
+  // real duration; leaving the stub's own stale minutes in place would
+  // double-count on top of it.
+  if (state.sessionLogId) {
+    const supersededUpdates = {
+      inProgress: false,
+      reconciliationNeeded: false,
+      durationMins: 0,
+      desc: 'Superseded by self-reported entry — no duration counted here to avoid double-counting',
+      recovered: true,
+      recoveredAt: new Date().toISOString(),
+      supersededBySelfReport: true,
+    };
+    db.collection('timeLogs').doc(state.sessionLogId).update(supersededUpdates)
+      .catch((e) => console.error('[orphan-save] failed to close superseded original doc (self-report itself still saved):', e.message));
+
+    // Mirror into the local array too -- same synchronous-mirror pattern as
+    // closeCurrentSessionNow() -- anything reading `timeLogs` right after
+    // this click (renderTimeLog, renderDashboard) should see the superseded
+    // doc as closed immediately, not after a reload.
+    const supersededIdx = timeLogs.findIndex((l) => l.id === state.sessionLogId);
+    if (supersededIdx >= 0) {
+      timeLogs[supersededIdx] = { ...timeLogs[supersededIdx], ...supersededUpdates };
+    }
+  }
 
   timeLogs.push({
     id:          genId(),
