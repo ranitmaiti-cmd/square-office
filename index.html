@@ -853,6 +853,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="sh-tabs">
           <div class="sh-tab active" data-shtab="individualinsight">Individual Insight</div>
           <div class="sh-tab" data-shtab="employeereview">Employee Review</div>
+          <div class="sh-tab" data-shtab="dataquality">Data Quality</div>
         </div>
         <div class="sh-tabcontent" id="sh-projecthealth"></div>
         <!-- V16.15: Submission Log -- delivery-tracking log (committed vs.
@@ -875,6 +876,12 @@ textarea.form-control{min-height:70px;resize:vertical;}
              in this build; retiring it is a separate follow-up step).
              Populated entirely by renderEmployeeReview(). -->
         <div class="sh-tabcontent" id="sh-employeereview"></div>
+        <!-- V18: Data Quality -- confidence-grade breakdown (A/B/C/D per
+             timeLog, derived from existing repair/reconciliation tags) +
+             phase/typology contradiction flag. Pure-read: derives from
+             already-fetched timeLogs, writes nothing, changes nothing.
+             Populated entirely by renderDataQuality(). -->
+        <div class="sh-tabcontent" id="sh-dataquality"></div>
       </div>
 
     </div><!-- /content -->
@@ -5028,6 +5035,219 @@ function renderSubmissionLogBody() {
 }
 
 // ═══════════════════════════════════════════════════════
+// V18 (Studio Health: Data Quality, 2026-09-01): two data-integrity
+// checks the August-report investigation surfaced -- both pure-read,
+// derived entirely from fields the app already writes, no new field, no
+// write path here at all. Reported here as FACTS for the owner to see
+// (a data-quality flag), never an auto-correction.
+//
+// PURPOSE (Feature A): every timeLog carries an implicit "how sure are
+// we this number is real" signal, scattered across several existing
+// repair/reconciliation tags (recovered, gapfill, gapfillSource,
+// autoCapped, estimatedClose, ceilingClamped, supersededBySelfReport)
+// plus a desc-text marker for self-reports (no dedicated boolean exists
+// for that one -- a real, small pre-existing gap, worked around here by
+// text match, not fixed). This turns that scattered signal into one
+// A/B/C/D grade per doc, then a single "verified vs total hours" line.
+// Real-data investigation (2026-08-31, logged in FINDINGS) found August
+// at 89.4% grade A+B (verified or biometric-cross-checked) -- worth
+// comparing against a report that separately characterized the month's
+// trustworthiness very differently.
+//
+// PURPOSE (Feature B): phase and typology are meant to agree --
+// typology is a fixed 14-item list, each literally named
+// "{phase} – {sub-activity}". TYPOLOGY_TO_PHASE below is an EXPLICIT
+// lookup table, not a naive `typology.startsWith(phase)` prefix check
+// -- 2 of the 14 typologies ("Material Selection – Research"/"Material
+// Selection – Vendor Coordination") do NOT prefix-match the real phase
+// name "Material Selection & Coordination", so a prefix check would
+// falsely flag every legitimate Material Selection entry. Real-data
+// investigation found 93 of 452 checkable August entries (20.6%, 280h)
+// genuinely contradict, concentrated in just 7 (person, phase, typology)
+// patterns -- Tasmin/Taskiya on Kredent office and Salt Lake Residence
+// account for 92% of it, a phase field that looks like it stopped being
+// updated once typology moved on to later sub-activities, not random
+// noise.
+// ═══════════════════════════════════════════════════════
+
+// Pure: A/B/C/D confidence grade for one timeLog doc. Checked most-
+// specific/worst-signal first -- a doc could in principle carry more
+// than one tag (e.g. autoCapped AND recovered), so order matters and is
+// deliberate, not incidental.
+function gradeTimeLogConfidence(log) {
+  const desc = log.desc || '';
+  const isSelfReported = /Self-reported \(timer left running/.test(desc);
+  if (log.supersededBySelfReport === true) return 'D'; // zeroed stub, real hours live in a linked self-report doc
+  if (isSelfReported) return 'D'; // a total with no clock evidence at all
+  if (log.recovered === true) {
+    // Distinguish "reconciled against a real biometric OUT" (B) from
+    // "auto-filled/estimated without biometric" (C) -- both carry
+    // recovered:true, but only the biometric-anchored close is
+    // cross-checked against an independent clock.
+    if (log.gapfillSource && /^biometric-/.test(log.gapfillSource)) return 'B';
+    if (desc.includes('capped at biometric OUT')) return 'B'; // biometric-sync's closeAtGenuineFinal, biometric branch
+    return 'C'; // autoCapped / estimatedClose / ceilingClamped / a bare heartbeat-stale recovery -- reconstructed, no independent clock
+  }
+  if (log.gapfill === true) return 'B'; // biometric-anchored gap-fill entry (mid-day or tail), not itself "recovered" but still built from biometric truth
+  return 'A'; // clean start/stop, no repair tag of any kind
+}
+
+// Pure: grade-by-grade doc counts and minutes, plus the single
+// verified-vs-total line (A+B = verified/cross-checked, C+D =
+// reconstructed). Takes ALREADY-FETCHED logs -- no fetch happens here.
+function computeConfidenceBreakdown(logs) {
+  const grades = { A: { count: 0, mins: 0 }, B: { count: 0, mins: 0 }, C: { count: 0, mins: 0 }, D: { count: 0, mins: 0 } };
+  logs.forEach(l => {
+    const g = gradeTimeLogConfidence(l);
+    grades[g].count++;
+    grades[g].mins += (l.durationMins || 0);
+  });
+  const totalMins = Object.values(grades).reduce((s, g) => s + g.mins, 0);
+  const verifiedMins = grades.A.mins + grades.B.mins;
+  return {
+    grades, totalMins, verifiedMins,
+    verifiedPct: totalMins > 0 ? (verifiedMins / totalMins) * 100 : null,
+  };
+}
+
+// V18: explicit typology -> phase lookup, NOT a prefix/startsWith check
+// -- see the file-header comment above for exactly why a prefix check
+// would misfire on the two Material Selection typologies. This is the
+// app's real, complete typologies list (confirmed against production
+// data: zero free-text/unknown typology values found).
+const TYPOLOGY_TO_PHASE = {
+  'Schematic Design – Concept Development': 'Schematic Design',
+  'Schematic Design – Client Presentation': 'Schematic Design',
+  'Final Design – Detailed Drawings': 'Final Design',
+  'Final Design – 3D Visualisation': 'Final Design',
+  'Construction Documents – Floor Plans': 'Construction Documents',
+  'Construction Documents – Sections & Elevations': 'Construction Documents',
+  'Construction Documents – Details': 'Construction Documents',
+  'Material Selection – Research': 'Material Selection & Coordination',
+  'Material Selection – Vendor Coordination': 'Material Selection & Coordination',
+  'Site Supervision – Site Visit': 'Site Supervision',
+  'Site Supervision – Progress Report': 'Site Supervision',
+  'Project Management – Coordination': 'Project Management',
+  'Project Management – Client Meeting': 'Project Management',
+  'Project Management – Internal Review': 'Project Management',
+};
+
+// Pure: which logs have a phase that contradicts their own typology,
+// grouped by the (userId, phase, typology) pattern -- real data showed
+// 7 patterns account for 92% of all contradiction hours, so the pattern
+// view is the useful one, not a 93-row entry list. Entries with no
+// phase, no typology, or a typology outside the known list are silently
+// excluded -- not checkable, not a contradiction (a non-productive entry
+// like Lunch Break has no phase at all; that's correct, not a flag).
+function detectPhaseTypologyContradictions(logs) {
+  let checkableCount = 0;
+  const contradictions = [];
+  const byPattern = {};
+  logs.forEach(l => {
+    if (!l.phase || !l.typology || !(l.typology in TYPOLOGY_TO_PHASE)) return;
+    checkableCount++;
+    const expectedPhase = TYPOLOGY_TO_PHASE[l.typology];
+    if (expectedPhase === l.phase) return;
+    contradictions.push(l);
+    const key = l.userId + '|' + l.phase + '|' + l.typology;
+    if (!byPattern[key]) byPattern[key] = { userId: l.userId, phase: l.phase, typology: l.typology, expectedPhase, count: 0, mins: 0 };
+    byPattern[key].count++;
+    byPattern[key].mins += (l.durationMins || 0);
+  });
+  const contradictionMins = contradictions.reduce((s, l) => s + (l.durationMins || 0), 0);
+  const patterns = Object.values(byPattern).sort((a, b) => b.mins - a.mins);
+  return { checkableCount, contradictions, contradictionMins, patterns };
+}
+
+async function renderDataQuality() {
+  const container = document.getElementById('sh-dataquality');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  let logs, allUsers;
+  try {
+    const [logSnap, userSnap] = await Promise.all([
+      db.collection('timeLogs').get({ source: 'server' }),
+      db.collection('users').get({ source: 'server' }),
+    ]);
+    logs = []; logSnap.forEach(d => logs.push({ ...d.data(), id: d.id }));
+    allUsers = []; userSnap.forEach(d => allUsers.push({ id: d.id, name: d.data().name }));
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+
+  const userNames = {};
+  allUsers.forEach(u => { userNames[u.id] = u.name; });
+
+  const breakdown = computeConfidenceBreakdown(logs);
+  const GRADE_LABELS = {
+    A: 'Verified — clean start/stop',
+    B: 'Reconciled — biometric-anchored',
+    C: 'Auto-filled — reconstructed, no biometric',
+    D: 'Self-reported / repaired',
+  };
+  const gradeRowsHTML = ['A', 'B', 'C', 'D'].map(g => {
+    const { count, mins } = breakdown.grades[g];
+    const pct = breakdown.totalMins > 0 ? ((mins / breakdown.totalMins) * 100).toFixed(1) : '0.0';
+    return `<tr><td><strong>${g}</strong></td><td>${GRADE_LABELS[g]}</td><td class="sh-num">${count}</td><td class="sh-num">${(mins / 60).toFixed(1)}h</td><td class="sh-num">${pct}%</td></tr>`;
+  }).join('');
+
+  const featureAHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title">🔍 Confidence Grade — how each logged hour was captured</div>
+      <div class="sh-fact-row">
+        <div class="sh-fact-points" style="font-size:15px;font-weight:700;color:#3D332A;">
+          ${(breakdown.verifiedMins / 60).toFixed(0)}h verified of ${(breakdown.totalMins / 60).toFixed(0)}h total —
+          <span class="sh-fact-dir">${breakdown.verifiedPct !== null ? breakdown.verifiedPct.toFixed(0) : '—'}%</span>
+        </div>
+        <div style="font-size:11px;color:#8A7E74;margin-top:4px;">Verified = grade A (clean start/stop) + grade B (biometric-reconciled). All logged history, not just one period.</div>
+      </div>
+      <table class="sh-table" style="margin-top:10px;">
+        <thead><tr><th>Grade</th><th>Meaning</th><th class="sh-num">Entries</th><th class="sh-num">Hours</th><th class="sh-num">% of total</th></tr></thead>
+        <tbody>${gradeRowsHTML}</tbody>
+      </table>
+    </div>`;
+
+  const contradictions = detectPhaseTypologyContradictions(logs);
+  const patternRowsHTML = contradictions.patterns.map(p => `
+    <tr>
+      <td>${userNames[p.userId] || p.userId}</td>
+      <td>${p.phase}</td>
+      <td>${p.typology}</td>
+      <td>${p.expectedPhase}</td>
+      <td class="sh-num">${p.count}</td>
+      <td class="sh-num">${(p.mins / 60).toFixed(1)}h</td>
+    </tr>`).join('');
+
+  const featureBHTML = `
+    <div class="card">
+      <div class="card-title">⚠️ Phase / Typology Contradiction</div>
+      <div class="sh-fact-row">
+        <div class="sh-fact-points" style="font-size:15px;font-weight:700;color:#3D332A;">
+          ${contradictions.contradictions.length} of ${contradictions.checkableCount} checkable entries contradict —
+          <span class="sh-fact-dir">${(contradictions.contradictionMins / 60).toFixed(0)}h</span>
+        </div>
+        <div style="font-size:11px;color:#8A7E74;margin-top:4px;">Entry's phase field doesn't match the phase its own typology names. A data-quality flag, not a correction — nothing here is changed automatically.</div>
+      </div>
+      ${contradictions.patterns.length ? `
+      <table class="sh-table" style="margin-top:10px;">
+        <thead><tr><th>Person</th><th>Logged phase</th><th>Typology</th><th>Typology's real phase</th><th class="sh-num">Entries</th><th class="sh-num">Hours</th></tr></thead>
+        <tbody>${patternRowsHTML}</tbody>
+      </table>` : '<div class="sh-flag-none">No contradictions found.</div>'}
+    </div>`;
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shdqRefreshLink" style="color:#A96E35;">refresh</a></div>
+    ${featureAHTML}
+    ${featureBHTML}
+  `;
+
+  const refreshLink = document.getElementById('shdqRefreshLink');
+  if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderDataQuality(); });
+}
+
+// ═══════════════════════════════════════════════════════
 // INIT — Load data then set up login
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
@@ -5631,6 +5851,7 @@ document.querySelectorAll('.sh-tab').forEach(tab => {
     if (tab.dataset.shtab === 'submissionlog') renderSubmissionLog();
     if (tab.dataset.shtab === 'individualinsight') renderIndividualInsight();
     if (tab.dataset.shtab === 'employeereview') renderEmployeeReview();
+    if (tab.dataset.shtab === 'dataquality') renderDataQuality();
   });
 });
 });
