@@ -367,6 +367,64 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .ap-save-scorecard.saved{background:#6E8F52;}
 .ap-save-status{font-size:10px;color:#B0A89E;line-height:1.3;}
 .ap-save-status.ok{color:#6E8F52;}
+
+/* V16.10: Studio Health -- admin-only reporting, Layer A (Project &
+   Estimation Health) first. Deliberately ONE neutral flag register
+   (tan/amber, matching .ht-badge.met's existing tone) -- NOT the
+   red/green .ht-badge.at-risk/.behind pattern used elsewhere in this
+   file for per-person targets. That contrast is intentional: this view
+   surfaces patterns to investigate, never a pass/fail verdict, so it
+   never borrows the app's existing "you're behind" visual language. */
+.sh-tabs{display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid #E0D8CE;}
+.sh-tab{padding:9px 16px;font-size:13px;font-weight:600;color:#8A7E74;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all 0.15s;}
+.sh-tab:hover{color:#5C4F42;}
+.sh-tab.active{color:#A96E35;border-bottom-color:#A96E35;}
+.sh-tabcontent{display:none;}
+.sh-tabcontent.active{display:block;}
+.sh-empty{text-align:center;color:#8A7E74;padding:44px 20px;font-size:13px;line-height:1.6;}
+.sh-flag{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:8px;background:#FBF7F0;margin-bottom:8px;font-size:13px;line-height:1.5;color:#3D332A;}
+.sh-flag-mark{flex-shrink:0;width:20px;height:20px;border-radius:50%;background:#F0E6D6;color:#8A5828;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px;}
+.sh-flag-none{text-align:center;color:#8A7E74;padding:20px;font-size:13px;}
+.sh-table{width:100%;border-collapse:collapse;font-size:12px;}
+.sh-table th{background:#EDE9E3;padding:8px 12px;text-align:left;font-weight:700;color:#5C4F42;border-bottom:2px solid #E0D8CE;}
+.sh-table td{padding:8px 12px;border-bottom:1px solid #EDE9E3;color:#3D332A;}
+.sh-table td.sh-num{text-align:right;font-variant-numeric:tabular-nums;}
+.sh-proj-group{font-weight:700;color:#5C4F42;background:#F7F4EF;}
+.sh-refresh-note{font-size:11px;color:#8A7E74;margin-bottom:14px;display:flex;align-items:center;gap:6px;}
+/* V16.14: Employee Review -- objective FACT rows (neutral, no color-
+   coding by design, unlike .phase-bar-fill's over/near/ok palette) and
+   the human rubric grid. Reuses .ap-star (defined earlier in this file,
+   for the existing Appraisal) verbatim for the 6-criteria star input --
+   same visual component, not redefined here. */
+.sh-fact-row{padding:10px 0;border-bottom:1px solid #EDE9E3;}
+.sh-fact-row:last-child{border-bottom:none;}
+.sh-fact-label{font-size:12px;font-weight:700;color:#5C4F42;margin-bottom:3px;}
+.sh-fact-value{font-size:13px;color:#3D332A;line-height:1.5;}
+.sh-fact-pending{font-size:12px;color:#B0A89E;font-style:italic;}
+/* V16.16: Employee Review point-form facts + neutral fact visuals.
+   .sh-fact-points is the crisp "label: point · point · point" line that
+   replaced the old paragraph .sh-fact-value. .sh-fact-dir is a small
+   neutral callout pill for a fact's directional/framing note -- reuses
+   .sh-flag-mark's exact amber "worth a look" palette (attention, not
+   alarm), never the red/green judgment palette below. The bar/dots are
+   FACT visuals only (this-quarter vs own-average, or a plain fraction)
+   -- modeled on .phase-bar-wrap's proportions for visual consistency,
+   but deliberately a single neutral fill color throughout, never the
+   ok/near/over palette -- no verdict is being rendered here. */
+.sh-fact-points{font-size:13px;color:#3D332A;line-height:1.5;}
+.sh-fact-dir{display:inline-block;background:#F0E6D6;color:#8A5828;font-size:11px;font-weight:600;padding:1px 7px;border-radius:10px;}
+.sh-fact-bar-wrap{position:relative;background:#E0D8CE;border-radius:4px;height:7px;margin-top:7px;max-width:320px;}
+.sh-fact-bar-fill{position:absolute;top:0;left:0;height:7px;border-radius:4px;background:#C9A876;transition:width 0.4s;}
+.sh-fact-bar-marker{position:absolute;top:-3px;width:2px;height:13px;background:#5C4F42;border-radius:1px;}
+.sh-fact-bar-legend{font-size:10px;color:#8A7E74;margin-top:3px;}
+.sh-fact-dots{display:flex;gap:4px;margin-top:7px;}
+.sh-fact-dot{width:8px;height:8px;border-radius:50%;background:#E0D8CE;flex-shrink:0;}
+.sh-fact-dot.filled{background:#C9A876;}
+.sh-rubric-grid{display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;margin-bottom:14px;}
+.sh-rubric-label{font-size:13px;color:#3D332A;}
+.sh-rater-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;}
+.sh-rater-table th{background:#EDE9E3;padding:6px 10px;text-align:left;font-weight:700;color:#5C4F42;border-bottom:2px solid #E0D8CE;}
+.sh-rater-table td{padding:6px 10px;border-bottom:1px solid #EDE9E3;color:#3D332A;}
 </style>
 
 <!-- Firebase SDK v10 - WORKING VERSION -->
@@ -472,6 +530,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="nav-item" data-page="teamleave"><span class="nav-icon">◫</span>Team Leave</div>
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
       <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">◈</span>Manage</div>
+      <div class="nav-item admin-only" data-page="studiohealth" style="display:none;"><span class="nav-icon">❖</span>Studio Health</div>
       <div style="border-top:1px solid #E0D8CE;margin:10px 0;"></div>
       <div class="nav-item" id="timerNavBtn" style="color:#6E8F52;font-weight:600;"><span class="nav-icon">▶</span><span id="timerNavLabel">Start Timer</span></div>
     </div>
@@ -766,6 +825,56 @@ textarea.form-control{min-height:70px;resize:vertical;}
           <div id="changeLogList" style="font-size:12px;max-height:200px;overflow-y:auto;"></div>
           <button class="btn btn-ghost btn-sm" id="clearChangeLogBtn" style="margin-top:10px;">Clear Log</button>
         </div>
+      </div>
+
+      <!-- STUDIO HEALTH -->
+      <!-- V16.10: admin-only reporting. Tabbed shell from day one -- only
+           Project Health (Layer A) has content; Submission Log and
+           Individual Insight are present-but-empty placeholders so B/C
+           slot in later without restructuring this page. -->
+      <div class="page admin-only" id="page-studiohealth">
+        <h2 class="page-title">❖ Studio Health</h2>
+        <!-- V16.18 (Studio Health v1 ship, 2026-08-30): Project Health
+             (Layer A) and Submission Log are HELD BACK from this ship --
+             dormant, not deleted. Their code/CSS/tabcontent divs/test
+             files are all still fully in place below, just unreferenced
+             from the tab bar, so their fetches never fire (confirmed: the
+             ONLY other caller of renderStudioHealth() is its own now-
+             unreachable refresh link; renderSubmissionLog() is only ever
+             called from the tab-click line for a tab that no longer
+             exists in this bar). Re-exposing either later is exactly
+             re-adding its one <div class="sh-tab" ...> line below and
+             restoring its content div's "active" state if it should be
+             the default again -- nothing else needs to change. Original
+             tab-bar markup, for that restore:
+               <div class="sh-tab active" data-shtab="projecthealth">Project Health</div>
+               <div class="sh-tab" data-shtab="submissionlog">Submission Log</div>
+        -->
+        <div class="sh-tabs">
+          <div class="sh-tab active" data-shtab="individualinsight">Individual Insight</div>
+          <div class="sh-tab" data-shtab="employeereview">Employee Review</div>
+        </div>
+        <div class="sh-tabcontent" id="sh-projecthealth"></div>
+        <!-- V16.15: Submission Log -- delivery-tracking log (committed vs.
+             actual dates, revision chains). Populated entirely by
+             renderSubmissionLog(). saveSubmission() is the ONLY write in
+             this feature; see its own header comment for the KPI-schema
+             confirmations (on-time rate, slippage, rework, rhythm,
+             hours-per-submission all deferred to a second pass).
+             V16.18: tab held back from this ship, see comment above --
+             div stays here unreferenced, never rendered into. -->
+        <div class="sh-tabcontent" id="sh-submissionlog"></div>
+        <!-- V16.11: Individual Insight (Workload + Estimation-vs-actual).
+             Populated entirely by renderIndividualInsight() -- structurally
+             empty here, same pattern as #sh-projecthealth.
+             V16.18: now the default active tab on Studio Health v1's ship
+             (Project Health held back, see the top-of-page comment). -->
+        <div class="sh-tabcontent active" id="sh-individualinsight"></div>
+        <!-- V16.14: Employee Review -- the honest replacement for the
+             dormant Appraisal (renderAppraisal()/appraisalData UNTOUCHED
+             in this build; retiring it is a separate follow-up step).
+             Populated entirely by renderEmployeeReview(). -->
+        <div class="sh-tabcontent" id="sh-employeereview"></div>
       </div>
 
     </div><!-- /content -->
@@ -1239,7 +1348,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-08-31.2'; // V17: budget-distribution feature -- Distribute-from-total control (template picker + total-hours input) in the project modal, fills the existing phase inputs via distributeBudgetByTemplate() (largest-remainder rounding), Manage Templates modal for editing/adding templates. Reuses saveProject() verbatim as the sole write path; budgetTemplates lives on companyData/squareDB (same pattern as holidays), no new field on project docs, diffMode/backstop untouched
+const APP_VERSION = '2026-08-31.3'; // Studio Health v1 ship: admin-only Studio Health page, Individual Insight + Employee Review live (Project Health/Layer A and Submission Log held back, dormant not deleted -- their tab entries removed from .sh-tabs, their fetches don't fire on page open). Merges in main's reconciliation fixes (self-report supersede, sweep re-flag race guard) and the budget-distribution feature unchanged -- this ship ADDS to that work, does not touch it
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -3471,6 +3580,1454 @@ function phaseLoggedMins(projectId,phaseName){ return timeLogs.filter(l=>l.proje
 function projectLoggedMins(projectId){ return timeLogs.filter(l=>l.projectId===projectId).reduce((s,l)=>s+l.durationMins,0); }
 
 // ═══════════════════════════════════════════════════════
+// V16.10: STUDIO HEALTH -- Layer A (Project & Estimation Health)
+// Admin-only, read-only reporting. Pure aggregation over EXISTING
+// timeLogs.durationMins + project.phases[] -- zero writes, no schema
+// change, never enters computeCollectionDiffs()/the backstop/diffMode
+// system (there is nothing here for that system to register).
+//
+// Reads FRESH from server on open (source:'server'), deliberately NOT
+// the cached in-memory timeLogs/projectsData arrays -- an admin tab can
+// sit open for hours (see the projects/p1-p2 staleness lesson,
+// FINDINGS-2026-08-10.md "Overnight admin-tab redundant write"), and a
+// stale in-memory snapshot here would misreport project health.
+//
+// The two aggregation functions below are deliberately pure (take their
+// data as arguments, touch no globals) and are NOT inlined into the
+// render function -- Layer C (individual insight, not yet built) will
+// reuse this exact math regrouped by person instead of becoming a 14th
+// independent summation site that could quietly diverge from Layer A's
+// numbers. This is also why they don't call the existing global-array-
+// bound phaseLoggedMins()/projectLoggedMins() just above: those read the
+// cached `timeLogs` array, which is exactly what this view avoids.
+//
+// Insight-not-verdict, proven here first (project-level, no names
+// attached at this layer, so mistakes in the visual language are cheap
+// to catch before Layer C puts a person's name next to a flag): flags
+// render as plain-language lines (.sh-flag), ONE neutral visual
+// register (.sh-flag-mark, tan/amber -- never the red/green
+// .ht-badge.at-risk/.behind pattern used elsewhere in this file for
+// per-person targets), and the reference table is grouped by PROJECT,
+// never sorted by "worst overrun" -- sorting by severity is a ranking
+// wearing a table's clothing.
+// ═══════════════════════════════════════════════════════
+
+// Groups durationMins by projectId+phase from a raw timeLogs array.
+// Pure function: no Firestore access, no globals beyond its argument.
+function sumHoursByProjectPhase(logs) {
+  const byProjectPhase = {}; // { projectId: { phaseName: totalMins } }
+  logs.forEach(l => {
+    if (!l.projectId || !l.phase) return; // skip lunch/unplanned/non-project entries
+    if (!byProjectPhase[l.projectId]) byProjectPhase[l.projectId] = {};
+    byProjectPhase[l.projectId][l.phase] = (byProjectPhase[l.projectId][l.phase] || 0) + (l.durationMins || 0);
+  });
+  return byProjectPhase;
+}
+
+// Cross-project estimation bias per phase NAME (not per-project) -- sums
+// actual and budgeted hours for a given phase type across every project
+// that has budgeted it, so a systemic over/under-run pattern is visible
+// even when no single project looks alarming on its own. Pure function.
+function computeEstimationBias(projects, byProjectPhase) {
+  const byPhaseName = {}; // { phaseName: { actualMins, budgetMins, projectCount } }
+  projects.forEach(proj => {
+    const phases = proj.phases || {};
+    Object.keys(phases).forEach(phaseName => {
+      const budgetHours = phases[phaseName] || 0;
+      if (!budgetHours) return; // no budget set for this phase -- nothing to compare
+      const actualMins = (byProjectPhase[proj.id] && byProjectPhase[proj.id][phaseName]) || 0;
+      if (!byPhaseName[phaseName]) byPhaseName[phaseName] = { actualMins: 0, budgetMins: 0, projectCount: 0 };
+      byPhaseName[phaseName].actualMins += actualMins;
+      byPhaseName[phaseName].budgetMins += budgetHours * 60;
+      byPhaseName[phaseName].projectCount += 1;
+    });
+  });
+  return byPhaseName;
+}
+
+async function renderStudioHealth() {
+  const container = document.getElementById('sh-projecthealth');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  let projects, logs;
+  try {
+    const [projSnap, logSnap] = await Promise.all([
+      db.collection('projects').get({ source: 'server' }),
+      db.collection('timeLogs').get({ source: 'server' }),
+    ]);
+    projects = []; projSnap.forEach(d => projects.push({ ...d.data(), id: d.id }));
+    logs = []; logSnap.forEach(d => logs.push({ ...d.data(), id: d.id }));
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+
+  const byProjectPhase = sumHoursByProjectPhase(logs);
+  const bias = computeEstimationBias(projects, byProjectPhase);
+
+  // Estimation-bias flags: phase TYPES running >10% over/under in
+  // aggregate across projects that have budgeted them (same 10%
+  // tolerance already used elsewhere in this file for per-person budget
+  // adherence, index.html's Appraisal scoring -- reused here for
+  // consistency, not a new arbitrary threshold).
+  const biasFlags = [];
+  Object.keys(bias).sort().forEach(phaseName => {
+    const b = bias[phaseName];
+    if (b.budgetMins <= 0) return;
+    const pct = b.actualMins / b.budgetMins;
+    if (pct > 1.10) {
+      biasFlags.push(`${phaseName} phases are running over budget on average (${Math.round(pct * 100)}% of budgeted hours across ${b.projectCount} project${b.projectCount > 1 ? 's' : ''}) — worth a look.`);
+    } else if (pct < 0.70 && b.actualMins > 0) {
+      biasFlags.push(`${phaseName} phases are finishing well under budget on average (${Math.round(pct * 100)}% of budgeted hours across ${b.projectCount} project${b.projectCount > 1 ? 's' : ''}) — worth checking whether that's efficiency or under-scoped budgets.`);
+    }
+  });
+
+  // Live burn: phases that are CURRENTLY open (a doc still inProgress)
+  // and already at or past 90% of their own budget -- the early-warning
+  // case, project-level, no person named.
+  const liveFlags = [];
+  projects.forEach(proj => {
+    const phases = proj.phases || {};
+    Object.keys(phases).forEach(phaseName => {
+      const budgetHours = phases[phaseName] || 0;
+      if (!budgetHours) return;
+      const isLive = logs.some(l => l.projectId === proj.id && l.phase === phaseName && l.inProgress === true);
+      if (!isLive) return;
+      const actualMins = (byProjectPhase[proj.id] && byProjectPhase[proj.id][phaseName]) || 0;
+      const pct = actualMins / (budgetHours * 60);
+      if (pct >= 0.90) {
+        liveFlags.push(`${proj.name || proj.id} — ${phaseName} is at ${Math.round(pct * 100)}% of budget and still running.`);
+      }
+    });
+  });
+
+  // Reference table: grouped BY PROJECT, in whatever order projects
+  // naturally come back in -- deliberately not sorted by overrun%, which
+  // would read as a ranking regardless of any caption above it.
+  let tableRows = '';
+  projects.forEach(proj => {
+    const phases = proj.phases || {};
+    const phaseNames = Object.keys(phases).filter(p => phases[p]);
+    if (phaseNames.length === 0) return;
+    tableRows += `<tr class="sh-proj-group"><td colspan="4">${proj.name || proj.id}</td></tr>`;
+    phaseNames.forEach(phaseName => {
+      const budgetHours = phases[phaseName];
+      const actualMins = (byProjectPhase[proj.id] && byProjectPhase[proj.id][phaseName]) || 0;
+      const actualHours = actualMins / 60;
+      const pct = budgetHours > 0 ? Math.round((actualHours / budgetHours) * 100) : 0;
+      tableRows += `<tr><td>${phaseName}</td><td class="sh-num">${actualHours.toFixed(1)}h</td><td class="sh-num">${budgetHours}h</td><td class="sh-num">${pct}%</td></tr>`;
+    });
+  });
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shRefreshLink" style="color:#A96E35;">refresh</a></div>
+    <div class="card">
+      <div class="card-title">📊 Estimation Bias — which phase types run over or under, across projects</div>
+      ${biasFlags.length ? biasFlags.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f}</div></div>`).join('') : '<div class="sh-flag-none">No phase type is running meaningfully over or under budget right now.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">⏱ Live Project Burn — open phases nearing or past budget</div>
+      ${liveFlags.length ? liveFlags.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f}</div></div>`).join('') : '<div class="sh-flag-none">No currently-open phase is near its budget.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">📁 Actual vs. Budget, by Project</div>
+      <table class="sh-table">
+        <thead><tr><th>Phase</th><th style="text-align:right">Actual</th><th style="text-align:right">Budget</th><th style="text-align:right">%</th></tr></thead>
+        <tbody>${tableRows || '<tr><td colspan="4" class="sh-flag-none">No budgeted phases found.</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+  const refreshLink = document.getElementById('shRefreshLink');
+  if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderStudioHealth(); });
+}
+
+// ═══════════════════════════════════════════════════════
+// V16.13 (reshaped 2026-08-28, after a second real-data review):
+// Individual Insight now leads with MARGIN RISK -- project/phase
+// economics, not individual performance. The owner bills roughly fixed
+// revenue, so hours running over budget is lost margin, full stop, not
+// a person-quality question. This is a deliberate reframe of what
+// V16.12 called "estimation-vs-actual, per person, primary" -- the
+// BURDWAN-RD clustering that used to surface as three separate
+// person-level "worth a conversation" sentences now surfaces ONCE, at
+// the project level, with people-on-it as drill-down "why" detail
+// underneath, not three individual flags.
+//
+// Attendance (#2, biometric IN-time) is STILL deliberately held out --
+// unchanged from V16.11/12, still no plumbing, still not persisted
+// anywhere in this system today.
+//
+// Same pure-read shape as every layer so far: fresh source:'server'
+// reads on open, zero writes, no schema change. Person-level patterns
+// (workload, the estimation recency-pattern) still compare each person
+// ONLY to their own history -- never a shared target, never each other.
+//
+// TWO drill-down axes now, both still one-at-a-time and non-comparative:
+// "Look at One Project" (margin risk -- budget burn bars, plus who's on
+// it) and "Look at One Person" (versatility/workload/leave-heatmap).
+//
+// STRUCTURAL anti-scoreboard mechanism, extended to the new visuals, with
+// ONE explicit, deliberate exception: flag sentences and the "Look at
+// One Person" drill-down never show two people's numbers together --
+// unchanged. The "Look at One Project" contributor list is DIFFERENT ON
+// PURPOSE: showing who worked on a shared over-budget phase is project
+// staffing context ("who's on this, for the why conversation"), not a
+// performance comparison between them -- the owner asked for this
+// explicitly, and it doesn't reopen the person-ranking risk because the
+// signal being surfaced is about the PROJECT, not about comparing the
+// people on it to each other.
+// ═══════════════════════════════════════════════════════
+
+const SH_WORKLOAD_WINDOWS = [7, 30]; // selectable window sizes, in days
+const SH_PRIOR_WINDOW_COUNT = 3;     // how many equal-length prior windows form "their own normal"
+// V16.12 (tuned against real data, 2026-08-28): raised HARD from the
+// original 1.3x/0.7x -- that band fired on ordinary week-to-week
+// variation (Souvik at 1.09x his own normal got flagged -- noise, not
+// signal). A workload flag now means "genuinely unusual for THIS
+// person," not "this week was a bit different": normal +-30% swings
+// (0.7x-1.3x) stay fully silent, and the quiet zone is wider still
+// (0.4x-2.0x) so only a real sustained drop (possible disengagement) or
+// spike (burnout risk) fires.
+const SH_WORKLOAD_SPIKE_RATIO = 2.0; // >= double their own normal
+const SH_WORKLOAD_DROP_RATIO = 0.4;  // <= 40% of their own normal
+const SH_EST_MIN_CONTRIBUTION_PCT = 0.20; // meaningful-contributor threshold -- no drive-by dilution.
+// Deliberately KEPT at 20% (not lowered to match Versatility's 10%) --
+// investigated directly against real data (2026-08-31) and confirmed NOT
+// the bottleneck here: sweeping 20%/15%/10% with the count threshold held
+// fixed produced the IDENTICAL "insufficient history" count at every
+// percentage (8/9 people, unchanged). Estimation asks a different question
+// than Versatility ("was this person responsible enough for this phase's
+// over/under-run to hold them to it," not "was this a meaningful chunk of
+// THEIR OWN time") -- correctly excludes drive-by touches (e.g. Angana's
+// real 6.6%-of-total phase), and it isn't what's excluding people.
+// V16.21 (real-data investigation, 2026-08-31): the count threshold --
+// need SH_EST_RECENT_COUNT + SH_EST_MIN_HISTORICAL_COUNT qualifying
+// phase-instances total -- was the ACTUAL bottleneck, not the
+// contribution-%. At the OLD 5+3 (8 total), 8 of 9 people showed "not
+// enough history" -- the metric almost never fired. Swept several count
+// combinations against real data with the 20% filter held fixed: 4+2 (6
+// total) dropped it to 5/9; 3+2 (5 total) to 4/9; 2+2 (4 total) rescued
+// NOBODY further than 3+2 did -- confirming 3+2 is the real floor of who
+// has genuine multi-phase history here, not an arbitrary stopping point.
+// Verified the 5 newly-qualifying people's actual computed patterns are
+// sane, not noise (real ratios, e.g. Tasmin's 100%/0% recent-vs-historical
+// split driven by real 243%/112%/120% overruns). People who still fall
+// short at 3+2 (Angana/Souvik/Taskiya) are genuinely short -- each has
+// only 1-2 qualifying phases ever, structurally incapable of reaching 5
+// regardless of threshold (see the budget-completeness finding logged
+// alongside this fix for a separate, non-threshold explanation of part of
+// why: ~48% of all logged phase-hours sit on projects with no budget
+// entered at all, invisible to this metric independent of any threshold).
+const SH_EST_RECENT_COUNT = 3;            // "last N" phase-instances
+const SH_EST_MIN_HISTORICAL_COUNT = 2;    // minimum historical sample before drawing any comparison
+// V16.13: the bar for a REAL margin problem -- reused for both the new
+// project-level Margin Risk ranking and the (still-kept) person-level
+// estimation recency-pattern's own internal over/under check. Kept as
+// one constant rather than two so the two signals stay consistent with
+// each other about what "significantly over" means.
+const SH_EST_SIGNIFICANT_OVER_RATIO = 1.5;
+const SH_TREND_WEEKS = 12;   // workload trend sparkline: last N weeks, one person's own series only
+const SH_HEATMAP_DAYS = 120; // leave-near-holiday heatmap: last N days, one person's own calendar only
+// V16.17 (real-data investigation, 2026-08-30): Versatility's meaningful-
+// contribution threshold. Deliberately its OWN constant, not a reuse of
+// SH_EST_MIN_CONTRIBUTION_PCT (0.20) -- that one measures a different
+// question (% of a PHASE's total hours, "was this person a major driver
+// of this phase") and is scoped per phase-instance, not per project.
+// This one measures "was this a meaningful chunk of THEIR OWN project
+// time" -- self-baselined against the person's own total, exactly like
+// every other Individual Insight/Employee Review signal, never an
+// external/absolute cutoff. Set lower than the estimation threshold on
+// purpose: real data showed 20% over-punishes people who are genuinely,
+// substantially active across several projects at once (Suravi's real
+// 25%/17%/15%/13%/11% split would collapse to just 1 project at a 20%
+// bar, erasing 4 real month-long commitments) while 10% still removes
+// the drive-by-help inflation (Angana's 11 touched projects -> 3
+// meaningful ones over a quarter, the other 8 all under 10%, one as low
+// as 0.3%).
+const SH_VERSATILITY_MIN_PCT = 0.10;
+
+let shCachedInsightData = null; // { projects, logs, leaveRequestsFresh, allUsers, holidaysFresh } -- set once per fetch, re-rendered from on selector changes
+let shSelectedProjectId = '';
+let shSelectedPersonId = '';
+let shSelectedWindowDays = 30;
+
+// Rolling-window date-string bounds [start, end) -- deliberately NOT
+// calendar-month boundaries, which would make a partial current month
+// look artificially "light" against full prior months. offsetPeriods=0
+// is the current window; 1, 2, 3... are equal-length windows immediately
+// before it, all real, none partial. Pure -- `today` passed in as an arg.
+// Pure: formats a Date's LOCAL calendar-day components as 'YYYY-MM-DD' --
+// deliberately NOT d.toISOString().slice(0,10), which converts to UTC
+// first and silently rolls the date back a day for any local time before
+// UTC (IST midnight-05:29 becomes the PREVIOUS UTC day) -- the exact
+// pitfall fmt() itself was already written to avoid (see the comment at
+// its own definition, a few hundred lines up). Every local-day
+// computation in this section goes through this one function so that
+// mistake can't recur independently at each call site.
+function toLocalDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getWindowBounds(windowDays, offsetPeriods, today) {
+  const end = new Date(today);
+  end.setDate(end.getDate() - windowDays * offsetPeriods);
+  const start = new Date(end);
+  start.setDate(start.getDate() - windowDays);
+  return { start: toLocalDateStr(start), end: toLocalDateStr(end) };
+}
+
+// Pure: sums productive minutes for one person within [start, end).
+function productiveMinsInWindow(logs, userId, start, end) {
+  return logs
+    .filter(l => l.userId === userId && l.productive && l.date >= start && l.date < end)
+    .reduce((s, l) => s + (l.durationMins || 0), 0);
+}
+
+// Pure: approved-leave day count for one person, clamped to [start, end).
+function approvedLeaveDaysInWindow(leaveRequestsList, userId, start, end) {
+  let days = 0;
+  leaveRequestsList.filter(l => l.userId === userId && l.status === 'approved').forEach(l => {
+    if (!l.startDate || !l.endDate) return;
+    // startDate/endDate are BOTH inclusive (a leave request from the 10th
+    // to the 12th means 3 days off); the window's own `end` is exclusive.
+    // Walk from max(leave.start, window.start) through leave.end
+    // inclusive, only counting days that also fall inside [start, end).
+    const s = l.startDate > start ? l.startDate : start;
+    let d = new Date(s + 'T00:00:00');
+    const leaveEnd = new Date(l.endDate + 'T00:00:00');
+    while (d <= leaveEnd) {
+      const ds = toLocalDateStr(d);
+      if (ds >= start && ds < end) days++;
+      d.setDate(d.getDate() + 1);
+    }
+  });
+  return days;
+}
+
+// Pure: current-window hours vs. the average of SH_PRIOR_WINDOW_COUNT
+// equal-length prior windows -- the person's OWN normal, never a shared
+// target. Requires at least one prior window with real data to flag at
+// all; otherwise this is genuinely their first tracked period and
+// nothing can honestly be said yet.
+function computeWorkloadPattern(logs, userId, windowDays, priorWindowCount, today) {
+  const current = getWindowBounds(windowDays, 0, today);
+  const currentMins = productiveMinsInWindow(logs, userId, current.start, current.end);
+
+  const priorMinsList = [];
+  for (let i = 1; i <= priorWindowCount; i++) {
+    const w = getWindowBounds(windowDays, i, today);
+    priorMinsList.push(productiveMinsInWindow(logs, userId, w.start, w.end));
+  }
+  const hasPriorData = priorMinsList.some(m => m > 0);
+  if (!hasPriorData) {
+    return { currentMins, avgPriorMins: null, flagged: false, direction: null, insufficientHistory: true, currentWindow: current };
+  }
+  const avgPriorMins = priorMinsList.reduce((s, m) => s + m, 0) / priorMinsList.length;
+  let flagged = false, direction = null;
+  if (avgPriorMins > 0) {
+    const ratio = currentMins / avgPriorMins;
+    if (ratio >= SH_WORKLOAD_SPIKE_RATIO) { flagged = true; direction = 'above'; }
+    else if (ratio <= SH_WORKLOAD_DROP_RATIO) { flagged = true; direction = 'below'; }
+  }
+  return { currentMins, avgPriorMins, flagged, direction, insufficientHistory: false, currentWindow: current };
+}
+
+// Pure: groups timeLogs into phase-instances (projectId+phase, budget>0
+// only) with per-person minute contributions, each instance's overall
+// actual/budget ratio, and its most-recent activity date (for recency
+// sorting). Shared across every person -- computed once per render, not
+// once per person, so it can't drift between people shown in the same view.
+function computePhaseContributions(logs, projects) {
+  const instances = {};
+  projects.forEach(proj => {
+    const phases = proj.phases || {};
+    Object.keys(phases).forEach(phaseName => {
+      const budgetHours = phases[phaseName] || 0;
+      if (!budgetHours) return;
+      instances[proj.id + '|' + phaseName] = {
+        projectId: proj.id, projectName: proj.name || proj.id, phase: phaseName,
+        budgetMins: budgetHours * 60, totalActualMins: 0, byPerson: {}, mostRecentDate: null,
+      };
+    });
+  });
+  logs.forEach(l => {
+    if (!l.projectId || !l.phase) return;
+    const inst = instances[l.projectId + '|' + l.phase];
+    if (!inst) return; // no budget set for this phase -- not tracked here, same as Layer A
+    inst.totalActualMins += (l.durationMins || 0);
+    inst.byPerson[l.userId] = (inst.byPerson[l.userId] || 0) + (l.durationMins || 0);
+    if (l.date && (!inst.mostRecentDate || l.date > inst.mostRecentDate)) inst.mostRecentDate = l.date;
+  });
+  return Object.values(instances).filter(inst => inst.totalActualMins > 0);
+}
+
+// Pure: a person's estimation-vs-actual PATTERN. Deliberately never
+// computes a "share of the overrun" for a shared phase -- only whether
+// THIS person was a meaningful contributor (>= minContributionPct of
+// that instance's total hours), then compares their most-recent N such
+// instances' over-run RATE against their own historical rate. Raw
+// per-instance data (their hours, total hours, budget, ratio) is
+// returned unmodified for direct display -- no attribution math applied
+// to it anywhere.
+function computeEstimationPattern(phaseInstances, userId, minContributionPct, recentCount, minHistoricalCount) {
+  const contributed = phaseInstances
+    .filter(inst => inst.totalActualMins > 0 && (inst.byPerson[userId] || 0) / inst.totalActualMins >= minContributionPct)
+    .map(inst => ({ ...inst, ratio: inst.totalActualMins / inst.budgetMins, personMins: inst.byPerson[userId] }))
+    .sort((a, b) => (b.mostRecentDate || '').localeCompare(a.mostRecentDate || ''));
+
+  const recent = contributed.slice(0, recentCount);
+  const historical = contributed.slice(recentCount);
+
+  if (recent.length < recentCount || historical.length < minHistoricalCount) {
+    return { contributed, recent, historical, flagged: false, insufficientHistory: true, recentOverRate: null, historicalOverRate: null };
+  }
+  const overRate = (arr) => arr.filter(x => x.ratio > 1.10).length / arr.length;
+  const recentOverRate = overRate(recent);
+  const historicalOverRate = overRate(historical);
+  const flagged = (recentOverRate - historicalOverRate) >= 0.4;
+  return { contributed, recent, historical, flagged, insufficientHistory: false, recentOverRate, historicalOverRate };
+}
+
+// V16.13: the PRIMARY signal, pure, and now PROJECT-level. Every
+// budgeted phase-instance running significantly over budget, ranked by
+// ABSOLUTE hours over -- the direct proxy for margin lost, since revenue
+// is roughly fixed. Deliberately NOT ranked by percentage: a small phase
+// at 288% can represent fewer real hours (less real money) than a large
+// phase at 130%. Ranking PROJECTS by severity is fine -- unlike ranking
+// PEOPLE, it was never what the anti-scoreboard rule protected against
+// (Layer A's own "over-budget is a project signal" already established
+// this). Supersedes V16.12's significantlyOverBudgetInstances(), which
+// this replaces at the project level -- see the header above for why.
+function computeMarginRiskRanking(phaseInstances, minRatio) {
+  return phaseInstances
+    .filter(inst => inst.budgetMins > 0 && inst.totalActualMins / inst.budgetMins > minRatio)
+    .map(inst => ({
+      ...inst,
+      ratio: inst.totalActualMins / inst.budgetMins,
+      hoursOver: (inst.totalActualMins - inst.budgetMins) / 60,
+    }))
+    .sort((a, b) => b.hoursOver - a.hoursOver);
+}
+
+// Pure: which people were MEANINGFUL contributors (>= minContributionPct)
+// to one specific phase-instance -- the "who's on this, for the why
+// conversation" detail shown under a Margin Risk project. Raw hours
+// only, sorted by their own hours purely for legibility (most-involved
+// first) -- NOT a quality ranking; see the file-level header for why
+// this deliberately differs from the person-view's no-side-by-side rule.
+function meaningfulContributorsFor(phaseInstance, minContributionPct, allUsers) {
+  return Object.keys(phaseInstance.byPerson)
+    .filter(uid => phaseInstance.byPerson[uid] / phaseInstance.totalActualMins >= minContributionPct)
+    .map(uid => ({ userId: uid, name: (allUsers.find(u => u.id === uid) || {}).name || uid, hours: phaseInstance.byPerson[uid] / 60 }))
+    .sort((a, b) => b.hours - a.hours);
+}
+
+// Pure: MEANINGFUL active-project count for one person within
+// [start, end) -- V16.17, replaces the old raw distinctProjectCount()
+// (any project with >=1 logged minute, no threshold, and no productive
+// check -- confirmed by real-data investigation to badly inflate on
+// drive-by help: Angana showed "11 projects" over a quarter when only 3
+// were a meaningful chunk of her own time, the other 8 ranging down to
+// a single 0.3%-of-her-time touch). A project now counts only if this
+// person's PRODUCTIVE minutes on it are >= minPct of their own total
+// productive project minutes in the window -- self-baselined against
+// their OWN total, not the project's total (see the SH_VERSATILITY_MIN_PCT
+// comment for why this differs from the estimation metric's threshold).
+// Non-productive entries (e.g. a project-tagged admin note) no longer
+// count toward involvement at all, on either side of the ratio.
+function meaningfulProjectCount(logs, userId, start, end, minPct) {
+  const perProject = {};
+  let personTotal = 0;
+  logs.filter(l => l.userId === userId && l.projectId && l.productive && l.date >= start && l.date < end)
+    .forEach(l => {
+      const mins = l.durationMins || 0;
+      perProject[l.projectId] = (perProject[l.projectId] || 0) + mins;
+      personTotal += mins;
+    });
+  if (personTotal === 0) return 0;
+  return Object.values(perProject).filter(mins => mins / personTotal >= minPct).length;
+}
+
+// Pure: Versatility -- current-window MEANINGFUL-project count vs. the
+// average of SH_PRIOR_WINDOW_COUNT prior windows, same self-baseline
+// shape as computeWorkloadPattern(). V16.17: both the current count and
+// the prior-window average now use the same meaningfulProjectCount()
+// definition (minPct-thresholded) -- deliberately not a thresholded
+// current count compared against an unthresholded historical average,
+// which would silently reintroduce the same inflation on the "own avg"
+// side that this fix removes from the current side. Deliberately does
+// NOT set a flagged/direction outcome -- this is framed as a pattern to
+// interpret (potentially positive, could also mean spread thin), not a
+// proactive alert, so it's shown only as a stat in the person drill-down,
+// never as its own flag sentence.
+function computeVersatilityStat(logs, userId, windowDays, priorWindowCount, today, minPct) {
+  const current = getWindowBounds(windowDays, 0, today);
+  const currentCount = meaningfulProjectCount(logs, userId, current.start, current.end, minPct);
+  const priorCounts = [];
+  for (let i = 1; i <= priorWindowCount; i++) {
+    const w = getWindowBounds(windowDays, i, today);
+    priorCounts.push(meaningfulProjectCount(logs, userId, w.start, w.end, minPct));
+  }
+  const hasPriorData = priorCounts.some(c => c > 0);
+  if (!hasPriorData) return { currentCount, avgPriorCount: null, insufficientHistory: true };
+  const avgPriorCount = priorCounts.reduce((s, c) => s + c, 0) / priorCounts.length;
+  return { currentCount, avgPriorCount, insufficientHistory: false };
+}
+
+// Pure: is this specific calendar date (as a 'YYYY-MM-DD' string) a
+// closed day -- Sunday, a 2nd/4th Saturday (this app's existing sandwich-
+// rule definition, ported verbatim from is24Sat()), or a real holiday
+// from the holidaysList passed in? A pure port of the existing
+// isClosedDay()/is24Sat()/isHoliday() globals (which read the cached
+// `holidays` array) -- needed as a pure function here because Individual
+// Insight reads fresh data, not the cached global.
+function isClosedDayStr(dateStr, holidaysList) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const dow = d.getDay();
+  if (dow === 0) return true; // Sunday
+  if (dow === 6) {
+    const weekOfMonth = Math.floor((d.getDate() - 1) / 7) + 1;
+    if (weekOfMonth === 2 || weekOfMonth === 4) return true; // 2nd/4th Saturday only, matching is24Sat() exactly
+  }
+  return holidaysList.some(h => h.date === dateStr);
+}
+
+function addDaysToDateStr(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return toLocalDateStr(d);
+}
+
+// Pure: which of a person's approved leave requests are adjacent to a
+// weekend/holiday -- the day immediately before it starts, or
+// immediately after it ends, is closed. The "bridge leave" shape (a day
+// taken to extend a long weekend). Deliberately NEUTRAL, coverage-
+// planning framing only -- this is never surfaced as a flag sentence,
+// see renderIndividualInsightBody() below.
+function leaveNearHolidayInstances(leaveRequestsList, userId, holidaysList) {
+  return leaveRequestsList
+    .filter(l => l.userId === userId && l.status === 'approved' && l.startDate && l.endDate)
+    .filter(l => isClosedDayStr(addDaysToDateStr(l.startDate, -1), holidaysList) || isClosedDayStr(addDaysToDateStr(l.endDate, 1), holidaysList));
+}
+
+// Pure: one person's own last `dayCount` days, classified normal/
+// weekend/holiday/leave, oldest-first -- feeds the heatmap visual. Leave
+// takes precedence in classification even if it happens to also be a
+// weekend/holiday (the interesting fact to show is "they were on leave,"
+// not "that day happened to be closed anyway").
+function buildLeaveHeatmapDays(leaveRequestsList, holidaysList, userId, dayCount, today) {
+  const days = [];
+  for (let i = dayCount - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const ds = toLocalDateStr(d);
+    let type = 'normal';
+    if (holidaysList.some(h => h.date === ds)) type = 'holiday';
+    else if (isClosedDayStr(ds, holidaysList)) type = 'weekend';
+    const onLeave = leaveRequestsList.some(l => l.userId === userId && l.status === 'approved' && l.startDate <= ds && ds <= l.endDate);
+    if (onLeave) type = 'leave';
+    days.push({ date: ds, type });
+  }
+  return days;
+}
+
+// Pure: one person's own last `weekCount` weeks of productive hours,
+// oldest-first -- a purely VISUAL series (the workload FLAG itself still
+// comes from computeWorkloadPattern()'s current-vs-prior-average
+// comparison; this is a finer-grained trend for the sparkline only).
+function computeWorkloadTrend(logs, userId, weekCount, today) {
+  const points = [];
+  for (let i = weekCount - 1; i >= 0; i--) {
+    const w = getWindowBounds(7, i, today);
+    points.push({ weekStart: w.start, hours: productiveMinsInWindow(logs, userId, w.start, w.end) / 60 });
+  }
+  return points;
+}
+
+// Presentational (deterministic string builders, not business logic) --
+// hand-built inline SVG, no charting library. Both take exactly ONE
+// person's own data and nothing else -- single series / single calendar,
+// confirmed by fixture, never two people on the same chart.
+function renderWorkloadTrendSVG(points) {
+  const w = 260, h = 50, pad = 4;
+  const max = Math.max(1, ...points.map(p => p.hours));
+  const n = Math.max(1, points.length - 1);
+  const stepX = (w - pad * 2) / n;
+  const barW = Math.max(2, stepX * 0.6);
+  const bars = points.map((p, i) => {
+    const x = pad + i * stepX - barW / 2;
+    const barH = Math.max(1, (p.hours / max) * (h - pad * 2));
+    const y = h - pad - barH;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" fill="#A96E35" opacity="0.55" rx="1"></rect>`;
+  }).join('');
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;">${bars}</svg>`;
+}
+
+function renderLeaveHeatmapSVG(days) {
+  const cell = 10, gap = 2, cols = 14;
+  const colorFor = { leave: '#D8B98A', holiday: '#B9CFE0', weekend: '#E8E2D8', normal: '#F5F2ED' };
+  const rows = Math.ceil(days.length / cols);
+  const rects = days.map((d, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = col * (cell + gap), y = row * (cell + gap);
+    return `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" fill="${colorFor[d.type]}"></rect>`;
+  }).join('');
+  const w = cols * (cell + gap), h = rows * (cell + gap);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;">${rects}</svg>`;
+}
+
+async function renderIndividualInsight() {
+  const container = document.getElementById('sh-individualinsight');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  try {
+    const [projSnap, logSnap, leaveSnap, userSnap, companySnap] = await Promise.all([
+      db.collection('projects').get({ source: 'server' }),
+      db.collection('timeLogs').get({ source: 'server' }),
+      db.collection('leaveRequests').get({ source: 'server' }),
+      db.collection('users').get({ source: 'server' }),
+      // V16.13: the ONE non-collection read this feature needs -- holidays
+      // lives as a field on the legacy single companyData/squareDB doc
+      // (predates the per-collection migration projects/timeLogs/
+      // leaveRequests/users already went through), not its own
+      // collection. Still a pure, fresh, targeted source:'server' read --
+      // no new plumbing, just a different existing read shape.
+      db.collection('companyData').doc('squareDB').get({ source: 'server' }),
+    ]);
+    const projects = []; projSnap.forEach(d => projects.push({ ...d.data(), id: d.id }));
+    const logs = []; logSnap.forEach(d => logs.push({ ...d.data(), id: d.id }));
+    const leaveRequestsFresh = []; leaveSnap.forEach(d => leaveRequestsFresh.push({ ...d.data(), id: d.id }));
+    const allUsers = []; userSnap.forEach(d => allUsers.push({ id: d.id, name: d.data().name, isAdmin: d.data().isAdmin }));
+    const holidaysFresh = (companySnap.exists ? companySnap.data().holidays : null) || [];
+    shCachedInsightData = { projects, logs, leaveRequestsFresh, allUsers, holidaysFresh };
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+  renderIndividualInsightBody();
+}
+
+// Renders from shCachedInsightData + the current selector state --
+// deliberately does NOT re-fetch (picking a project/person or changing
+// the window is a local view change, not new data; only the tab-open and
+// the explicit refresh link re-fetch, matching Project Health's own
+// pattern).
+function renderIndividualInsightBody() {
+  const container = document.getElementById('sh-individualinsight');
+  const data = shCachedInsightData;
+  if (!container || !data) return;
+  const { projects, logs, leaveRequestsFresh, allUsers, holidaysFresh } = data;
+  const today = new Date();
+
+  const phaseInstances = computePhaseContributions(logs, projects);
+  const peopleWithData = allUsers.filter(u => !u.isAdmin && logs.some(l => l.userId === u.id));
+
+  // ── PRIMARY: Margin Risk (project-level, see file header) ──────
+  const marginRisk = computeMarginRiskRanking(phaseInstances, SH_EST_SIGNIFICANT_OVER_RATIO);
+  const marginRiskSentences = marginRisk.map(inst =>
+    `${inst.projectName} — ${inst.phase} is running ${Math.round(inst.hoursOver)}h over its ${Math.round(inst.budgetMins / 60)}h budget (${Math.round(inst.ratio * 100)}%) — worth a look at margin.`
+  ); // already sorted by hoursOver descending -- a PROJECT severity ranking, not a person one, so this ordering is fine (see file header)
+
+  // ── SECONDARY: person-level patterns, quiet by design ───────────
+  const secondarySentences = [];
+  const patternsByPerson = {};
+  peopleWithData.forEach(u => {
+    const wl = computeWorkloadPattern(logs, u.id, shSelectedWindowDays, SH_PRIOR_WINDOW_COUNT, today);
+    const est = computeEstimationPattern(phaseInstances, u.id, SH_EST_MIN_CONTRIBUTION_PCT, SH_EST_RECENT_COUNT, SH_EST_MIN_HISTORICAL_COUNT);
+    const vs = computeVersatilityStat(logs, u.id, shSelectedWindowDays, SH_PRIOR_WINDOW_COUNT, today, SH_VERSATILITY_MIN_PCT);
+    patternsByPerson[u.id] = { workload: wl, estimation: est, versatility: vs };
+    if (wl.flagged) {
+      secondarySentences.push({ name: u.name, text: `${u.name}'s workload this period is well ${wl.direction} their own normal — worth a look.` });
+    }
+    if (est.flagged) {
+      const recentOverCount = est.recent.filter(x => x.ratio > 1.10).length;
+      const historicalOverCount = est.historical.filter(x => x.ratio > 1.10).length;
+      secondarySentences.push({ name: u.name, text: `Phases ${u.name} has meaningfully worked on have run over budget in ${recentOverCount} of their last ${est.recent.length}, versus ${historicalOverCount} of ${est.historical.length} historically — worth a conversation.` });
+    }
+  });
+  secondarySentences.sort((a, b) => a.name.localeCompare(b.name)); // alphabetical, NEVER by magnitude -- unchanged rule for PEOPLE
+
+  // ── "Look at One Project" (NEW, margin-risk drill-down) ─────────
+  const projectsWithBudgets = projects.filter(p => Object.values(p.phases || {}).some(v => v > 0));
+  const projectOptions = projectsWithBudgets
+    .slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .map(p => `<option value="${p.id}" ${p.id === shSelectedProjectId ? 'selected' : ''}>${p.name || p.id}</option>`).join('');
+
+  let selectedProjectHTML = '<div class="sh-flag-none">Pick a project above to see its budget burn.</div>';
+  const selectedProject = shSelectedProjectId ? projectsWithBudgets.find(p => p.id === shSelectedProjectId) : null;
+  if (selectedProject) {
+    const phaseRows = Object.keys(selectedProject.phases || {}).filter(ph => selectedProject.phases[ph] > 0).map(ph => {
+      const inst = phaseInstances.find(x => x.projectId === selectedProject.id && x.phase === ph);
+      const actualMins = inst ? inst.totalActualMins : 0;
+      const budgetHours = selectedProject.phases[ph];
+      const pct = budgetHours > 0 ? Math.round((actualMins / 60 / budgetHours) * 100) : 0;
+      const status = pct >= 100 ? 'over' : pct >= 80 ? 'near' : 'ok';
+      // V16.13: reuses Projects & Budget's existing .phase-bar-wrap/
+      // .phase-bar-fill.{over|near|ok} pattern verbatim -- deliberate,
+      // this visual is project-level (see file header for why that's OK).
+      const bar = `<div class="phase-row"><span class="phase-name">${ph}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${status}" style="width:${Math.min(100, pct)}%;"></div></div><span class="phase-nums">${(actualMins / 60).toFixed(1)}h / <strong>${budgetHours}h</strong> (${pct}%)</span></div>`;
+      const contributors = inst ? meaningfulContributorsFor(inst, SH_EST_MIN_CONTRIBUTION_PCT, allUsers) : [];
+      // V16.13: multiple people's raw hours, together, on purpose -- this
+      // IS the "who's on it, for the why conversation" detail the owner
+      // explicitly asked for. Project staffing context, not a
+      // person-to-person performance comparison -- see file header.
+      const contribHTML = contributors.length
+        ? `<div style="font-size:12px;color:#8A7E74;margin:2px 0 12px;">Who's on this: ${contributors.map(c => `${c.name} (${c.hours.toFixed(1)}h)`).join(', ')}</div>`
+        : '<div style="font-size:12px;color:#8A7E74;margin:2px 0 12px;">No meaningful (≥20%) contributor on record.</div>';
+      return bar + contribHTML;
+    }).join('');
+    selectedProjectHTML = `<div style="margin-bottom:12px;"><strong>${selectedProject.name}</strong> — budget burn by phase</div>${phaseRows}`;
+  }
+
+  // ── "Look at One Person" (existing axis, extended) ──────────────
+  const peopleOptions = peopleWithData
+    .slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map(u => `<option value="${u.id}" ${u.id === shSelectedPersonId ? 'selected' : ''}>${u.name}</option>`).join('');
+
+  let selectedPersonHTML = '<div class="sh-flag-none">Pick a name above to see their numbers.</div>';
+  if (shSelectedPersonId && patternsByPerson[shSelectedPersonId]) {
+    const u = peopleWithData.find(p => p.id === shSelectedPersonId);
+    const { workload: wl, estimation: est, versatility: vs } = patternsByPerson[shSelectedPersonId];
+    const leaveDays = approvedLeaveDaysInWindow(leaveRequestsFresh, shSelectedPersonId, wl.currentWindow.start, wl.currentWindow.end);
+
+    let workloadHTML;
+    if (wl.insufficientHistory) {
+      workloadHTML = `<p>${(wl.currentMins / 60).toFixed(1)}h logged in the last ${shSelectedWindowDays} days. Not enough prior history yet to compare against their own normal.</p>`;
+    } else {
+      workloadHTML = `<p>${(wl.currentMins / 60).toFixed(1)}h logged in the last ${shSelectedWindowDays} days, versus their own average of ${(wl.avgPriorMins / 60).toFixed(1)}h over the same length window.</p>`;
+    }
+    if (leaveDays > 0) workloadHTML += `<p style="color:#8A7E74;">${leaveDays} day${leaveDays > 1 ? 's' : ''} of approved leave in this period.</p>`;
+    workloadHTML += renderWorkloadTrendSVG(computeWorkloadTrend(logs, shSelectedPersonId, SH_TREND_WEEKS, today));
+
+    let versatilityHTML;
+    if (vs.insufficientHistory) {
+      versatilityHTML = `<p>Active on ${vs.currentCount} project${vs.currentCount === 1 ? '' : 's'} in the last ${shSelectedWindowDays} days. Not enough prior history yet to compare.</p>`;
+    } else {
+      versatilityHTML = `<p>Active on ${vs.currentCount} project${vs.currentCount === 1 ? '' : 's'} in the last ${shSelectedWindowDays} days, versus their own average of ${vs.avgPriorCount.toFixed(1)} over the same length window. Could mean versatile utility across projects, or spread thin — worth understanding why, not a verdict either way.</p>`;
+    }
+
+    let estRows = '';
+    const rowsFor = (arr) => arr.map(x => `<tr><td>${x.projectName} — ${x.phase}</td><td class="sh-num">${(x.personMins / 60).toFixed(1)}h</td><td class="sh-num">${(x.totalActualMins / 60).toFixed(1)}h</td><td class="sh-num">${(x.budgetMins / 60).toFixed(0)}h</td><td class="sh-num">${Math.round(x.ratio * 100)}%</td></tr>`).join('');
+    if (est.contributed.length === 0) {
+      estRows = '<tr><td colspan="5" class="sh-flag-none">No phases with a meaningful (≥20%) contribution found.</td></tr>';
+    } else {
+      if (est.recent.length) estRows += `<tr class="sh-proj-group"><td colspan="5">Most recent</td></tr>` + rowsFor(est.recent);
+      if (est.historical.length) estRows += `<tr class="sh-proj-group"><td colspan="5">Historical</td></tr>` + rowsFor(est.historical);
+    }
+
+    // V16.13: leave-near-holiday -- drill-down ONLY, never a flag
+    // sentence anywhere above. Strictly neutral, coverage-planning
+    // language -- no suspicion wording.
+    const heatmapDays = buildLeaveHeatmapDays(leaveRequestsFresh, holidaysFresh, shSelectedPersonId, SH_HEATMAP_DAYS, today);
+    const nearHoliday = leaveNearHolidayInstances(leaveRequestsFresh, shSelectedPersonId, holidaysFresh);
+    const heatmapNote = nearHoliday.length
+      ? `<p style="font-size:12px;color:#8A7E74;margin-top:6px;">${nearHoliday.length} leave period${nearHoliday.length > 1 ? 's' : ''} fell next to a weekend or holiday — useful for coverage planning around upcoming holidays, not a concern on its own.</p>`
+      : `<p style="font-size:12px;color:#8A7E74;margin-top:6px;">No leave adjacent to a weekend or holiday in this window.</p>`;
+
+    selectedPersonHTML = `
+      <div style="margin-bottom:16px;"><strong>${u.name}</strong> — Phases meaningfully worked on (≥20% of that phase's hours), their raw numbers, no attribution math</div>
+      <table class="sh-table">
+        <thead><tr><th>Project — Phase</th><th style="text-align:right">Their Hours</th><th style="text-align:right">Total Hours</th><th style="text-align:right">Budget</th><th style="text-align:right">%</th></tr></thead>
+        <tbody>${estRows}</tbody>
+      </table>
+      ${est.insufficientHistory ? '<p style="color:#8A7E74;font-size:12px;margin-top:8px;">Not enough phase history yet (need ' + SH_EST_RECENT_COUNT + ' recent + ' + SH_EST_MIN_HISTORICAL_COUNT + ' historical) to compare a pattern.</p>' : ''}
+      <div style="margin:20px 0 8px;"><strong>${u.name}</strong> — Versatility</div>
+      ${versatilityHTML}
+      <div style="margin:20px 0 8px;"><strong>${u.name}</strong> — Workload, last ${SH_TREND_WEEKS} weeks (their own trend)</div>
+      ${workloadHTML}
+      <div style="margin:20px 0 8px;"><strong>${u.name}</strong> — Leave, last ${SH_HEATMAP_DAYS} days (for coverage planning)</div>
+      ${renderLeaveHeatmapSVG(heatmapDays)}
+      ${heatmapNote}
+    `;
+  }
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shiiRefreshLink" style="color:#A96E35;">refresh</a></div>
+    <div class="card">
+      <div class="card-title">💰 Margin Risk — projects/phases consuming far more hours than budgeted</div>
+      ${marginRiskSentences.length ? marginRiskSentences.map(t => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${t}</div></div>`).join('') : '<div class="sh-flag-none">Nothing bleeding margin right now.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">📊 Also Worth Noting — person-level patterns, quieter by design</div>
+      ${secondarySentences.length ? secondarySentences.map(f => `<div class="sh-flag"><div class="sh-flag-mark">?</div><div>${f.text}</div></div>`).join('') : '<div class="sh-flag-none">Nothing extreme right now.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">📁 Look at One Project</div>
+      <div style="margin-bottom:14px;">
+        <select class="form-control" id="shiiProjectPicker" style="max-width:260px;">
+          <option value="">Select a project…</option>
+          ${projectOptions}
+        </select>
+      </div>
+      ${selectedProjectHTML}
+    </div>
+    <div class="card">
+      <div class="card-title">👤 Look at One Person</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <select class="form-control" id="shiiPersonPicker" style="max-width:220px;">
+          <option value="">Select a person…</option>
+          ${peopleOptions}
+        </select>
+        <select class="form-control" id="shiiWindowPicker" style="max-width:160px;">
+          ${SH_WORKLOAD_WINDOWS.map(d => `<option value="${d}" ${d === shSelectedWindowDays ? 'selected' : ''}>Last ${d} Days</option>`).join('')}
+        </select>
+      </div>
+      ${selectedPersonHTML}
+    </div>
+  `;
+
+  const projectPicker = document.getElementById('shiiProjectPicker');
+  if (projectPicker) projectPicker.addEventListener('change', (e) => { shSelectedProjectId = e.target.value; renderIndividualInsightBody(); });
+  const personPicker = document.getElementById('shiiPersonPicker');
+  if (personPicker) personPicker.addEventListener('change', (e) => { shSelectedPersonId = e.target.value; renderIndividualInsightBody(); });
+  const windowPicker = document.getElementById('shiiWindowPicker');
+  if (windowPicker) windowPicker.addEventListener('change', (e) => { shSelectedWindowDays = parseInt(e.target.value, 10); renderIndividualInsightBody(); });
+  const refreshLink = document.getElementById('shiiRefreshLink');
+  if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderIndividualInsight(); });
+}
+
+// ═══════════════════════════════════════════════════════
+// V16.14: Studio Health -- EMPLOYEE REVIEW. The honest replacement for
+// the dormant Appraisal (renderAppraisal()/appraisalData/the appraisal
+// nav item are UNTOUCHED by this build -- confirmed via git diff before
+// commit; retiring them is a deliberate separate follow-up step, not
+// bundled here). See FINDINGS-2026-08-10.md for the read-only Appraisal
+// deep-dive this replaces: 8-component weighted composite, employee-
+// facing narrative, a full ranked leaderboard, ZERO real appraisalData
+// ever written, employees structurally unable to reach the page at all.
+//
+// Two panels, never merged into one number -- that's the exact flaw
+// being fixed. OBJECTIVE PANEL: pure-read facts, identical method for
+// everyone, reusing Individual Insight's own pure functions directly
+// (computeWorkloadPattern/computeVersatilityStat/computeEstimationPattern)
+// rather than reimplementing them -- one source of truth for what
+// "workload" or "versatility" means across this entire Studio Health
+// feature. HUMAN RUBRIC: this build's ONLY write, saveReview() -- see
+// its own header below for the safety discipline.
+//
+// Period reuses the existing top-level getQuarter() (index.html, used
+// by Hours Tracker) -- NOT the near-identical getApQtr() nested inside
+// renderAppraisal(), which this build deliberately never touches.
+// computeWorkloadPattern()/computeVersatilityStat() are rolling-window
+// functions, not calendar-quarter-aware -- reused here with a ~91-day
+// window anchored at the quarter's own end date as a pragmatic quarter
+// proxy, not exact day-for-day boundaries. Documented here plainly
+// rather than silently presented as more precise than it is.
+// ═══════════════════════════════════════════════════════
+
+const SH_REVIEW_CRITERIA = [
+  { key: 'designQuality', label: 'Design quality' },
+  { key: 'judgment', label: 'Judgment / problem-solving' },
+  { key: 'clientHandling', label: 'Client handling / communication' },
+  { key: 'initiative', label: 'Initiative / ownership' },
+  { key: 'reliability', label: 'Reliability under pressure' },
+  { key: 'mentoring', label: 'Mentoring / helping others' },
+];
+const SH_REVIEW_WINDOW_DAYS = 91;     // ~one quarter -- see file header for the approximation this is
+const SH_REVIEW_PRIOR_WINDOWS = 1;    // one prior quarter-length window as "their own norm" -- quarters are long, 3 (Individual Insight's default) would reach back a full year
+const SH_CONSISTENCY_CV_THRESHOLD = 0.6; // descriptive label boundary ONLY -- never a flag, never good/bad
+
+let shCachedReviewData = null; // { projects, logs, allUsers, allReviews }
+let shReviewSelectedPersonId = '';
+let shReviewQtrOffset = 0;
+
+// Pure: the last day of a getQuarter()-shaped quarter's final month --
+// used as the reference "today" for reusing computeWorkloadPattern()/
+// computeVersatilityStat() unchanged (see file header).
+function quarterEndDate(qtr) {
+  const last = qtr.months[2];
+  return new Date(last.year, last.month + 1, 0);
+}
+
+function quarterPeriodKey(qtr) {
+  return `${qtr.shortLabel}-FY${qtr.fyYear}`;
+}
+
+// Pure: coefficient of variation (stdev/mean) of a person's DAILY
+// productive minutes over [start, end) -- steadiness, not level (that's
+// Workload's own job). Buckets every non-Sunday calendar day in range
+// (a missing day counts as 0), so both "erratic swings between huge and
+// tiny days" and "sporadic bursts with long silent gaps" show up the
+// same way, as a high CV. Deliberately descriptive, never good/bad --
+// an intense, uneven creative workflow isn't wrong for being uneven.
+function computeLoggingConsistency(logs, userId, start, end) {
+  const dailyTotals = {};
+  logs.filter(l => l.userId === userId && l.productive && l.date >= start && l.date < end)
+    .forEach(l => { dailyTotals[l.date] = (dailyTotals[l.date] || 0) + (l.durationMins || 0); });
+
+  const days = [];
+  let d = new Date(start + 'T00:00:00');
+  const endD = new Date(end + 'T00:00:00');
+  while (d < endD) {
+    if (d.getDay() !== 0) days.push(dailyTotals[toLocalDateStr(d)] || 0); // Sundays excluded -- a simple, holiday-list-independent proxy
+    d.setDate(d.getDate() + 1);
+  }
+  if (days.length === 0) return { cv: null, insufficientData: true };
+  const mean = days.reduce((s, v) => s + v, 0) / days.length;
+  if (mean === 0) return { cv: null, insufficientData: true };
+  const variance = days.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / days.length;
+  return { cv: Math.sqrt(variance) / mean, insufficientData: false };
+}
+
+// Pure: a single "current vs own-average" bar -- one fill sized to
+// `current`, plus a thin marker line at `avg`'s position on the same
+// scale. One neutral color throughout (see the CSS comment above
+// .sh-fact-bar-wrap) -- this renders a FACT, not a verdict, so there is
+// deliberately no over/near/ok-style palette here. Returns '' when
+// there's nothing comparable to draw (both values non-positive).
+function renderFactBarHTML(current, avg) {
+  if (current <= 0 && avg <= 0) return '';
+  const max = Math.max(current, avg, 0.01) * 1.15;
+  const curPct = Math.min(100, (current / max) * 100);
+  const avgPct = Math.min(100, (avg / max) * 100);
+  return `<div class="sh-fact-bar-wrap"><div class="sh-fact-bar-fill" style="width:${curPct.toFixed(1)}%"></div><div class="sh-fact-bar-marker" style="left:${avgPct.toFixed(1)}%" title="Own average"></div></div><div class="sh-fact-bar-legend">▮ this quarter &nbsp; | &nbsp; own average</div>`;
+}
+
+// Pure: a row of dots rendering a fraction (e.g. phases run over
+// budget this window) -- filled vs hollow, same neutral color as the
+// bar above. Purely a scannable restatement of a number already in the
+// point-form text next to it, not a new judgment on its own.
+function renderFractionDotsHTML(filledCount, total) {
+  if (total <= 0) return '';
+  let dots = '';
+  for (let i = 0; i < total; i++) dots += `<span class="sh-fact-dot${i < filledCount ? ' filled' : ''}"></span>`;
+  return `<div class="sh-fact-dots">${dots}</div>`;
+}
+
+// Pure: assembles the whole Objective Panel for one person+quarter,
+// reusing Individual Insight's own pure functions unchanged.
+function computeObjectivePanelFacts(logs, projects, userId, qtr) {
+  const qEnd = quarterEndDate(qtr);
+  const workload = computeWorkloadPattern(logs, userId, SH_REVIEW_WINDOW_DAYS, SH_REVIEW_PRIOR_WINDOWS, qEnd);
+  const versatility = computeVersatilityStat(logs, userId, SH_REVIEW_WINDOW_DAYS, SH_REVIEW_PRIOR_WINDOWS, qEnd, SH_VERSATILITY_MIN_PCT);
+  const phaseInstances = computePhaseContributions(logs, projects);
+  const estimation = computeEstimationPattern(phaseInstances, userId, SH_EST_MIN_CONTRIBUTION_PCT, SH_EST_RECENT_COUNT, SH_EST_MIN_HISTORICAL_COUNT);
+  const qWindow = getWindowBounds(SH_REVIEW_WINDOW_DAYS, 0, qEnd);
+  const consistency = computeLoggingConsistency(logs, userId, qWindow.start, qWindow.end);
+  return { workload, versatility, estimation, consistency };
+}
+
+// V16.14: Employee Review's ONLY write, and the first write in Studio
+// Health. Mirrors saveLeaveRequest()'s exact shape -- one targeted doc,
+// {merge:true}, no full-collection diff, and confirmed NOT registered
+// in computeCollectionDiffs() (still hardcoded to exactly
+// timeLogs/planEntries/projects -- unchanged, checked again for this
+// build) -- the entire clobber class this file has spent so much effort
+// on doesn't apply here by construction, same reasoning as
+// leaveRequests/the submissions design. reviewId already encodes
+// personId+raterId+period, so two different raters reviewing the same
+// person in the same period are two structurally separate documents --
+// never the same doc, never a merge collision, no schema change needed
+// when a second rater is added later. Verifies source:'server'
+// immediately after -- this is the first write in this whole feature
+// area, it earns the same scrutiny every other real write in this
+// engagement gets, not less.
+async function saveReview(reviewId, data) {
+  await db.collection('reviews').doc(reviewId).set(data, { merge: true });
+  const verifySnap = await db.collection('reviews').doc(reviewId).get({ source: 'server' });
+  if (!verifySnap.exists) throw new Error('Save did not land -- doc missing on server verify');
+  return verifySnap.data();
+}
+
+async function renderEmployeeReview() {
+  const container = document.getElementById('sh-employeereview');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  try {
+    const [projSnap, logSnap, userSnap, reviewSnap] = await Promise.all([
+      db.collection('projects').get({ source: 'server' }),
+      db.collection('timeLogs').get({ source: 'server' }),
+      db.collection('users').get({ source: 'server' }),
+      db.collection('reviews').get({ source: 'server' }),
+    ]);
+    const projects = []; projSnap.forEach(d => projects.push({ ...d.data(), id: d.id }));
+    const logs = []; logSnap.forEach(d => logs.push({ ...d.data(), id: d.id }));
+    const allUsers = []; userSnap.forEach(d => allUsers.push({ id: d.id, name: d.data().name, isAdmin: d.data().isAdmin }));
+    const allReviews = []; reviewSnap.forEach(d => allReviews.push({ ...d.data(), id: d.id }));
+    shCachedReviewData = { projects, logs, allUsers, allReviews };
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+  renderEmployeeReviewBody();
+}
+
+function renderEmployeeReviewBody() {
+  const container = document.getElementById('sh-employeereview');
+  const data = shCachedReviewData;
+  if (!container || !data) return;
+  const { projects, logs, allUsers, allReviews } = data;
+
+  const qtr = getQuarter(shReviewQtrOffset);
+  const period = quarterPeriodKey(qtr);
+  const peopleWithData = allUsers.filter(u => !u.isAdmin);
+  const peopleOptions = peopleWithData
+    .slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map(u => `<option value="${u.id}" ${u.id === shReviewSelectedPersonId ? 'selected' : ''}>${u.name}</option>`).join('');
+
+  let bodyHTML = '<div class="sh-flag-none">Pick a name above to see their objective panel and rubric.</div>';
+  if (shReviewSelectedPersonId) {
+    const u = peopleWithData.find(p => p.id === shReviewSelectedPersonId);
+    if (u) {
+      const facts = computeObjectivePanelFacts(logs, projects, u.id, qtr);
+
+      // ── Objective Panel HTML -- crisp point-form facts, neutral bar/
+      // dot visuals where a "current vs own-average" or a fraction is
+      // actually the shape of the fact. No color-coding, no verdict --
+      // see the CSS comment above .sh-fact-bar-wrap and the header
+      // comments on renderFactBarHTML()/renderFractionDotsHTML().
+      let workloadPoints, workloadBar = '';
+      if (facts.workload.insufficientHistory) {
+        workloadPoints = `${(facts.workload.currentMins / 60).toFixed(0)}h this quarter · <span class="sh-fact-dir">not enough prior history to compare</span>`;
+      } else {
+        const curH = facts.workload.currentMins / 60, avgH = facts.workload.avgPriorMins / 60;
+        const dir = curH < avgH * 0.97 ? '↓ below own norm' : curH > avgH * 1.03 ? '↑ above own norm' : '→ in line with own norm';
+        workloadPoints = `${curH.toFixed(0)}h this quarter · own avg ${avgH.toFixed(0)}h · <span class="sh-fact-dir">${dir}</span>`;
+        workloadBar = renderFactBarHTML(curH, avgH);
+      }
+      let versatilityPoints, versatilityBar = '';
+      const vCount = facts.versatility.currentCount, vPlural = vCount === 1 ? '' : 's';
+      if (facts.versatility.insufficientHistory) {
+        versatilityPoints = `${vCount} project${vPlural} this quarter · <span class="sh-fact-dir">not enough prior history to compare</span>`;
+      } else {
+        const vAvg = facts.versatility.avgPriorCount;
+        const dir = vCount > vAvg * 1.03 ? 'broader than usual — worth understanding' : vCount < vAvg * 0.97 ? 'narrower than usual' : 'in line with usual';
+        versatilityPoints = `${vCount} project${vPlural} · own avg ${vAvg.toFixed(1)} · <span class="sh-fact-dir">${dir}</span>`;
+        versatilityBar = renderFactBarHTML(vCount, vAvg);
+      }
+      let estimationPoints, estimationDots = '';
+      if (facts.estimation.insufficientHistory) {
+        estimationPoints = `<span class="sh-fact-dir">not enough history yet</span> · need ${SH_EST_RECENT_COUNT} recent + ${SH_EST_MIN_HISTORICAL_COUNT} historical`;
+      } else {
+        const recentOverCount = facts.estimation.recent.filter(x => x.ratio > 1.10).length;
+        const historicalOverCount = facts.estimation.historical.filter(x => x.ratio > 1.10).length;
+        estimationPoints = `over budget ${recentOverCount}/${facts.estimation.recent.length} recent · ${historicalOverCount}/${facts.estimation.historical.length} historical` +
+          (facts.estimation.flagged ? ' · <span class="sh-fact-dir">worth exploring — not automatically individual (see Margin Risk)</span>' : '');
+        estimationDots = renderFractionDotsHTML(recentOverCount, facts.estimation.recent.length);
+      }
+      let consistencyPoints;
+      if (facts.consistency.insufficientData) {
+        consistencyPoints = `<span class="sh-fact-dir">not enough activity this quarter</span> to describe a pattern`;
+      } else {
+        const label = facts.consistency.cv < SH_CONSISTENCY_CV_THRESHOLD ? 'steady' : 'variable';
+        consistencyPoints = `${label} day-to-day · <span class="sh-fact-dir">neither good nor bad</span>`;
+      }
+
+      const objectiveHTML = `
+        <div class="sh-fact-row"><div class="sh-fact-label">Workload</div><div class="sh-fact-points">${workloadPoints}</div>${workloadBar}</div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Versatility</div><div class="sh-fact-points">${versatilityPoints}</div>${versatilityBar}</div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Estimation</div><div class="sh-fact-points">${estimationPoints}</div>${estimationDots}</div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Logging</div><div class="sh-fact-points">${consistencyPoints}</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">Attendance</div><div class="sh-fact-pending">pending — needs the attendance-capture build</div></div>
+        <div class="sh-fact-row"><div class="sh-fact-label">On-time delivery</div><div class="sh-fact-pending">pending — needs the Submission Log</div></div>
+      `;
+
+      // ── Human Rubric HTML -- this rater's input + existing raters ──
+      const reviewsForPerson = allReviews.filter(r => r.personId === u.id && r.period === period);
+      const myReviewId = `review-${u.id}-${currentUser.id}-${period}`;
+      const myExisting = reviewsForPerson.find(r => r.id === myReviewId) || null;
+
+      const starsHTML = SH_REVIEW_CRITERIA.map(c => {
+        const existingVal = myExisting ? (myExisting.criteria || {})[c.key] : null;
+        const stars = [1, 2, 3, 4, 5].map(n =>
+          `<div class="ap-star${existingVal && n <= existingVal ? ' active' : ''}" data-crit="${c.key}" data-val="${n}">${n}</div>`
+        ).join('');
+        return `<div class="sh-rubric-label">${c.label}</div><div class="ap-score-pills" id="shrevStars_${c.key}">${stars}</div>`;
+      }).join('');
+
+      const otherRaterRows = reviewsForPerson.filter(r => r.id !== myReviewId).map(r => `
+        <tr><td>${r.raterName}</td>${SH_REVIEW_CRITERIA.map(c => `<td>${(r.criteria || {})[c.key] ?? '—'}</td>`).join('')}<td>${r.notes ? r.notes.slice(0, 60) : ''}</td></tr>
+      `).join('');
+      const raterTableHTML = reviewsForPerson.length ? `
+        <table class="sh-rater-table">
+          <thead><tr><th>Rater</th>${SH_REVIEW_CRITERIA.map(c => `<th>${c.label}</th>`).join('')}<th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>${currentUser.name} (you)</strong></td>${SH_REVIEW_CRITERIA.map(c => `<td>${myExisting ? ((myExisting.criteria || {})[c.key] ?? '—') : '—'}</td>`).join('')}<td>${myExisting && myExisting.notes ? myExisting.notes.slice(0, 60) : ''}</td></tr>
+            ${otherRaterRows}
+          </tbody>
+        </table>` : '';
+
+      const rubricHTML = `
+        <div class="sh-rubric-grid">${starsHTML}</div>
+        <textarea class="ap-note-input" id="shrevNotes" placeholder="Optional note — context for this period..." style="height:60px;">${myExisting ? (myExisting.notes || '') : ''}</textarea>
+        <div class="ap-scorecard-footer" style="margin-top:10px;">
+          <button class="ap-save-scorecard" id="shrevSaveBtn">${myExisting ? 'Update Review' : 'Save Review'}</button>
+          <span class="ap-save-status" id="shrevSaveStatus">${myExisting ? `Saved ${new Date(myExisting.updatedAt).toLocaleDateString('en-IN')}` : 'Not yet saved'}</span>
+        </div>
+        ${raterTableHTML}
+      `;
+
+      bodyHTML = `
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">📋 Objective Panel — ${u.name}, ${qtr.label}</div>
+          ${objectiveHTML}
+        </div>
+        <div class="card">
+          <div class="card-title">⭐ Human Rubric — ${u.name}, ${qtr.label}</div>
+          ${rubricHTML}
+        </div>
+      `;
+    }
+  }
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shrevRefreshLink" style="color:#A96E35;">refresh</a></div>
+    <div class="card">
+      <div class="card-title">👤 Employee Review</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <select class="form-control" id="shrevPersonPicker" style="max-width:220px;">
+          <option value="">Select a person…</option>
+          ${peopleOptions}
+        </select>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="ap-qtr-btn" id="shrevQtrPrev">◀</button>
+          <strong style="font-size:13px;color:#3D332A;">${qtr.label}</strong>
+          <button class="ap-qtr-btn" id="shrevQtrNext" ${shReviewQtrOffset === 0 ? 'disabled style="opacity:0.35;cursor:not-allowed;"' : ''}>▶</button>
+        </div>
+      </div>
+    </div>
+    ${bodyHTML}
+  `;
+
+  // Local UI state for the rubric (not yet saved) -- lost on re-render,
+  // matching the pattern that Save writes immediately, there's no
+  // separate "draft" persistence layer for this first, deliberately
+  // simple version.
+  const critValues = {};
+  if (shReviewSelectedPersonId) {
+    const u = peopleWithData.find(p => p.id === shReviewSelectedPersonId);
+    const period2 = quarterPeriodKey(qtr);
+    const existing = u ? allReviews.find(r => r.id === `review-${u.id}-${currentUser.id}-${period2}`) : null;
+    SH_REVIEW_CRITERIA.forEach(c => { critValues[c.key] = existing ? (existing.criteria || {})[c.key] || 0 : 0; });
+  }
+
+  document.querySelectorAll('.ap-star[data-crit]').forEach(star => {
+    star.addEventListener('click', function () {
+      const crit = this.dataset.crit;
+      const val = parseInt(this.dataset.val, 10);
+      critValues[crit] = val;
+      document.querySelectorAll(`#shrevStars_${crit} .ap-star`).forEach(s => {
+        s.classList.toggle('active', parseInt(s.dataset.val, 10) <= val);
+      });
+    });
+  });
+
+  const personPicker = document.getElementById('shrevPersonPicker');
+  if (personPicker) personPicker.addEventListener('change', (e) => { shReviewSelectedPersonId = e.target.value; renderEmployeeReviewBody(); });
+  const qtrPrev = document.getElementById('shrevQtrPrev');
+  if (qtrPrev) qtrPrev.addEventListener('click', () => { shReviewQtrOffset--; renderEmployeeReviewBody(); });
+  const qtrNext = document.getElementById('shrevQtrNext');
+  if (qtrNext) qtrNext.addEventListener('click', () => { if (shReviewQtrOffset < 0) { shReviewQtrOffset++; renderEmployeeReviewBody(); } });
+  const refreshLink = document.getElementById('shrevRefreshLink');
+  if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderEmployeeReview(); });
+
+  const saveBtn = document.getElementById('shrevSaveBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const u = peopleWithData.find(p => p.id === shReviewSelectedPersonId);
+      if (!u) return;
+      const period3 = quarterPeriodKey(qtr);
+      const reviewId = `review-${u.id}-${currentUser.id}-${period3}`;
+      const existing = allReviews.find(r => r.id === reviewId);
+      const notes = (document.getElementById('shrevNotes') || {}).value || '';
+      const statusEl = document.getElementById('shrevSaveStatus');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        const saved = await saveReview(reviewId, {
+          id: reviewId,
+          personId: u.id,
+          raterId: currentUser.id,
+          raterName: currentUser.name,
+          period: period3,
+          criteria: critValues,
+          notes,
+          createdAt: existing ? existing.createdAt : new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        saveBtn.textContent = '✓ Saved';
+        if (statusEl) { statusEl.textContent = `Saved ${new Date(saved.updatedAt).toLocaleDateString('en-IN')} · verified on server`; statusEl.classList.add('ok'); }
+      } catch (e) {
+        saveBtn.textContent = 'Save Review';
+        if (statusEl) statusEl.textContent = `Save failed: ${e.message}`;
+        console.error('[employee-review] save failed:', e);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// V16.15: Studio Health -- SUBMISSION LOG (Layer B). The delivery-
+// tracking log: what packages went out, when they were promised, when
+// they actually shipped, and how many times each one got reworked.
+// Independent of phases -- related to a project only via projectId.
+//
+// The keystone for the objective project/business KPIs (on-time rate,
+// slippage, rework rate, delivery rhythm, hours-per-submission) -- but
+// this build is deliberately the LOG ONLY. None of those KPIs are
+// computed here; the schema below is designed so none of them need a
+// schema change when their turn comes:
+//   - on-time rate: actualDate <= committedDate, per doc -- both fields
+//     already exist.
+//   - slippage: avg(actualDate - committedDate) where late -- same two
+//     fields.
+//   - rework: count of docs sharing a parentSubmissionId (or the max
+//     revisionNumber reached) per original -- this is exactly what the
+//     parent-link design below exists to make a single flat query, not
+//     a chain-walk.
+//   - delivery rhythm: group by projectId + actualDate/committedDate --
+//     no new field needed.
+//   - hours-per-submission: NOT precisely attributable (no timeLogs
+//     entry is tagged to a specific package) -- when built, must be
+//     computed as the project's total logged hours between the
+//     PREVIOUS submission's actualDate and this one's, labeled
+//     "approximate hours in this delivery window," never presented as
+//     precise per-submission cost. Same no-fake-precision discipline as
+//     Estimation Reliability's raw-hours-not-attribution-math rule.
+//
+// Same pure-read-list + one-write shape as Employee Review:
+// saveSubmission() is the ONLY write here, mirrors saveLeaveRequest()/
+// saveReview() exactly -- targeted .doc(id).set(data,{merge:true}), one
+// doc, one action. Confirmed NOT registered in computeCollectionDiffs()
+// (still hardcoded to exactly timeLogs/planEntries/projects) -- the
+// clobber class doesn't apply here by construction, same reasoning as
+// every other Studio Health write so far. source:'server' verify
+// immediately after every write, throws rather than silently succeeding
+// if the verify comes back missing.
+//
+// REWORK REPRESENTATION: one document per delivery EVENT, not one
+// mutating doc per package -- every KPI above wants per-event
+// granularity (its own committed/actual date pair), so collapsing
+// revisions into a single doc with overwritten dates would destroy the
+// history those KPIs need. parentSubmissionId always points at the
+// ORIGINAL submission's id (revisionNumber=1), never at the
+// immediately-prior revision -- so "every cycle for this package" is
+// one flat query (id===originalId || parentSubmissionId===originalId),
+// never a chain-walk.
+// ═══════════════════════════════════════════════════════
+
+let shCachedSubmissionData = null; // { projects, submissions }
+let shSubFormMode = 'new';    // 'new' | 'edit' | 'revise'
+let shSubFormTargetId = '';   // for 'edit': the doc being edited; for 'revise': the doc being revised FROM
+
+// Pure: groups a flat submissions array into { [projectId]: { projectName,
+// chains: { [originalId]: [docs sorted by revisionNumber] } } } -- the
+// log's own display shape. A "chain" is every revision of one package.
+function groupSubmissionsByProject(submissions) {
+  const byProject = {};
+  submissions.forEach(s => {
+    if (!byProject[s.projectId]) byProject[s.projectId] = { projectName: s.projectName, chains: {} };
+    const originalId = s.parentSubmissionId || s.id;
+    if (!byProject[s.projectId].chains[originalId]) byProject[s.projectId].chains[originalId] = [];
+    byProject[s.projectId].chains[originalId].push(s);
+  });
+  Object.values(byProject).forEach(p => {
+    Object.values(p.chains).forEach(chain => chain.sort((a, b) => (a.revisionNumber || 1) - (b.revisionNumber || 1)));
+  });
+  return byProject;
+}
+
+// Pure: given the id of a submission being revised, finds its ORIGINAL
+// (walking up at most one hop, since parentSubmissionId always points
+// straight at the original -- never a multi-hop chain to walk) and the
+// next revisionNumber -- the MAX across the whole chain plus one, not
+// just this doc's own revisionNumber plus one, so reviving from an
+// older revision in the chain still produces the correct next number.
+function computeNextRevision(allSubmissions, submissionId) {
+  const doc = allSubmissions.find(s => s.id === submissionId);
+  if (!doc) return null;
+  const originalId = doc.parentSubmissionId || doc.id;
+  const chain = allSubmissions.filter(s => s.id === originalId || s.parentSubmissionId === originalId);
+  const maxRev = chain.reduce((m, s) => Math.max(m, s.revisionNumber || 1), 1);
+  return { originalId, nextRevisionNumber: maxRev + 1, projectId: doc.projectId, projectName: doc.projectName, packageName: doc.packageName };
+}
+
+// V16.15: Submission Log's ONLY write. See file header for the safety
+// discipline -- mirrors saveReview()/saveLeaveRequest() exactly.
+async function saveSubmission(id, data) {
+  await db.collection('submissions').doc(id).set(data, { merge: true });
+  const verifySnap = await db.collection('submissions').doc(id).get({ source: 'server' });
+  if (!verifySnap.exists) throw new Error('Save did not land -- doc missing on server verify');
+  return verifySnap.data();
+}
+
+async function renderSubmissionLog() {
+  const container = document.getElementById('sh-submissionlog');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  try {
+    const [projSnap, subSnap] = await Promise.all([
+      db.collection('projects').get({ source: 'server' }),
+      db.collection('submissions').get({ source: 'server' }),
+    ]);
+    const projects = []; projSnap.forEach(d => projects.push({ ...d.data(), id: d.id }));
+    const submissions = []; subSnap.forEach(d => submissions.push({ ...d.data(), id: d.id }));
+    shCachedSubmissionData = { projects, submissions };
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+  renderSubmissionLogBody();
+}
+
+function renderSubmissionLogBody() {
+  const container = document.getElementById('sh-submissionlog');
+  const data = shCachedSubmissionData;
+  if (!container || !data) return;
+  const { projects, submissions } = data;
+
+  const projectOptions = projects.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .map(p => `<option value="${p.id}">${p.name || p.id}</option>`).join('');
+
+  // ── Form pre-fill, depending on mode ────────────────────────────
+  let formTitle = '➕ Log a Submission';
+  let prefill = { projectId: '', packageName: '', committedDate: '', actualDate: '', status: 'pending', notes: '' };
+  if (shSubFormMode === 'edit') {
+    const doc = submissions.find(s => s.id === shSubFormTargetId);
+    if (doc) { formTitle = `✏️ Editing — ${doc.packageName} (Rev ${doc.revisionNumber})`; prefill = { ...doc }; }
+  } else if (shSubFormMode === 'revise') {
+    const next = computeNextRevision(submissions, shSubFormTargetId);
+    if (next) { formTitle = `🔁 New Revision — ${next.packageName} (Rev ${next.nextRevisionNumber})`; prefill = { projectId: next.projectId, packageName: next.packageName, committedDate: '', actualDate: '', status: 'pending', notes: '' }; }
+  }
+
+  const formHTML = `
+    <div class="card">
+      <div class="card-title">${formTitle}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+        <select class="form-control" id="shsubProject">
+          <option value="">Select a project…</option>
+          ${projects.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(p => `<option value="${p.id}" ${p.id === prefill.projectId ? 'selected' : ''}>${p.name || p.id}</option>`).join('')}
+        </select>
+        <input class="form-control" id="shsubPackage" placeholder="Package name" value="${prefill.packageName || ''}">
+        <input class="form-control" type="date" id="shsubCommitted" placeholder="Committed date" value="${prefill.committedDate || ''}">
+        <input class="form-control" type="date" id="shsubActual" placeholder="Actual date" value="${prefill.actualDate || ''}">
+        <select class="form-control" id="shsubStatus">
+          <option value="pending" ${prefill.status === 'pending' ? 'selected' : ''}>Pending</option>
+          <option value="submitted" ${prefill.status === 'submitted' ? 'selected' : ''}>Submitted</option>
+        </select>
+      </div>
+      <textarea class="ap-note-input" id="shsubNotes" placeholder="Optional notes..." style="height:50px;">${prefill.notes || ''}</textarea>
+      <div class="ap-scorecard-footer" style="margin-top:10px;">
+        <button class="ap-save-scorecard" id="shsubSaveBtn">${shSubFormMode === 'new' ? 'Save' : shSubFormMode === 'revise' ? 'Save New Revision' : 'Update'}</button>
+        ${shSubFormMode !== 'new' ? '<button class="btn btn-ghost btn-sm" id="shsubCancelBtn">Cancel</button>' : ''}
+        <span class="ap-save-status" id="shsubSaveStatus"></span>
+      </div>
+    </div>`;
+
+  // ── List view, grouped by project then by chain ─────────────────
+  const byProject = groupSubmissionsByProject(submissions);
+  let listHTML = '<div class="sh-flag-none">No submissions logged yet.</div>';
+  const projectIds = Object.keys(byProject).sort((a, b) => byProject[a].projectName.localeCompare(byProject[b].projectName));
+  if (projectIds.length) {
+    listHTML = `<table class="sh-table"><thead><tr><th>Package</th><th>Rev</th><th>Committed</th><th>Actual</th><th>Status</th><th></th></tr></thead><tbody>`;
+    projectIds.forEach(pid => {
+      const proj = byProject[pid];
+      listHTML += `<tr class="sh-proj-group"><td colspan="6">${proj.projectName}</td></tr>`;
+      Object.values(proj.chains).forEach(chain => {
+        chain.forEach((s, idx) => {
+          const isLatest = idx === chain.length - 1;
+          listHTML += `<tr>
+            <td>${s.packageName}</td>
+            <td class="sh-num">${s.revisionNumber || 1}</td>
+            <td class="sh-num">${s.committedDate || '—'}</td>
+            <td class="sh-num">${s.actualDate || '—'}</td>
+            <td class="sh-num">${s.status}</td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-ghost btn-sm" data-edit="${s.id}">Edit</button>
+              ${isLatest ? `<button class="btn btn-ghost btn-sm" data-revise="${s.id}">Revise</button>` : ''}
+            </td>
+          </tr>`;
+        });
+      });
+    });
+    listHTML += `</tbody></table>`;
+  }
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shsubRefreshLink" style="color:#A96E35;">refresh</a></div>
+    ${formHTML}
+    <div class="card">
+      <div class="card-title">📜 Submission Log</div>
+      ${listHTML}
+    </div>
+  `;
+
+  const refreshLink = document.getElementById('shsubRefreshLink');
+  if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderSubmissionLog(); });
+
+  document.querySelectorAll('[data-edit]').forEach(btn => {
+    btn.addEventListener('click', () => { shSubFormMode = 'edit'; shSubFormTargetId = btn.dataset.edit; renderSubmissionLogBody(); });
+  });
+  document.querySelectorAll('[data-revise]').forEach(btn => {
+    btn.addEventListener('click', () => { shSubFormMode = 'revise'; shSubFormTargetId = btn.dataset.revise; renderSubmissionLogBody(); });
+  });
+  const cancelBtn = document.getElementById('shsubCancelBtn');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => { shSubFormMode = 'new'; shSubFormTargetId = ''; renderSubmissionLogBody(); });
+
+  const saveBtn = document.getElementById('shsubSaveBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const projectId = document.getElementById('shsubProject').value;
+      const proj = projects.find(p => p.id === projectId);
+      const packageName = document.getElementById('shsubPackage').value.trim();
+      const committedDate = document.getElementById('shsubCommitted').value;
+      const actualDate = document.getElementById('shsubActual').value || null;
+      const status = document.getElementById('shsubStatus').value;
+      const notes = document.getElementById('shsubNotes').value;
+      const statusEl = document.getElementById('shsubSaveStatus');
+      if (!projectId || !packageName || !committedDate) { if (statusEl) statusEl.textContent = 'Project, package name, and committed date are required.'; return; }
+
+      let id, revisionNumber, parentSubmissionId, createdAt;
+      const nowIso = new Date().toISOString();
+      if (shSubFormMode === 'edit') {
+        const existing = submissions.find(s => s.id === shSubFormTargetId);
+        id = shSubFormTargetId;
+        revisionNumber = existing ? existing.revisionNumber : 1;
+        parentSubmissionId = existing ? existing.parentSubmissionId : null;
+        createdAt = existing ? existing.createdAt : nowIso;
+      } else if (shSubFormMode === 'revise') {
+        const next = computeNextRevision(submissions, shSubFormTargetId);
+        id = genId();
+        revisionNumber = next ? next.nextRevisionNumber : 2;
+        parentSubmissionId = next ? next.originalId : shSubFormTargetId;
+        createdAt = nowIso;
+      } else {
+        id = genId();
+        revisionNumber = 1;
+        parentSubmissionId = null;
+        createdAt = nowIso;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        await saveSubmission(id, {
+          id, projectId, projectName: proj ? proj.name : '', packageName,
+          revisionNumber, parentSubmissionId, committedDate, actualDate, status, notes,
+          createdAt, createdBy: currentUser.name, updatedAt: nowIso,
+        });
+        shSubFormMode = 'new'; shSubFormTargetId = '';
+        await renderSubmissionLog(); // fresh reload -- shows the new/updated row immediately
+      } catch (e) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+        if (statusEl) statusEl.textContent = `Save failed: ${e.message}`;
+        console.error('[submission-log] save failed:', e);
+      }
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════
 // INIT — Load data then set up login
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
@@ -4049,7 +5606,33 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='manage')       renderManage();
     if(page==='hourstracker') renderHoursTracker();
     if(page==='appraisal')   renderAppraisal();
+    // V16.18: Studio Health v1 ships with Individual Insight as the
+    // default tab (Project Health/Layer A held back -- see the comment
+    // atop #page-studiohealth). Deliberately renderIndividualInsight()
+    // here, NOT renderStudioHealth() -- the old call would still fetch
+    // and render Layer A's data into its now-unreachable #sh-projecthealth
+    // div on every single Studio Health page open, silently, even though
+    // no tab exists to ever show it.
+    if(page==='studiohealth') renderIndividualInsight();
   });
+
+// V16.10/V16.11: Studio Health tab-switching -- local to this page, same
+// active-class-toggle pattern as the main nav above, scoped to .sh-tab/
+// .sh-tabcontent so it can't interfere with page navigation. Each tab
+// with a render function re-fetches fresh on every click (not just the
+// first time) -- same "don't trust a snapshot from whenever this admin
+// tab happened to load" reasoning as Project Health's own refresh link.
+document.querySelectorAll('.sh-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.sh-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.sh-tabcontent').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('sh-' + tab.dataset.shtab).classList.add('active');
+    if (tab.dataset.shtab === 'submissionlog') renderSubmissionLog();
+    if (tab.dataset.shtab === 'individualinsight') renderIndividualInsight();
+    if (tab.dataset.shtab === 'employeereview') renderEmployeeReview();
+  });
+});
 });
 
 // ═══════════════════════════════════════════════════════
