@@ -7191,7 +7191,30 @@ function startDashboardAutoRefresh() {
 
     // Reload time logs from Firebase — always force server read to avoid cache
     try {
-      const snapshot = await db.collection("timeLogs").get({source:'server'});
+      // V19: date-scoped, same 90-day window loadData() already uses --
+      // this used to pull the ENTIRE timeLogs collection (3,000+ docs and
+      // growing) every 30 seconds for as long as Dashboard stayed open,
+      // the single biggest live Firestore-read cost in the app (see
+      // FINDINGS-2026-08-10.md, "Firebase cost investigation"). Dashboard
+      // itself only ever displays this-month/this-week/live-session data
+      // -- but this refresh replaces the SHARED global `timeLogs` array
+      // other pages (Projects & Budget's phaseLoggedMins(), Time Report)
+      // also read from, so it can't go narrower than loadData()'s own
+      // 90-day baseline without silently starving them of days 8-90 that
+      // they already expect to have. 90 days matches that baseline
+      // exactly -- no page loses data it could see before this change;
+      // it only stops this one refresh from being WIDER (all-time) than
+      // every other read in the app. Safe w.r.t. the delete-guard too:
+      // snapshotCollection() below rebuilds docSnapshots from exactly
+      // what's in the filtered array, so a doc outside the window is
+      // never in docSnapshots to begin with -- nothing can look "missing"
+      // and become a false delete candidate (see diffCollection()).
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      const cutoffDate = fmt(ninetyDaysAgo);
+      const snapshot = await db.collection("timeLogs")
+        .where("date", ">=", cutoffDate)
+        .get({source:'server'});
       timeLogs = [];
       snapshot.forEach(doc => {
         timeLogs.push({ id: doc.id, ...doc.data() });
