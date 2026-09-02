@@ -417,6 +417,12 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .sh-fact-bar-fill{position:absolute;top:0;left:0;height:7px;border-radius:4px;background:#C9A876;transition:width 0.4s;}
 .sh-fact-bar-marker{position:absolute;top:-3px;width:2px;height:13px;background:#5C4F42;border-radius:1px;}
 .sh-fact-bar-legend{font-size:10px;color:#8A7E74;margin-top:3px;}
+/* V19: Log Reliability's fixed framing banner -- deliberately its own
+   bordered box (not just a small note like .sh-refresh-note) so it
+   can't be skimmed past the way a footnote can. Same amber "attention,
+   not alarm" family as .sh-flag-mark/.sh-fact-dir above, never red --
+   this is a permanent caveat, not a warning about anyone's numbers. */
+.sh-framing-banner{background:#FBF3E7;border:1px solid #E8D5B5;border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.6;color:#5C4F42;margin-bottom:16px;}
 .sh-fact-dots{display:flex;gap:4px;margin-top:7px;}
 .sh-fact-dot{width:8px;height:8px;border-radius:50%;background:#E0D8CE;flex-shrink:0;}
 .sh-fact-dot.filled{background:#C9A876;}
@@ -854,6 +860,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
           <div class="sh-tab active" data-shtab="individualinsight">Individual Insight</div>
           <div class="sh-tab" data-shtab="employeereview">Employee Review</div>
           <div class="sh-tab" data-shtab="dataquality">Data Quality</div>
+          <div class="sh-tab" data-shtab="logreliability">Log Reliability</div>
         </div>
         <div class="sh-tabcontent" id="sh-projecthealth"></div>
         <!-- V16.15: Submission Log -- delivery-tracking log (committed vs.
@@ -882,6 +889,15 @@ textarea.form-control{min-height:70px;resize:vertical;}
              already-fetched timeLogs, writes nothing, changes nothing.
              Populated entirely by renderDataQuality(). -->
         <div class="sh-tabcontent" id="sh-dataquality"></div>
+        <!-- V19: Log Reliability (v2 on Data Quality) -- per-person
+             Verified%/Contradiction% facts, reusing computeConfidence-
+             Breakdown() and detectPhaseTypologyContradictions() as-is
+             against one person's own logs. Deliberately NO letter grade,
+             NO composite score -- two facts + a plain-language line.
+             Reached one person at a time via a picker, never a
+             full-team table (nothing to sort/rank by). Populated
+             entirely by renderLogReliability(). -->
+        <div class="sh-tabcontent" id="sh-logreliability"></div>
       </div>
 
     </div><!-- /content -->
@@ -5247,6 +5263,144 @@ async function renderDataQuality() {
   if (refreshLink) refreshLink.addEventListener('click', (e) => { e.preventDefault(); renderDataQuality(); });
 }
 
+// V19: Log Reliability -- v2 layer on Data Quality. Combines the same
+// two signals (confidence-mix, phase/typology contradiction) but
+// DELIBERATELY does not fold them into a letter grade or composite
+// score -- two plain facts + one descriptive sentence, per person,
+// per the owner's explicit "Option B" call. Reuses
+// computeConfidenceBreakdown()/detectPhaseTypologyContradictions() as-
+// is, just filtered to one person's logs first -- no new grading rule,
+// no new contradiction rule, nothing this file's Data Quality section
+// doesn't already compute. Reached one person at a time via a picker
+// (mirrors Employee Review's shrevPersonPicker), never a full-team
+// table -- the structural anti-ranking guard: there is nothing to sort
+// or rank when only one card is ever on screen.
+const SH_LOGREL_MIN_CHECKABLE = 10; // minimum phase/typology-checkable entries before showing either fact -- below this a single contradiction swings the % by double digits (same don't-trust-a-tiny-sample principle as SH_EST_RECENT_COUNT/SH_EST_MIN_HISTORICAL_COUNT above). None of the current roster is anywhere near this floor (94-348 checkable entries each, per the v2 scope) -- it exists to protect a new or part-time hire's first noisy weeks, not because anyone today needs it.
+
+// Pure: one person's two Log Reliability facts. No letter grade, no
+// composite score -- verifiedPct and contradictionPct stand on their
+// own, exactly as computeConfidenceBreakdown()/
+// detectPhaseTypologyContradictions() already produce them.
+function computeLogReliabilityFacts(logs, userId) {
+  const personLogs = logs.filter(l => l.userId === userId);
+  const breakdown = computeConfidenceBreakdown(personLogs);
+  const contradictions = detectPhaseTypologyContradictions(personLogs);
+  return {
+    totalMins: breakdown.totalMins,
+    verifiedMins: breakdown.verifiedMins,
+    verifiedPct: breakdown.verifiedPct,
+    checkableCount: contradictions.checkableCount,
+    contradictionCount: contradictions.contradictions.length,
+    contradictionMins: contradictions.contradictionMins,
+    contradictionPct: contradictions.checkableCount > 0 ? (contradictions.contradictions.length / contradictions.checkableCount) * 100 : null,
+    insufficientData: contradictions.checkableCount < SH_LOGREL_MIN_CHECKABLE,
+  };
+}
+
+let shCachedLogRelData = null; // { logs, allUsers } -- set once per fetch, re-rendered from on picker change (same split as Employee Review)
+let shLogRelSelectedPersonId = '';
+
+async function renderLogReliability() {
+  const container = document.getElementById('sh-logreliability');
+  if (!container || !currentUser?.isAdmin) return;
+  container.innerHTML = `<div class="sh-empty">Loading current data from server…</div>`;
+
+  try {
+    const [logSnap, userSnap] = await Promise.all([
+      db.collection('timeLogs').get({ source: 'server' }),
+      db.collection('users').get({ source: 'server' }),
+    ]);
+    const logs = []; logSnap.forEach(d => logs.push({ ...d.data(), id: d.id }));
+    const allUsers = []; userSnap.forEach(d => allUsers.push({ id: d.id, name: d.data().name, isAdmin: d.data().isAdmin }));
+    shCachedLogRelData = { logs, allUsers };
+  } catch (e) {
+    container.innerHTML = `<div class="sh-empty">Couldn't load current data (${e.message}). Try again.</div>`;
+    return;
+  }
+  renderLogReliabilityBody();
+}
+
+// CRITICAL: the framing banner rendered below is FIXED text, not
+// conditional on the selected person's numbers -- it reads identically
+// whether their facts are reassuring or not. That fixedness is what
+// keeps this a data-quality read rather than a person read, same
+// structural role Employee Review's insight-not-verdict framing plays
+// there. Never make it conditional, never remove it.
+function renderLogReliabilityBody() {
+  const container = document.getElementById('sh-logreliability');
+  const data = shCachedLogRelData;
+  if (!container || !data) return;
+  const { logs, allUsers } = data;
+  const peopleWithData = allUsers.filter(u => !u.isAdmin);
+  const peopleOptions = peopleWithData
+    .slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map(u => `<option value="${u.id}" ${u.id === shLogRelSelectedPersonId ? 'selected' : ''}>${u.name}</option>`).join('');
+
+  let bodyHTML = '<div class="sh-flag-none">Pick a name above to see their log reliability facts.</div>';
+  if (shLogRelSelectedPersonId) {
+    const u = peopleWithData.find(p => p.id === shLogRelSelectedPersonId);
+    if (u) {
+      const facts = computeLogReliabilityFacts(logs, u.id);
+      if (facts.insufficientData) {
+        bodyHTML = `
+          <div class="card">
+            <div class="card-title">📋 Log Reliability — ${u.name}</div>
+            <div class="sh-flag-none">Insufficient data yet — only ${facts.checkableCount} phase/typology-checkable entr${facts.checkableCount === 1 ? 'y' : 'ies'} on record (need ${SH_LOGREL_MIN_CHECKABLE}+). Check back once there's more logging history.</div>
+          </div>`;
+      } else {
+        const verifiedPctStr = facts.verifiedPct !== null ? facts.verifiedPct.toFixed(1) : '—';
+        const contradictionPctStr = facts.contradictionPct !== null ? facts.contradictionPct.toFixed(1) : '—';
+        // Descriptive text keyed to the same natural gaps found in the
+        // real-data v2 scope (0.8-5.5% / 18.7-25.5% / 69.5-90% observed
+        // clusters) -- plain language, never a letter or score.
+        let closing;
+        if (facts.contradictionPct <= 10) {
+          closing = 'Phase/typology fields are well kept in sync — safe to rely on for phase analytics.';
+        } else if (facts.contradictionPct <= 40) {
+          closing = "A meaningful share of entries don't reconcile — worth a spot-check before leaning on phase analytics for this person.";
+        } else {
+          closing = 'These logs need a cleanup pass before relying on them for phase analytics.';
+        }
+        const sentence = `${u.name} — ${contradictionPctStr}% of entries have phase/typology mismatches; ${verifiedPctStr}% of hours verified. ${closing}`;
+
+        bodyHTML = `
+          <div class="card">
+            <div class="card-title">📋 Log Reliability — ${u.name}</div>
+            <div class="sh-fact-row">
+              <div class="sh-fact-label">Verified%</div>
+              <div class="sh-fact-points">${(facts.verifiedMins / 60).toFixed(0)}h verified of ${(facts.totalMins / 60).toFixed(0)}h total — <span class="sh-fact-dir">${verifiedPctStr}%</span></div>
+            </div>
+            <div class="sh-fact-row">
+              <div class="sh-fact-label">Contradiction%</div>
+              <div class="sh-fact-points">${facts.contradictionCount} of ${facts.checkableCount} checkable entries mismatch — <span class="sh-fact-dir">${contradictionPctStr}%</span></div>
+            </div>
+            <div class="sh-fact-row" style="font-size:13px;color:#3D332A;line-height:1.6;border-bottom:none;">${sentence}</div>
+          </div>`;
+      }
+    }
+  }
+
+  container.innerHTML = `
+    <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shlogrelRefreshLink" style="color:#A96E35;">refresh</a></div>
+    <div class="sh-framing-banner">
+      <strong>This reflects DATA quality — how clean/verifiable these logs are — NOT job performance.</strong>
+      A high mismatch % means the phase field wasn't kept in sync with the work; it says nothing about how well someone works. Two people can do equally strong work while one logs it less precisely.
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <select class="form-control" id="shlogrelPersonPicker" style="max-width:220px;">
+        <option value="">Select a person…</option>
+        ${peopleOptions}
+      </select>
+    </div>
+    ${bodyHTML}
+  `;
+
+  const personPicker = document.getElementById('shlogrelPersonPicker');
+  if (personPicker) personPicker.addEventListener('change', (e) => { shLogRelSelectedPersonId = e.target.value; renderLogReliabilityBody(); });
+  const refreshLink2 = document.getElementById('shlogrelRefreshLink');
+  if (refreshLink2) refreshLink2.addEventListener('click', (e) => { e.preventDefault(); renderLogReliability(); });
+}
+
 // ═══════════════════════════════════════════════════════
 // INIT — Load data then set up login
 // ═══════════════════════════════════════════════════════
@@ -5852,6 +6006,7 @@ document.querySelectorAll('.sh-tab').forEach(tab => {
     if (tab.dataset.shtab === 'individualinsight') renderIndividualInsight();
     if (tab.dataset.shtab === 'employeereview') renderEmployeeReview();
     if (tab.dataset.shtab === 'dataquality') renderDataQuality();
+    if (tab.dataset.shtab === 'logreliability') renderLogReliability();
   });
 });
 });
