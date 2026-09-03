@@ -1355,7 +1355,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-01.1'; // Data Quality ship: adds a 3rd, genuinely-visible Studio Health tab -- Feature A confidence-grade (A/B/C/D per log, verified-hours line) + Feature B phase/typology contradiction (grouped patterns), both pure-read against existing timeLogs/users fields, admin-only. Project Health/Submission Log remain held back exactly as in 2026-08-31.3; this ship only adds to that tab bar, does not touch the hide
+const APP_VERSION = '2026-09-03.1'; // Dashboard refresh cost fix: startDashboardAutoRefresh()'s 30s timeLogs re-read is now date-scoped to the same 90-day window loadData() already uses, instead of pulling the entire (unfiltered) collection every cycle -- confirmed the #1 Firebase read-cost driver (167K reads, exceeded the 50K/day free tier on 2026-09-02). Studio Health's per-tab full-collection reads are deliberately left untouched (need all-time data by design, admin-only, non-growing) -- see FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
