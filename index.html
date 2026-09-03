@@ -638,7 +638,14 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="page" id="page-projects">
         <div class="section-header">
           <h2 class="page-title" style="margin:0;">📁 Projects & Budget</h2>
-          <button class="btn btn-primary admin-only" id="addProjectBtn" style="display:none;">+ New Project</button>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <!-- V20: budget %/over-budget figures are all-time, cached once
+                 per session (see ensureAllTimeBudgetLogsLoaded()) -- this is
+                 the only way to force a fresh pull after editing time logs,
+                 deliberately never automatic/on-a-timer. -->
+            <a href="#" id="projBudgetRefreshLink" style="font-size:11px;color:#A96E35;">🔄 refresh accurate budgets</a>
+            <button class="btn btn-primary admin-only" id="addProjectBtn" style="display:none;">+ New Project</button>
+          </div>
         </div>
         <div id="projectsBudgetList"></div>
       </div>
@@ -3586,6 +3593,88 @@ function updateApprovalBadge(){
 function phaseLoggedMins(projectId,phaseName){ return timeLogs.filter(l=>l.projectId===projectId&&l.phase===phaseName).reduce((s,l)=>s+l.durationMins,0); }
 function projectLoggedMins(projectId){ return timeLogs.filter(l=>l.projectId===projectId).reduce((s,l)=>s+l.durationMins,0); }
 
+// V20: All-time project/phase budget tracking -- deliberately a SEPARATE
+// data source from the two functions just above. `timeLogs` is now
+// correctly 90-day-scoped for cost reasons (see the Dashboard refresh
+// cost fix, FINDINGS-2026-08-10.md), which is right for "recent
+// activity" but WRONG for budget math: a phase that went over budget 2
+// years ago is still over budget today, regardless of how much has been
+// logged against it in the last 90 days. Using phaseLoggedMins()/
+// projectLoggedMins() for budget tracking would silently under-report
+// exactly the 4-phase case that fix's own FINDINGS entry flagged and
+// left for this decision.
+//
+// Cost discipline: this must NOT become a second version of the same
+// problem. loadAllTimeBudgetLogs() queries ONLY the projects that
+// actually have a budgeted phase (not the whole timeLogs collection,
+// and not even every project) -- one .where('projectId','==',id) query
+// per budgeted project, in parallel, same Promise.all pattern already
+// used throughout this file. It is cached after the first call and
+// NEVER wired to a timer or interval: ensureAllTimeBudgetLogsLoaded()
+// below is the only thing render functions call, and it is a no-op
+// (zero network calls) on every call after the first, structurally --
+// not "we chose not to loop it," genuinely incapable of firing more
+// than once per session without an explicit refresh.
+let allTimeBudgetLogs = null; // null = not yet loaded this session; array once loaded
+let allTimeBudgetLogsPromise = null; // in-flight dedup -- concurrent callers share one fetch, never fire two
+
+async function loadAllTimeBudgetLogs() {
+  if (allTimeBudgetLogs !== null) return allTimeBudgetLogs; // already cached -- zero network cost
+  if (allTimeBudgetLogsPromise) return allTimeBudgetLogsPromise; // already in flight -- share it, don't refetch
+
+  allTimeBudgetLogsPromise = (async () => {
+    const budgetedProjectIds = projectsData
+      .filter(p => Object.values(p.phases || {}).some(v => v > 0))
+      .map(p => p.id);
+    if (budgetedProjectIds.length === 0) { allTimeBudgetLogs = []; return allTimeBudgetLogs; }
+
+    const snaps = await Promise.all(
+      budgetedProjectIds.map(id => db.collection('timeLogs').where('projectId', '==', id).get({ source: 'server' }))
+    );
+    const merged = [];
+    snaps.forEach(snap => snap.forEach(doc => merged.push({ id: doc.id, ...doc.data() })));
+    allTimeBudgetLogs = merged;
+    return allTimeBudgetLogs;
+  })();
+
+  try {
+    return await allTimeBudgetLogsPromise;
+  } finally {
+    allTimeBudgetLogsPromise = null;
+  }
+}
+
+// The only thing render functions should call. Kicks off the load if it
+// hasn't happened yet this session and re-renders via `onReady` once it
+// lands; a total no-op (no network call, no callback fired) if already
+// cached -- safe to call from every render site that needs accurate
+// budgets, because every call after the first is free.
+function ensureAllTimeBudgetLogsLoaded(onReady) {
+  if (allTimeBudgetLogs !== null) return; // already have it, nothing to do
+  loadAllTimeBudgetLogs().then(onReady);
+}
+
+// The only way stale-until-forced budget data ever updates -- an
+// explicit user action (a refresh link), never a timer.
+function refreshAllTimeBudgetLogs(onReady) {
+  allTimeBudgetLogs = null;
+  allTimeBudgetLogsPromise = null;
+  loadAllTimeBudgetLogs().then(onReady);
+}
+
+// Same filter logic as phaseLoggedMins()/projectLoggedMins() above, just
+// reading the all-time cache instead of the 90-day-scoped global array.
+// Falls back to the (90-day) `timeLogs` array only for the brief window
+// before the first load resolves this session, so a first render never
+// shows a blank/zero budget -- it just self-corrects via
+// ensureAllTimeBudgetLogsLoaded()'s callback once the real data lands.
+function phaseLoggedMinsAllTime(projectId, phaseName) {
+  return (allTimeBudgetLogs || timeLogs).filter(l => l.projectId === projectId && l.phase === phaseName).reduce((s, l) => s + l.durationMins, 0);
+}
+function projectLoggedMinsAllTime(projectId) {
+  return (allTimeBudgetLogs || timeLogs).filter(l => l.projectId === projectId).reduce((s, l) => s + l.durationMins, 0);
+}
+
 // ═══════════════════════════════════════════════════════
 // V16.10: STUDIO HEALTH -- Layer A (Project & Estimation Health)
 // Admin-only, read-only reporting. Pure aggregation over EXISTING
@@ -5863,6 +5952,16 @@ document.getElementById('prevWeek').addEventListener('click',()=>{ currentWeek=a
 document.getElementById('nextWeek').addEventListener('click',()=>{ currentWeek=addDays(currentWeek,7);  renderDashboard(); });
 
 function renderDashboard(){
+  // V20: kick off the all-time budget load if it hasn't happened yet this
+  // session (no-op, zero network calls, if already cached). "Phases Over
+  // Budget" below uses phaseLoggedMinsAllTime() -- this callback re-renders
+  // just the stat cards once real all-time data lands; the FIRST render
+  // this session uses phaseLoggedMinsAllTime()'s 90-day fallback until then.
+  ensureAllTimeBudgetLogsLoaded(() => {
+    const dashAnalytics = document.getElementById('dashAnalytics');
+    if (dashAnalytics) renderDashboardStats();
+  });
+
   // V14.3.15: Show timeLogs collection bloat warning if any -- see
   // checkTimeLogsCollectionSize(). Placed first so it's the most prominent
   // banner if both this and the attendance alert are showing.
@@ -5910,7 +6009,11 @@ function renderDashboard(){
   const utilization=totalHours>0?((prodHours/totalHours)*100).toFixed(0):0;
   const activeProjects=projectsData.length;
   let overBudgetCount=0;
-  projectsData.forEach(proj=>{ Object.entries(proj.phases||{}).forEach(([phase,budget])=>{ if(budget>0){ const used=phaseLoggedMins(proj.id,phase)/60; if(used>=budget)overBudgetCount++; } }); });
+  // V20: all-time, not phaseLoggedMins() -- a phase over budget 2 years
+  // ago is still over budget today. See ensureAllTimeBudgetLogsLoaded()
+  // call above; phaseLoggedMinsAllTime() falls back to the 90-day array
+  // only until that first load resolves.
+  projectsData.forEach(proj=>{ Object.entries(proj.phases||{}).forEach(([phase,budget])=>{ if(budget>0){ const used=phaseLoggedMinsAllTime(proj.id,phase)/60; if(used>=budget)overBudgetCount++; } }); });
   const activeUsers=users.filter(u=>!u.isAdmin).length;
   const avgHoursPerPerson=activeUsers>0?(totalHours/activeUsers).toFixed(1):0;
 
@@ -7696,14 +7799,29 @@ function renderTimeLog(){
 // PROJECTS & BUDGET
 // ═══════════════════════════════════════════════════════
 document.getElementById('addProjectBtn').addEventListener('click',()=>openProjectModal(null));
+document.getElementById('projBudgetRefreshLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  refreshAllTimeBudgetLogs(() => {
+    const el = document.getElementById('projectsBudgetList');
+    if (el) renderProjectsBudget();
+  });
+});
 
 function renderProjectsBudget(){
+  // V20: same all-time budget load as renderDashboard() -- no-op if
+  // already cached this session. Every phase/project % below reads
+  // *AllTime() so it's accurate regardless of how old the hours are.
+  ensureAllTimeBudgetLogsLoaded(() => {
+    const el2 = document.getElementById('projectsBudgetList');
+    if (el2) renderProjectsBudget();
+  });
+
   const el=document.getElementById('projectsBudgetList');
   if(!projectsData.length){ el.innerHTML='<p style="color:#8A7E74;padding:20px;">No projects yet.</p>'; return; }
   el.innerHTML='';
   projectsData.forEach(proj=>{
     const totalBudget=Object.values(proj.phases).reduce((s,h)=>s+h,0);
-    const loggedH=projectLoggedMins(proj.id)/60;
+    const loggedH=projectLoggedMinsAllTime(proj.id)/60;
     const pct=totalBudget>0?Math.round((loggedH/totalBudget)*100):0;
     const status=pct>=100?'over':pct>=80?'near':'ok';
     const card=document.createElement('div'); card.className=`project-card ${status}`;
@@ -7711,7 +7829,7 @@ function renderProjectsBudget(){
     const phasesDiv=card.querySelector(`#phases-${proj.id}`);
     PHASES.forEach(ph=>{
       const budget=proj.phases[ph]||0; if(!budget) return;
-      const loggedMins=phaseLoggedMins(proj.id,ph); const loggedHrs=loggedMins/60;
+      const loggedMins=phaseLoggedMinsAllTime(proj.id,ph); const loggedHrs=loggedMins/60;
       const pp=budget>0?Math.min(100,Math.round((loggedHrs/budget)*100)):0; const st=pp>=100?'over':pp>=80?'near':'ok';
       const row=document.createElement('div'); row.className='phase-row';
       row.innerHTML=`<span class="phase-name">${ph}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${st}" style="width:${pp}%;"></div></div><span class="phase-nums">${minsToHM(loggedMins)} / <strong>${budget}h</strong> <span style="color:${st==='over'?'#C0554A':st==='near'?'#C4874A':'#6E8F52'}">(${pp}%)</span></span>`;
