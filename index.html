@@ -812,7 +812,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div class="card" style="margin-top:16px;border:2px solid #A96E35;">
           <div class="card-title">💾 Data Backup & Security</div>
           <div style="background:#F0E6D6;border:1px solid #DBC9A8;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#8A5828;">
-            📌 <strong>V14.2.40 Production:</strong> All new leave rules (1.5 CL penalty, same-day block, sandwich rule, CL block at -5) effective from 6 May 2026. Pre-policy absences deduct 1.0 CL. Dashboard alerts for 3+ auto-deductions. 3-month warning auto-generated. Salary field in Manage. Salary deduction calc in Appraisal. All V14.2.39 features retained.ing days since last check. Any OMS-active staff with zero productive logs and no approved leave gets 1 casual day auto-deducted. Allows negative balance. Excluded: Debaleena, Rajkumar, Gayaram. All V14.2.35 fixes retained.
+            📌 <strong>V14.2.40 Production:</strong> All new leave rules (1.5 CL penalty, same-day block, sandwich rule, CL block at -5) effective from 6 May 2026. Pre-policy absences deduct 1.0 CL. Dashboard alerts for 3+ auto-deductions. 3-month warning auto-generated. Salary field in Manage. All V14.2.39 features retained.ing days since last check. Any OMS-active staff with zero productive logs and no approved leave gets 1 casual day auto-deducted. Allows negative balance. Excluded: Debaleena, Rajkumar, Gayaram. All V14.2.35 fixes retained.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
             <button class="btn btn-success" id="exportDataBtn">⬇️ Export All Data (Backup)</button>
@@ -857,7 +857,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
         -->
         <div class="sh-tabs">
           <div class="sh-tab active" data-shtab="individualinsight">Individual Insight</div>
-          <div class="sh-tab" data-shtab="employeereview">Employee Review</div>
+          <div class="sh-tab" data-shtab="employeereview">Appraisal</div>
           <div class="sh-tab" data-shtab="dataquality">Data Quality</div>
         </div>
         <div class="sh-tabcontent" id="sh-projecthealth"></div>
@@ -4773,7 +4773,7 @@ function renderEmployeeReviewBody() {
   container.innerHTML = `
     <div class="sh-refresh-note">🔄 Reflects current server data as of just now — <a href="#" id="shrevRefreshLink" style="color:#A96E35;">refresh</a></div>
     <div class="card">
-      <div class="card-title">👤 Employee Review</div>
+      <div class="card-title">👤 Appraisal</div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
         <select class="form-control" id="shrevPersonPicker" style="max-width:220px;">
           <option value="">Select a person…</option>

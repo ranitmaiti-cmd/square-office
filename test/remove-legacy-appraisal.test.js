@@ -4,10 +4,14 @@
 // fully dormant since it was built: admin-only, its own internal admin
 // gate on top of that, zero appraisalData docs ever written (confirmed
 // at the 2026-08-28 read-only deep-dive and again immediately before
-// this removal). Employee Review is now the single appraisal system.
-// This proves the removal was clean: every Appraisal-only artifact is
-// genuinely gone, nothing shared got caught in it, and nothing else in
-// the file references what was removed.
+// this removal). Employee Review is now the single appraisal system --
+// its tab label and panel heading were renamed (display text only) to
+// "Appraisal" to reflect that; everything internal (function names,
+// container ids, comments) stays "Employee Review". This proves the
+// removal was clean: every Appraisal-only artifact is genuinely gone,
+// nothing shared got caught in it, nothing else in the file references
+// what was removed, and the rename landed in exactly the two intended
+// spots (no more, no less).
 //
 // Reads the ACTUAL index.html (not retyped) and checks it directly --
 // same discipline as every other fixture in this repo, adapted for a
@@ -138,10 +142,28 @@ console.log('\n=== Positive proof: every remaining "appraisal" mention is inert 
   const afterScript = src.slice(scriptMatch.index + scriptMatch[0].length);
   const wholeFileCommentsStripped =
     stripComments(beforeScript, { html: true }) + codeOnly + stripComments(afterScript, { html: true });
-  const withoutKnownBanner = wholeFileCommentsStripped.replace(/Salary deduction calc in Appraisal[^"<]*/i, '');
-  const hit = /appraisal/i.exec(withoutKnownBanner);
-  check('with all comments (and the one known stale banner) removed, ZERO remaining "appraisal" mentions anywhere in the file', hit === null);
-  if (hit) console.log('    unexpected residual hit near: ' + withoutKnownBanner.slice(Math.max(0, hit.index - 60), hit.index + 60).replace(/\s+/g, ' '));
+  // V22: Employee Review was renamed (display text only) to "Appraisal"
+  // -- it's now the team's single appraisal system, so the tab label
+  // and its panel heading legitimately say "Appraisal". Those two exact,
+  // known, intentional occurrences are allowlisted below; anything else
+  // matching /appraisal/i is still a real failure (a stale reference to
+  // the OLD, deleted system, or an accidental new one).
+  const KNOWN_LEGITIMATE_APPRAISAL_STRINGS = [
+    'Salary deduction calc in Appraisal', // the stale banner -- gone from source entirely now, harmless no-op if already removed
+    'data-shtab="employeereview">Appraisal<', // the renamed tab label
+    '<div class="card-title">👤 Appraisal</div>', // the renamed panel heading
+  ];
+  let cleaned = wholeFileCommentsStripped;
+  KNOWN_LEGITIMATE_APPRAISAL_STRINGS.forEach(s => { cleaned = cleaned.split(s).join(''); });
+  const hit = /appraisal/i.exec(cleaned);
+  check('with all comments and the known-legitimate strings (renamed tab label/heading, the old stale banner) removed, ZERO remaining "appraisal" mentions anywhere in the file', hit === null);
+  if (hit) console.log('    unexpected residual hit near: ' + cleaned.slice(Math.max(0, hit.index - 60), hit.index + 60).replace(/\s+/g, ' '));
+
+  // The allowlist itself must actually be present and correct -- proves
+  // the rename really happened, not just that the check tolerates it.
+  check('the tab label really does say "Appraisal" now (not silently still "Employee Review")', src.includes('data-shtab="employeereview">Appraisal<'));
+  check('the panel heading really does say "Appraisal" now', src.includes('<div class="card-title">👤 Appraisal</div>'));
+  check('the stale Manage-page banner text is genuinely gone from the source (not just allowlisted)', !src.includes('Salary deduction calc in Appraisal'));
 }
 
 console.log('\n=== Untouched: the shared .ap-* CSS vocabulary ===');
