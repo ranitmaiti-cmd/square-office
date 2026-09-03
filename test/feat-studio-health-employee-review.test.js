@@ -1,7 +1,13 @@
 // Fixture test for Studio Health -- Employee Review, the honest
-// replacement for the dormant Appraisal (renderAppraisal()/
-// appraisalData/the appraisal nav item are UNTOUCHED by this build --
-// confirmed by source-text check below, not just by intent).
+// replacement for the old Appraisal. Originally (2026-08-28) proved
+// this build left renderAppraisal()/appraisalData/the appraisal nav
+// item genuinely untouched -- that premise no longer applies: the old
+// Appraisal was deliberately removed 2026-09-03 (see
+// remove-legacy-appraisal, FINDINGS-2026-08-10.md) now that Employee
+// Review is the single appraisal system. What's still checked here:
+// Employee Review's own code never referenced appraisalData/
+// apAdminScores/renderAppraisal in the first place, so the removal
+// elsewhere in the file needed no changes here.
 //
 // Extracts the ACTUAL functions from index.html (brace-matched, not
 // retyped) and runs them in a vm sandbox -- proving the real shipped
@@ -17,8 +23,8 @@
 //    proven with a real second write, not just asserted
 //  - the objective panel reuses Individual Insight's own pure functions
 //    unchanged -- confirmed both by source text and by matching output
-//  - renderAppraisal()/appraisalData/the appraisal nav item are
-//    genuinely untouched
+//  - Employee Review's own code never referenced appraisalData/
+//    apAdminScores (true before AND after the old Appraisal's removal)
 //
 // Run with: node test/feat-studio-health-employee-review.test.js
 'use strict';
@@ -77,7 +83,7 @@ const renderReviewBodySrc = extractFunction(fullScript, 'renderEmployeeReviewBod
 const getQuarterSrc = extractFunction(fullScript, 'getQuarter');
 
 // ═══════════════════════════════════════════════════════════════════
-console.log('=== Source-text check: saveReview() is the ONLY write; Appraisal untouched ===');
+console.log('=== Source-text check: saveReview() is the ONLY write; no Appraisal residue ===');
 let passCount = 0, failCount = 0;
 function check(label, cond) {
   if (cond) { console.log(`  PASS: ${label}`); passCount++; }
@@ -93,11 +99,8 @@ check('reviews collection NOT registered in computeCollectionDiffs() -- still ha
   const ccdSrc = extractFunction(fullScript, 'computeCollectionDiffs');
   return ccdSrc.includes('timeLogs') && ccdSrc.includes('planEntries') && ccdSrc.includes('projects') && !ccdSrc.includes('reviews');
 })());
-check('renderAppraisal() itself is completely unchanged by this feature (still gates non-admins, still uses appraisalData)', (() => {
-  const apSrc = extractFunction(fullScript, 'renderAppraisal');
-  return apSrc.includes(`if (!currentUser.isAdmin)`) && apSrc.includes('appraisalData') && !apSrc.includes('reviews');
-})());
-check('renderEmployeeReview()/Body() never reference appraisalData/apAdminScores', !renderReviewSrc.includes('appraisalData') && !renderReviewBodySrc.includes('appraisalData') && !renderReviewSrc.includes('apAdminScores') && !renderReviewBodySrc.includes('apAdminScores'));
+check('renderAppraisal() no longer exists in index.html (removed 2026-09-03 -- see remove-legacy-appraisal.test.js for the full removal proof)', fullScript.indexOf('function renderAppraisal(') < 0);
+check('renderEmployeeReview()/Body() never reference appraisalData/apAdminScores (true before AND after the removal -- this feature never depended on it)', !renderReviewSrc.includes('appraisalData') && !renderReviewBodySrc.includes('appraisalData') && !renderReviewSrc.includes('apAdminScores') && !renderReviewBodySrc.includes('apAdminScores'));
 check('the objective panel reuses computeWorkloadPattern/computeVersatilityStat/computeEstimationPattern by NAME, not reimplemented', fnSrc.computeObjectivePanelFacts.includes('computeWorkloadPattern(') && fnSrc.computeObjectivePanelFacts.includes('computeVersatilityStat(') && fnSrc.computeObjectivePanelFacts.includes('computeEstimationPattern('));
 check('V16.17: the objective panel passes SH_VERSATILITY_MIN_PCT through to computeVersatilityStat() -- same thresholded definition as Individual Insight, not a second unthresholded copy', fnSrc.computeObjectivePanelFacts.includes('SH_VERSATILITY_MIN_PCT'));
 
