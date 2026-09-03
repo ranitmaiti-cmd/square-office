@@ -1360,7 +1360,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-03.2'; // All-time project/phase budget tracking: "Phases Over Budget" and Projects & Budget's phase bars now read a separate, cached, all-time data source (loadAllTimeBudgetLogs(), queried once per session per budgeted project, never on a timer) instead of the 90-day-scoped shared timeLogs array -- fixes the 4-phase regression the Dashboard refresh cost fix (2026-09-03.1) left flagged. Dashboard's own activity feed/who's-working-now stays 90-day/cheap, unchanged. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-03.3'; // Retired the legacy Appraisal (renderAppraisal(), the nav item, #page-appraisal -- ~450 lines, fully dormant since built, zero appraisalData docs ever written) -- Studio Health's Employee Review is now the single appraisal system, renamed (display text only, tab label + panel heading) to "Appraisal" accordingly. Shared .ap-* CSS untouched, confirmed still used by Employee Review's own rubric. Also cleaned a stale Manage-page banner referencing the deleted page. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
