@@ -1376,7 +1376,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-03.3'; // Retired the legacy Appraisal (renderAppraisal(), the nav item, #page-appraisal -- ~450 lines, fully dormant since built, zero appraisalData docs ever written) -- Studio Health's Employee Review is now the single appraisal system, renamed (display text only, tab label + panel heading) to "Appraisal" accordingly. Shared .ap-* CSS untouched, confirmed still used by Employee Review's own rubric. Also cleaned a stale Manage-page banner referencing the deleted page. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-03.4'; // Studio Health: Log Reliability v2 -- 4th tab, per-person Verified%/Contradiction% facts (Option B: two plain facts + a line, NO letter grade, NO composite score), reached one person at a time via a picker, never a sortable/rankable table. Reuses the already-shipped confidence-grade/contradiction functions and the all-time-budget-tracking data layer as-is. Fixed "this is DATA quality, not performance" framing banner. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
