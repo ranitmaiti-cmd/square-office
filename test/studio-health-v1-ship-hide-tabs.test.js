@@ -66,18 +66,19 @@ const tabsBarHTML = tabsBarMatch[1];
 const tabEntries = [...tabsBarHTML.matchAll(/<div class="sh-tab( active)?" data-shtab="(\w+)">/g)]
   .map(m => ({ shtab: m[2], active: !!m[1] }));
 
-console.log('=== .sh-tabs bar: Individual Insight + Employee Review + Data Quality (V18) ===');
-// V18: Data Quality joined as a genuinely new, visible, working tab --
-// unlike Project Health/Submission Log, it's not held back, so the bar
-// now has 3 entries, not 2. Still asserting a fixed, known count (not
-// "at least 2") so a future unintended addition fails this fixture
-// honestly instead of silently passing.
-check('exactly 3 tab-bar entries', tabEntries.length === 3);
+console.log('=== .sh-tabs bar: Individual Insight + Employee Review + Data Quality + Log Reliability (V19) ===');
+// V19: Log Reliability joined as a 4th genuinely new, visible, working
+// tab -- unlike Project Health/Submission Log, it's not held back, so
+// the bar now has 4 entries, not 3. Still asserting a fixed, known
+// count (not "at least 3") so a future unintended addition fails this
+// fixture honestly instead of silently passing.
+check('exactly 4 tab-bar entries', tabEntries.length === 4);
 check('projecthealth is NOT a tab-bar entry', !tabEntries.some(t => t.shtab === 'projecthealth'));
 check('submissionlog is NOT a tab-bar entry', !tabEntries.some(t => t.shtab === 'submissionlog'));
 check('individualinsight IS a tab-bar entry, and is the active one', tabEntries.some(t => t.shtab === 'individualinsight' && t.active));
 check('employeereview IS a tab-bar entry, not active (Individual Insight leads)', tabEntries.some(t => t.shtab === 'employeereview' && !t.active));
 check('dataquality IS a tab-bar entry, not active', tabEntries.some(t => t.shtab === 'dataquality' && !t.active));
+check('logreliability IS a tab-bar entry, not active', tabEntries.some(t => t.shtab === 'logreliability' && !t.active));
 
 console.log('\n=== .sh-tabcontent divs: default-active state matches the tab bar ===');
 function contentDivClass(id) {
@@ -148,7 +149,7 @@ console.log('\n=== BEHAVIORAL: simulated page-open + click-every-tab never invok
     };
   });
   const contentEls = {};
-  ['sh-projecthealth', 'sh-submissionlog', 'sh-individualinsight', 'sh-employeereview', 'sh-dataquality'].forEach(id => {
+  ['sh-projecthealth', 'sh-submissionlog', 'sh-individualinsight', 'sh-employeereview', 'sh-dataquality', 'sh-logreliability'].forEach(id => {
     const classes = new Set(['sh-tabcontent', ...(id === 'sh-individualinsight' ? ['active'] : [])]);
     contentEls[id] = { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) } };
   });
@@ -160,6 +161,7 @@ console.log('\n=== BEHAVIORAL: simulated page-open + click-every-tab never invok
     renderIndividualInsight: makeSpy('renderIndividualInsight'),
     renderEmployeeReview: makeSpy('renderEmployeeReview'),
     renderDataQuality: makeSpy('renderDataQuality'),
+    renderLogReliability: makeSpy('renderLogReliability'),
     document: {
       querySelectorAll: (sel) => {
         if (sel === '.sh-tab') return tabEls;
@@ -176,12 +178,13 @@ console.log('\n=== BEHAVIORAL: simulated page-open + click-every-tab never invok
   // there is no way to click a tab that doesn't exist in tabEls).
   tabEls.forEach(el => el.click());
 
-  check('exactly 3 clickable tabs exist to simulate (individualinsight, employeereview, dataquality)', tabEls.length === 3);
+  check('exactly 4 clickable tabs exist to simulate (individualinsight, employeereview, dataquality, logreliability)', tabEls.length === 4);
   check('renderStudioHealth() was NEVER invoked by clicking any visible tab', !calls.includes('renderStudioHealth'));
   check('renderSubmissionLog() was NEVER invoked by clicking any visible tab', !calls.includes('renderSubmissionLog'));
   check('renderIndividualInsight() WAS invoked (clicking its own tab)', calls.includes('renderIndividualInsight'));
   check('renderEmployeeReview() WAS invoked (clicking its own tab)', calls.includes('renderEmployeeReview'));
   check('renderDataQuality() WAS invoked (clicking its own tab)', calls.includes('renderDataQuality'));
+  check('renderLogReliability() WAS invoked (clicking its own tab)', calls.includes('renderLogReliability'));
 }
 
 console.log('\n=== BEHAVIORAL: simulated Studio Health nav-item open fires Individual Insight\'s fetch, never Layer A\'s ===');
