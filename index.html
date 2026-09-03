@@ -1362,7 +1362,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-03.1'; // Dashboard refresh cost fix: startDashboardAutoRefresh()'s 30s timeLogs re-read is now date-scoped to the same 90-day window loadData() already uses, instead of pulling the entire (unfiltered) collection every cycle -- confirmed the #1 Firebase read-cost driver (167K reads, exceeded the 50K/day free tier on 2026-09-02). Studio Health's per-tab full-collection reads are deliberately left untouched (need all-time data by design, admin-only, non-growing) -- see FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-03.2'; // All-time project/phase budget tracking: "Phases Over Budget" and Projects & Budget's phase bars now read a separate, cached, all-time data source (loadAllTimeBudgetLogs(), queried once per session per budgeted project, never on a timer) instead of the 90-day-scoped shared timeLogs array -- fixes the 4-phase regression the Dashboard refresh cost fix (2026-09-03.1) left flagged. Dashboard's own activity feed/who's-working-now stays 90-day/cheap, unchanged. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
