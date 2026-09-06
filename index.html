@@ -5235,6 +5235,33 @@ const TYPOLOGY_TO_PHASE = {
   'Project Management – Internal Review': 'Project Management',
 };
 
+// V23: the phase/typology forward-fix -- prevents the mislabeling Data
+// Quality measures and Log Reliability localizes, at LOG TIME, by
+// deriving phase from typology using this same TYPOLOGY_TO_PHASE table
+// (reused, not duplicated). GRACEFUL by design: only sets phaseSelectEl's
+// value when the implied phase is actually one of its current <option>
+// values -- a project's phase dropdown is scoped to that project's own
+// budgeted phases (Log Time) or always all 6 (Planner), and forcing a
+// value that isn't a real option would either silently no-op (harmless)
+// or, worse, require injecting an option the project was never budgeted
+// for. When the implied phase isn't available, this leaves phase exactly
+// as the user already had it -- never worse than today, never an error,
+// never a blocked save. Zero-friction by construction: a plain change-
+// event side effect, nothing async, nothing that can slow down or
+// interrupt logging.
+function autoSyncPhaseFromTypology(phaseSelectEl, typologyValue) {
+  if (!phaseSelectEl) return;
+  const impliedPhase = TYPOLOGY_TO_PHASE[typologyValue];
+  if (!impliedPhase) return; // blank or unrecognized typology -- nothing to derive
+  const hasOption = Array.from(phaseSelectEl.options).some(o => o.value === impliedPhase);
+  if (hasOption) phaseSelectEl.value = impliedPhase;
+  // else: silently leave phase untouched -- this is the graceful fallback,
+  // not a failure path. See the file-header discussion (FINDINGS-2026-08-10.md,
+  // "phase-typology forward-fix scope") for why ~44% of historical
+  // contradictions were on projects without the implied phase budgeted at
+  // all -- forcing it there would be guessing, not fixing.
+}
+
 // Pure: which logs have a phase that contradicts their own typology,
 // grouped by the (userId, phase, typology) pattern -- real data showed
 // 7 patterns account for 92% of all contradiction hours, so the pattern
@@ -7265,7 +7292,19 @@ function openPlanModal(userId,date,planId){
   }
   openModal('planModal');
 }
-document.getElementById('planProject').addEventListener('change',function(){ updatePlanPhases(this.value); });
+document.getElementById('planProject').addEventListener('change',function(){
+  updatePlanPhases(this.value);
+  // V23: same re-apply-after-repopulate as the Log Time modal --
+  // updatePlanPhases() unconditionally rebuilds planPhase (always all 6
+  // canonical phases here, not project-scoped), which resets its value
+  // to blank even if a typology was already picked. Re-apply so picking
+  // typology first, then project, still ends with the right phase.
+  const typVal = document.getElementById('planTypology').value;
+  if (typVal) autoSyncPhaseFromTypology(document.getElementById('planPhase'), typVal);
+});
+document.getElementById('planTypology').addEventListener('change',function(){
+  autoSyncPhaseFromTypology(document.getElementById('planPhase'), this.value);
+});
 function updatePlanPhases(projId){
   const pSel=document.getElementById('planPhase');
   pSel.innerHTML='<option value="">Select phase...</option>'+PHASES.map(ph=>`<option value="${ph}">${ph}</option>`).join('');
@@ -7353,6 +7392,16 @@ document.getElementById('logProject').addEventListener('change',function(){
   const pSel=document.getElementById('logPhase');
   if(proj){ pSel.innerHTML='<option value="">Select phase...</option>'+Object.keys(proj.phases).map(ph=>`<option value="${ph}">${ph}</option>`).join(''); }
   else pSel.innerHTML='<option value="">Select project first</option>';
+  // V23: re-apply the typology->phase auto-sync -- typology can be picked
+  // BEFORE a project (this dropdown starts as "Select project first"),
+  // so a project pick that arrives afterward needs its own chance to
+  // apply whatever typology is already selected, against the phase
+  // options this exact change just repopulated.
+  const typVal = document.getElementById('logTypology').value;
+  if (typVal) autoSyncPhaseFromTypology(pSel, typVal);
+});
+document.getElementById('logTypology').addEventListener('change',function(){
+  autoSyncPhaseFromTypology(document.getElementById('logPhase'), this.value);
 });
 
 function openLogModal(preLinked=null){
