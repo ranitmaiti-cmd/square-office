@@ -1376,7 +1376,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-03.4'; // Studio Health: Log Reliability v2 -- 4th tab, per-person Verified%/Contradiction% facts (Option B: two plain facts + a line, NO letter grade, NO composite score), reached one person at a time via a picker, never a sortable/rankable table. Reuses the already-shipped confidence-grade/contradiction functions and the all-time-budget-tracking data layer as-is. Fixed "this is DATA quality, not performance" framing banner. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-06.1'; // Fix session-revival race: close the wake-verification ordering gap. Every wake path (visibilitychange, both 'online' listeners, focus, tick-worker onmessage) could call heartbeatSession()/finalizeCurrentSession() before checkTimerHealth() had a chance to set awaitingWakeVerification, letting a stale client revive an already-closed session once per wake (root cause of Taskiya's Sept 3 revival). New tripWakeVerificationIfStale() computes staleness directly at the same two write chokepoints instead of depending on load-bearing call order; also fixes a loop-prevention gap found via fixture (verifySessionStillOpenOnWake's still-open branch now refreshes lastHeartbeatSuccessAt so a healthy session doesn't re-trip forever). See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
