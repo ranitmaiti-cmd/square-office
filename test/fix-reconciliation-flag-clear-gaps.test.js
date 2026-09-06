@@ -56,6 +56,14 @@ function extractHandler(source, anchor, wrapperName) {
 }
 
 const finalizeCurrentSessionSrc = extractFunction(fullScript, 'finalizeCurrentSession');
+// V24 (session-revival race, 2026-09-05): finalizeCurrentSession() now
+// calls the real tripWakeVerificationIfStale() instead of reading a bare
+// awaitingWakeVerification flag directly -- extract it for real too, same
+// discipline as everything else here. Not exercised by these cases (see
+// lastHeartbeatSuccessAt below, always fresh) -- that whole mechanism has
+// its own dedicated fixture, test/fix-session-revival-race.test.js.
+const tripWakeVerificationIfStaleSrc = extractFunction(fullScript, 'tripWakeVerificationIfStale');
+const verifySessionStillOpenOnWakeSrc = extractFunction(fullScript, 'verifySessionStillOpenOnWake');
 const runEndOfDayCheckSrc = extractFunction(fullScript, 'runEndOfDayCheck');
 const completeTaskHandlerSrc = extractHandler(
   fullScript,
@@ -110,6 +118,11 @@ function buildSandbox({ nowLocal, timerStartedAtOffsetMs, capped = false }) {
     timerLinkedPlan: { id: 'plan1', project: 'Test Project', projectId: 'p1', phase: 'Schematic Design', typology: 'Schematic Design', type: 'work' },
     sessionExternallyClosed: false,
     awaitingWakeVerification: false,
+    // V24: always fresh (equal to "now") -- tripWakeVerificationIfStale()
+    // must read as "not stale" here so it's a no-op, exactly preserving
+    // every one of this file's existing cases unchanged.
+    lastHeartbeatSuccessAt: fixedNowMs,
+    WD_ALERT_MS: 5 * 60 * 1000,
     currentUser: { id: 'u1', name: 'Test User' },
     planEntries: [{ id: 'plan1', done: false }],
     MAX_SESSION_HOURS: 12,
@@ -138,6 +151,8 @@ function buildSandbox({ nowLocal, timerStartedAtOffsetMs, capped = false }) {
     },
   };
   vm.createContext(sandbox);
+  vm.runInContext(verifySessionStillOpenOnWakeSrc, sandbox);
+  vm.runInContext(tripWakeVerificationIfStaleSrc, sandbox);
   vm.runInContext(finalizeCurrentSessionSrc, sandbox);
   vm.runInContext(runEndOfDayCheckSrc, sandbox);
   vm.runInContext(completeTaskHandlerSrc, sandbox);

@@ -1376,7 +1376,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-03.4'; // Studio Health: Log Reliability v2 -- 4th tab, per-person Verified%/Contradiction% facts (Option B: two plain facts + a line, NO letter grade, NO composite score), reached one person at a time via a picker, never a sortable/rankable table. Reuses the already-shipped confidence-grade/contradiction functions and the all-time-budget-tracking data layer as-is. Fixed "this is DATA quality, not performance" framing banner. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-06.1'; // Fix session-revival race: close the wake-verification ordering gap. Every wake path (visibilitychange, both 'online' listeners, focus, tick-worker onmessage) could call heartbeatSession()/finalizeCurrentSession() before checkTimerHealth() had a chance to set awaitingWakeVerification, letting a stale client revive an already-closed session once per wake (root cause of Taskiya's Sept 3 revival). New tripWakeVerificationIfStale() computes staleness directly at the same two write chokepoints instead of depending on load-bearing call order; also fixes a loop-prevention gap found via fixture (verifySessionStillOpenOnWake's still-open branch now refreshes lastHeartbeatSuccessAt so a healthy session doesn't re-trip forever). See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -2279,14 +2279,26 @@ async function verifySessionStillOpenOnWake() {
         showNotificationToast('⏸ Timer auto-closed', 'Your session was closed while this tab was away. Please start a new timer to keep tracking.', 'warning');
         resetTimer({ keepCloseListener: true, statusText: 'Auto-closed — start a new timer' });
       }
-    } else if (data.reconciliationNeeded === true) {
-      // Still genuinely open, and demonstrably alive again -- self-heal the
-      // flag now rather than leaving a stale reconciliation-queue entry for
-      // a session that's actually fine. Best-effort: a failure here just
-      // means the flag lingers until the next sweep re-evaluates it, which
-      // is harmless (the doc is still open either way).
-      db.collection('timeLogs').doc(currentSessionLogId).update({ reconciliationNeeded: false })
-        .catch((e) => console.warn('[wake-verify] failed to clear reconciliationNeeded (harmless, doc stays open):', e.message));
+    } else {
+      // V24: genuinely still open -- this fresh source:'server' read IS a
+      // confirmed sign of life, exactly as good as a successful heartbeat
+      // ping for the purpose lastHeartbeatSuccessAt exists for. Without
+      // this, the NEXT tripWakeVerificationIfStale()/checkTimerHealth()
+      // call would compute the SAME stale gap again (nothing else moves
+      // lastHeartbeatSuccessAt forward except a successful write, which
+      // this branch deliberately doesn't attempt), re-trip the guard, and
+      // defer another heartbeat -- forever, on a perfectly healthy
+      // session, since the underlying staleness condition this verify
+      // just disproved would otherwise never change. One line closes it.
+      lastHeartbeatSuccessAt = Date.now();
+      if (data.reconciliationNeeded === true) {
+        // Demonstrably alive again -- self-heal the flag now rather than
+        // leaving a stale reconciliation-queue entry for a session that's
+        // actually fine. Best-effort: a failure here just means the flag
+        // lingers until the next sweep re-evaluates it, harmless either way.
+        db.collection('timeLogs').doc(currentSessionLogId).update({ reconciliationNeeded: false })
+          .catch((e) => console.warn('[wake-verify] failed to clear reconciliationNeeded (harmless, doc stays open):', e.message));
+      }
     }
   } catch (e) {
     // Fail open -- can't confirm server truth this time, but don't
@@ -2296,6 +2308,52 @@ async function verifySessionStillOpenOnWake() {
   } finally {
     awaitingWakeVerification = false;
   }
+}
+
+// V24 (session-revival race, 2026-09-05): the ACTUAL root cause behind
+// Taskiya's Sept 3 revival, found by tracing every wake path, not
+// assumed. awaitingWakeVerification (above) is only ever SET by
+// checkTimerHealth() -- but every wake entry point (the visibilitychange
+// "tab visible again" handler, both 'online' listeners, and the reliable
+// tick worker's own onmessage) calls heartbeatSession()/
+// finalizeCurrentSession() BEFORE checkTimerHealth() runs, deliberately
+// (V14.3.21's own comment: reArmHeartbeat() first, so checkTimerHealth()
+// reports "healthy" a moment sooner). That ordering means the flag can
+// still read false on the very FIRST write attempt after a genuine long
+// silence -- checkTimerHealth() hasn't had a chance to trip it yet -- so
+// heartbeatSession()'s existing `if (awaitingWakeVerification) return`
+// guard (V16) can be silently bypassed exactly once per wake, which is
+// exactly enough to revive an already-closed doc. A device that was
+// fully suspended (not just backgrounded) never ticks at all until the
+// wake instant, so there is no earlier tick that could have tripped the
+// flag in time.
+//
+// Fix: don't depend on some OTHER function having already set the flag.
+// Both write-gating functions call this FIRST and use ITS return value
+// as their guard -- it computes genuine staleness directly from
+// lastHeartbeatSuccessAt (the same source checkTimerHealth() itself
+// uses), so it's correct regardless of what has or hasn't run yet this
+// tick. This fixes every wake path at its one true chokepoint (both
+// functions every path already funnels through to write) instead of
+// reordering five separate event listeners and hoping nothing calls
+// them out of order again in the future.
+//
+// Deliberately mirrors verifySessionStillOpenOnWake()'s own fail-open
+// direction (its try/catch above is untouched): on an ambiguous read
+// (offline, a transient Firestore error), the session resumes
+// unverified rather than being torn down on a guess -- the same
+// asymmetry Glitch 3 established (only act on POSITIVE confirmation
+// of closure; anything else, including "couldn't check," defers to
+// "assume still open"). Never trips more than once per silence (the
+// `!awaitingWakeVerification` guard) and never fires the verification
+// fetch a second time while one is already resolving.
+function tripWakeVerificationIfStale() {
+  if (!awaitingWakeVerification && timerRunning && lastHeartbeatSuccessAt &&
+      (Date.now() - lastHeartbeatSuccessAt) >= WD_ALERT_MS) {
+    awaitingWakeVerification = true;
+    verifySessionStillOpenOnWake(); // fire-and-forget -- resolves before the next tick either way
+  }
+  return awaitingWakeVerification;
 }
 
 async function reArmHeartbeat() {
@@ -2872,7 +2930,7 @@ function heartbeatSession() {
   if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
   if (sessionExternallyClosed) return; // V14.3.48: reopen guard -- don't resurrect a session the server already finalized
-  if (awaitingWakeVerification) return; // V16: clobber guard -- in-memory state is unverified after a >=5min silence, don't trust it yet
+  if (tripWakeVerificationIfStale()) return; // V24: self-sufficient version of the old bare awaitingWakeVerification check -- see its own header for why the bare flag alone let the first post-wake write slip through
   const now  = Date.now();
   const mins = Math.max(1, Math.floor((now - timerStartedAt) / 1000 / 60));
   upsertTimeLog({
@@ -9148,7 +9206,7 @@ function switchTaskTo(newPlan) {
 function finalizeCurrentSession(reason) {
   if (!timerRunning || !timerStartedAt || !currentSessionLogId || !timerLinkedPlan) return;
   if (sessionExternallyClosed) return; // V14.3.49: reopen guard -- don't write a fresh checkpoint onto a session the server already finalized
-  if (awaitingWakeVerification) return; // V16: clobber guard -- same reasoning as heartbeatSession()
+  if (tripWakeVerificationIfStale()) return; // V24: self-sufficient version of the old bare awaitingWakeVerification check -- same reasoning as heartbeatSession()
   const now         = Date.now();
   const sessionSecs = Math.floor((now - timerStartedAt) / 1000);
   if (sessionSecs < 30) return; // too short to be worth a checkpoint write
