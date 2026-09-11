@@ -3,6 +3,7 @@
   "private": true,
   "description": "No build step for the static app itself -- this only exists so Vercel installs dependencies for the /api serverless functions (api/finalize-stale.js needs the firebase client SDK to talk to Firestore).",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
     "firebase": "^12.17.0"
   }
 }

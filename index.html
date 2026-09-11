@@ -538,6 +538,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
            apAdminScores) removed together; see FINDINGS-2026-08-10.md. -->
       <div class="nav-item" data-page="leaves"><span class="nav-icon">◌</span>Leave</div>
       <div class="nav-item" data-page="teamleave"><span class="nav-icon">◫</span>Team Leave</div>
+      <div class="nav-item" data-page="asksquare"><span class="nav-icon">🤖</span>Ask Square</div>
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
       <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">◈</span>Manage</div>
       <div class="nav-item admin-only" data-page="studiohealth" style="display:none;"><span class="nav-icon">❖</span>Studio Health</div>
@@ -738,6 +739,21 @@ textarea.form-control{min-height:70px;resize:vertical;}
           <button class="btn btn-primary" id="applyLeaveBtn">+ Apply</button>
         </div>
         <div id="myLeaveList"></div>
+      </div>
+
+      <!-- ASK SQUARE -- OMS's first LLM-powered feature. Read-only Q&A over
+           the asking person's OWN data + public policy/holiday info only.
+           See FINDINGS-2026-08-10.md for the full architecture (server-side
+           endpoint, hard-coded own-data filter, grounded facts). -->
+      <div class="page" id="page-asksquare">
+        <h2 class="page-title">🤖 Ask Square</h2>
+        <div style="font-size:12px;color:#8A7E74;margin-bottom:16px;max-width:520px;">Ask about your own leave, attendance, and company policies. Ask Square only knows YOUR data and public company info — it can't see anyone else's records, and it can't approve, change, or delete anything.</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;max-width:600px;">
+          <input type="text" id="askSquareInput" placeholder="e.g. How much casual leave do I have left?" maxlength="500" style="flex:1;padding:10px 12px;border:1.5px solid #DBC9A8;border-radius:8px;font-size:13px;">
+          <button class="btn btn-primary" id="askSquareBtn">Ask</button>
+        </div>
+        <div id="askSquareStatus" style="display:none;font-size:12px;color:#8A7E74;margin-bottom:10px;max-width:600px;"></div>
+        <div id="askSquareAnswer" style="display:none;background:#fff;border:1px solid #E0D8CE;border-radius:10px;padding:16px;font-size:13px;line-height:1.6;color:#3D332A;max-width:600px;white-space:pre-wrap;"></div>
       </div>
 
       <!-- TEAM LEAVE CALENDAR -->
@@ -1376,7 +1392,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-11.1'; // Carve holidays out of the batch saveData() payload. `holidays` used to ride in every open tab's 30s periodic save (dataToSave), so a stale tab's in-memory copy could silently revert squareDB.holidays to [] or an older list -- last-write-wins, same failure mode already fixed for leaveRequests (V14.2.6) and casLeft/medLeft (V14.2.40c). New saveHolidaysGranular() does a targeted .update({holidays}) instead; wired into the add/delete holiday UI and the backup-restore path. isHoliday()/getHolidayName()/loadData's read of squareDB.holidays are unchanged. Unblocks safely populating the 2026 holiday list. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-11.2'; // Ask Square: OMS's first LLM-powered feature. New "Ask Square" tab (visible to everyone, own-data-only) posts { question, userId } to the new server-side api/ask-square.js, which hard-filters Firestore reads to the requester's own userId (plus public holidays/policy text), computes every fact in plain code, and makes ONE Anthropic Messages API call (claude-haiku-4-5) whose only job is to phrase the pre-computed facts -- never to invent a number. ANTHROPIC_API_KEY lives in Vercel env vars only. Rate-limited 20 questions/user/day (askSquareUsage collection). Leave-balance answers carry a mandatory reconciliation caveat until the auto-deduction fix lands. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -6174,6 +6190,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='projects')   renderProjectsBudget();
     if(page==='timereport') initTimeReport();
     if(page==='leaves')     renderLeaves();
+    if(page==='asksquare')  renderAskSquare();
     if(page==='teamleave')  { renderTeamLeave(); renderTeamLeaveBank(); }
     if(page==='approvals')  renderApprovals();
     if(page==='manage')       renderManage();
@@ -7272,6 +7289,71 @@ window.deleteHoliday=async function(id){
   holidays=holidays.filter(h=>h.id!==id); await saveHolidaysGranular(); // V25: granular write, not autoSave()
   document.getElementById('dashViewHolidays').click(); renderDashboard();
 };
+
+// ═══════════════════════════════════════════════════════
+// ASK SQUARE -- OMS's first LLM-powered feature (2026-09-11). Pure client:
+// POSTs { question, userId } to api/ask-square.js and displays whatever
+// text comes back. The ANTHROPIC_API_KEY, the own-data hard filter, and the
+// grounding logic all live server-side -- this file never sees any of it.
+// See FINDINGS-2026-08-10.md for the full architecture.
+// ═══════════════════════════════════════════════════════
+function renderAskSquare() {
+  // Nothing to fetch on open -- no server-side state belongs to this page
+  // itself. Just make the input ready to type into.
+  document.getElementById('askSquareInput')?.focus();
+}
+
+document.getElementById('askSquareBtn')?.addEventListener('click', submitAskSquareQuestion);
+document.getElementById('askSquareInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitAskSquareQuestion();
+});
+
+async function submitAskSquareQuestion() {
+  const input = document.getElementById('askSquareInput');
+  const statusEl = document.getElementById('askSquareStatus');
+  const answerEl = document.getElementById('askSquareAnswer');
+  const btn = document.getElementById('askSquareBtn');
+  const question = input.value.trim();
+  if (!question) return;
+
+  btn.disabled = true;
+  answerEl.style.display = 'none';
+  statusEl.style.display = 'block';
+  statusEl.textContent = '🤔 Thinking…'; // V26: OMS's first "wait for a response" moment
+
+  // ~20s timeout, per scope -- Haiku is fast, so this only ever fires on a
+  // genuinely stuck request, not a slow-but-normal one.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const resp = await fetch('/api/ask-square', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, userId: currentUser.id }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && data.answer) {
+      answerEl.textContent = data.answer;
+      answerEl.style.display = 'block';
+      statusEl.style.display = 'none';
+    } else {
+      // Covers 429 (rate limit), 400 (bad input), 5xx (misconfigured/Anthropic
+      // failure) uniformly -- the server already put a friendly message in
+      // `message` for every one of these; never show a raw error to the user.
+      statusEl.textContent = data.message || 'Could not get an answer right now — try again, or ask HR directly.';
+    }
+  } catch (e) {
+    clearTimeout(timeoutId);
+    statusEl.textContent = (e && e.name === 'AbortError')
+      ? 'This is taking longer than expected — try again, or ask HR directly.'
+      : 'Could not reach Ask Square right now — check your connection and try again.';
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 // ═══════════════════════════════════════════════════════
 // WEEKLY PLANNER
