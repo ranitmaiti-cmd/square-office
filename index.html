@@ -1867,6 +1867,24 @@ async function saveProject(project) {
   }
 }
 
+// V25: dedicated granular writer for squareDB.holidays -- see the note in
+// saveData() for why holidays is no longer in that batch payload. Mirrors
+// saveUser()/saveClients(): a targeted .update() of just this one field, so a
+// stale tab's periodic batch save can never clobber it. Called from the two
+// canManageHolidays()-gated mutation points (add / delete) and the backup
+// restore path. Uses .update({ holidays }) -- every other field on squareDB is
+// left exactly as-is.
+async function saveHolidaysGranular() {
+  if (staleVersionLockout) return; // V16.2: confirmed-stale tab, writes paused until reload
+  try {
+    await db.collection("companyData").doc("squareDB").update({ holidays });
+    console.log('✅ Holidays saved granularly:', holidays.length);
+  } catch(e) {
+    console.error('❌ Save holidays failed:', e);
+    alert('Could not save the holiday change — check your connection and try again.');
+  }
+}
+
 async function saveUser(user) {
   // V14.2.44: Cap medLeft at 24 (max 2 years carry forward)
   if(user.medLeft !== undefined && user.medLeft > 24) user.medLeft = 24;
@@ -3229,8 +3247,16 @@ async function saveData() {
     if (hasUnsavedChanges) {
       // V14.2.40c FIX: Save main data using update() not set() so casLeft/medLeft
       // are NOT overwritten by auto-save. Leave balances only written by deduction logic.
+      // V25: `holidays` removed from this payload for the SAME last-write-wins reason.
+      // Every open tab runs saveData() every 30s and writes the whole object below,
+      // using ITS OWN in-memory `holidays`. A tab that loaded before a holiday change
+      // (or before the array was ever populated) would silently revert
+      // squareDB.holidays to its stale copy on the next tick. Holidays are admin-only
+      // reference data, mutated only through the canManageHolidays()-gated UI, so they
+      // are now written granularly via saveHolidaysGranular() -- exactly the carve-out
+      // already made for leaveRequests (V14.2.6) and casLeft/medLeft (V14.2.40c).
       const dataToSave = {
-        clients, typologies, changeRequests, holidays, budgetTemplates,
+        clients, typologies, changeRequests, budgetTemplates,
         timestamp: saveTimestamp,
         instanceId: instanceId,
         savedBy: currentUser?.name || 'Unknown',
@@ -3240,7 +3266,8 @@ async function saveData() {
         leaveRequestCount: leaveRequests.length
       };
 
-      // Save main document — use update() to preserve casLeft/medLeft not in dataToSave
+      // Save main document — use update() so fields NOT in dataToSave are preserved:
+      // casLeft/medLeft (V14.2.40c) and holidays (V25), each written by its own path.
       await db.collection("companyData").doc("squareDB").update(dataToSave);
       console.log('✅ Main document saved');
     }
@@ -7227,12 +7254,12 @@ function renderLiveTimeLogFeed() {
 document.getElementById('dashAddHoliday').addEventListener('click',()=>{
   document.getElementById('holName').value=''; document.getElementById('holDate').value=''; openModal('holidayModal');
 });
-document.getElementById('saveHolidayBtn').addEventListener('click',()=>{
+document.getElementById('saveHolidayBtn').addEventListener('click',async ()=>{
   const name=document.getElementById('holName').value.trim(),date=document.getElementById('holDate').value;
   if(!name||!date){ alert('Enter holiday name and date'); return; }
   if(holidays.find(h=>h.date===date)){ alert('Holiday already exists for this date'); return; }
   holidays.push({id:genId(),name,date}); holidays.sort((a,b)=>new Date(a.date)-new Date(b.date));
-  autoSave(); closeModal('holidayModal'); renderDashboard();
+  await saveHolidaysGranular(); closeModal('holidayModal'); renderDashboard(); // V25: granular write, not autoSave()
 });
 document.getElementById('dashViewHolidays').addEventListener('click',()=>{
   const list=document.getElementById('holidaysList');
@@ -7240,9 +7267,9 @@ document.getElementById('dashViewHolidays').addEventListener('click',()=>{
   else{ list.innerHTML=holidays.map(h=>`<div class="list-item"><div><div style="font-weight:600;">${h.name}</div><div style="font-size:11px;color:#8A7E74;">${fmtD(h.date)}</div></div><button class="btn btn-danger btn-sm" onclick="deleteHoliday('${h.id}')">Delete</button></div>`).join(''); }
   openModal('viewHolidaysModal');
 });
-window.deleteHoliday=function(id){
+window.deleteHoliday=async function(id){
   if(!confirm('Delete this holiday?')) return;
-  holidays=holidays.filter(h=>h.id!==id); autoSave();
+  holidays=holidays.filter(h=>h.id!==id); await saveHolidaysGranular(); // V25: granular write, not autoSave()
   document.getElementById('dashViewHolidays').click(); renderDashboard();
 };
 
@@ -8863,8 +8890,9 @@ document.getElementById('importFileInput').addEventListener('change', (e) => {
       changeRequests = backup.data.changeRequests || [];
       holidays = backup.data.holidays || [];
       budgetTemplates = backup.data.budgetTemplates || budgetTemplates;
-      
+
       await saveData();
+      await saveHolidaysGranular(); // V25: holidays left saveData()'s payload -- persist it explicitly on restore too
       
       alert(`✅ Data restored successfully!\n\nBackup from: ${new Date(backup.exportDate).toLocaleString()}\n\nPlease refresh the page.`);
       
