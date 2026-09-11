@@ -1376,7 +1376,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-06.2'; // Phase-typology auto-sync: derive phase from typology at LOG TIME on both the Log Time modal (logTypology -> logPhase, scoped to the project's own budgeted phases) and the Planner Assign Work modal (planTypology -> planPhase, always all 6 canonical phases). Reuses TYPOLOGY_TO_PHASE (not duplicated). Graceful by design -- only fills phase when the implied phase is actually a current option on that select; otherwise leaves phase untouched, never an error, never a blocked save. UI-only, zero-friction (a synchronous change-event side effect), zero write-path changes. See FINDINGS-2026-08-10.md, "phase-typology forward-fix scope".
+const APP_VERSION = '2026-09-11.1'; // Carve holidays out of the batch saveData() payload. `holidays` used to ride in every open tab's 30s periodic save (dataToSave), so a stale tab's in-memory copy could silently revert squareDB.holidays to [] or an older list -- last-write-wins, same failure mode already fixed for leaveRequests (V14.2.6) and casLeft/medLeft (V14.2.40c). New saveHolidaysGranular() does a targeted .update({holidays}) instead; wired into the add/delete holiday UI and the backup-restore path. isHoliday()/getHolidayName()/loadData's read of squareDB.holidays are unchanged. Unblocks safely populating the 2026 holiday list. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
