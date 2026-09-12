@@ -136,8 +136,13 @@ function extractDivBlock(html, startMarker) {
   check('the balance-grid (#leaveBalance) is present exactly once', (pageLeavesBlock.match(/id="leaveBalance"/g) || []).length === 1);
   check('the reconciliation caveat text appears in page-leaves, directly after the balance-grid div',
     /id="leaveBalance"><\/div>\s*<div[^>]*>⚠ Leave balances are currently being reconciled/.test(pageLeavesBlock));
-  check('there is only ONE balance-related caveat/section in the whole file (no leftover second copy)',
-    (src.match(/Leave balances are currently being reconciled/g) || []).length === 1);
+  // Matches the ⚠-prefixed STATIC UI BANNER specifically, not the bare
+  // phrase -- Quick Ask (2026-09-12) legitimately reuses the same wording
+  // in a JS string constant (QUICK_ASK_CAVEAT, no ⚠ prefix) for its own
+  // dynamically-built answers, which is a deliberate second, different use
+  // of the phrase, not a leftover duplicate UI section.
+  check('there is only ONE static balance-caveat UI banner in the whole file (no leftover second copy)',
+    (src.match(/⚠ Leave balances are currently being reconciled/g) || []).length === 1);
   check('#hrInfoBalance (the old separate HR Info balance card) no longer exists anywhere', !src.includes('hrInfoBalance'));
   check('renderHrInfo() no longer references a second balance element',
     !extractFunction(fullScript, 'renderHrInfo').includes('hrInfoBalance'));

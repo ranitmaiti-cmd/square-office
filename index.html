@@ -742,6 +742,20 @@ textarea.form-control{min-height:70px;resize:vertical;}
            exactly once, not twice. -->
       <div class="page" id="page-leaves">
         <h2 class="page-title">🌴 Leave & HR</h2>
+
+        <!-- QUICK ASK -- 2026-09-12: NOT AI. Pure client-side keyword
+             matching against data already on this tab (no new fetches,
+             no network calls beyond what renderHrInfo() already made).
+             See FINDINGS-2026-08-10.md. -->
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">💬 Quick Ask</div>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="quickAskInput" placeholder="Ask about leave, holidays, or policy..." maxlength="200" style="flex:1;padding:10px 12px;border:1.5px solid #DBC9A8;border-radius:8px;font-size:13px;">
+            <button class="btn btn-primary" id="quickAskBtn">Ask</button>
+          </div>
+          <div id="quickAskAnswer" style="display:none;margin-top:12px;font-size:12px;color:#5C4F42;white-space:pre-wrap;background:#F7F5F2;border-radius:8px;padding:12px;"></div>
+        </div>
+
         <div class="balance-grid" id="leaveBalance"></div>
         <div style="margin-top:-6px;margin-bottom:16px;font-size:11px;color:#A96E35;background:#FBF3E7;border-radius:6px;padding:8px 10px;">⚠ Leave balances are currently being reconciled — please confirm with HR before relying on this number.</div>
         <div class="section-header">
@@ -1412,7 +1426,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-12.2'; // Merge the Leave and HR Info tabs into one "Leave & HR" tab (Option A). id="page-leaves"/data-page="leaves" kept internally unchanged -- only the visible label changed. Apply-for-leave stays the primary action at the top, completely untouched: renderLeaves()/applyLeaveBtn/the leave modal/cancelLeave()/the approval handlers have zero lines changed, only where their container markup sits. HR Info's sections (My Attendance, Leave Policy, Holidays, Office Timing/Late/Half-Day/WFH, How to Apply) are appended below; its separate "My Leave Balance" card was dropped to avoid showing the balance twice -- the reconciliation caveat now sits as static markup directly under the existing balance-grid instead. The standalone HR Info tab/page/nav-item are gone, no dangling references. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-12.3'; // Quick Ask: a NON-AI, keyword-matching HR box at the top of the Leave & HR tab. No API, no network call, no cost -- pure client-side keyword matching against data already loaded on this tab (hrInfoPoliciesCache, set by renderHrInfo(); holidays/timeLogs/users, same globals the rest of the tab already uses). Word-boundary keyword matching (not naive substring) across 11 categories (holiday/casual/medical/balance/late/half-day/wfh/sandwich/apply/attendance/timing), plus dynamic matching against actual holiday names. Multiple matched categories all get answered. No-match falls back to a friendly message naming what IS answerable. Own-data-only: balance/attendance answers always read users.find(u=>u.id===currentUser.id), same scoping as renderLeaves()/renderHrInfo(). renderLeaves()/the apply flow/approval handlers untouched; only renderHrInfo() gained one cache-assignment line. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -7343,6 +7357,10 @@ function upcomingHolidays(holidaysList, todayStr) {
 
 const HR_INFO_NOT_DOCUMENTED = 'Not documented yet — contact HR.';
 
+// 2026-09-12: set by renderHrInfo() every time it fetches hrPolicies, so
+// Quick Ask (below) can reuse the same data instead of fetching it again.
+let hrInfoPoliciesCache = null;
+
 function hrInfoPolicyText(policies, field) {
   const val = policies && policies[field];
   return (typeof val === 'string' && val.trim()) ? val : HR_INFO_NOT_DOCUMENTED;
@@ -7387,6 +7405,7 @@ async function renderHrInfo() {
 
   // Public policy/holiday data -- no identity dimension, fetched fresh below.
   const policies = await fetchHrPolicies();
+  hrInfoPoliciesCache = policies; // 2026-09-12: Quick Ask reuses this -- no new fetch of its own.
 
   // 2. Leave Policy
   document.getElementById('hrInfoLeavePolicy').innerHTML = hrInfoPolicyBlock(policies, [
@@ -7417,6 +7436,125 @@ async function renderHrInfo() {
   document.getElementById('hrInfoHowToApply').innerHTML =
     `<div style="font-size:12px;color:#5C4F42;">${hrInfoPolicyText(policies, 'leaveApplicationProcess')}</div>`;
 }
+
+// ═══════════════════════════════════════════════════════
+// QUICK ASK -- 2026-09-12. NOT AI: pure client-side keyword matching, no
+// API, no network call, no cost. Reuses hrInfoPoliciesCache (set by
+// renderHrInfo() above) plus the same already-loaded globals/pure
+// functions the rest of this tab already uses (holidays, timeLogs, users,
+// currentUser, countDistinctDates, upcomingHolidays, hrInfoPolicyText) --
+// zero new fetches. Own-data-only: balance/attendance answers are always
+// computed from users.find(u => u.id === currentUser.id), the same
+// scoping renderLeaves()/renderHrInfo() already use, never any other id.
+// See FINDINGS-2026-08-10.md.
+// ═══════════════════════════════════════════════════════
+
+const QUICK_ASK_CAVEAT = 'Leave balances are currently being reconciled — please confirm with HR before relying on this number.';
+const QUICK_ASK_NO_MATCH = "I can answer about leave balance, holidays, and late/WFH/leave policy. For anything else, please contact HR.";
+
+// Keyword -> category map. Matched with word-boundary regex (not naive
+// substring) so a short keyword like "days" can't false-positive inside
+// an unrelated word that happens to contain it (e.g. "holidays" contains
+// the substring "days", but must NOT trigger the attendance answer).
+const QUICK_ASK_CATEGORIES = [
+  { id: 'holiday', keywords: ['holiday', 'holidays', 'next holiday', 'puja', 'christmas'] },
+  { id: 'casual', keywords: ['casual', 'cl', 'casual leave'] },
+  { id: 'medical', keywords: ['medical', 'ml', 'sick', 'medical leave'] },
+  { id: 'balance', keywords: ['balance', 'how much leave', 'leave left', 'remaining'] },
+  { id: 'late', keywords: ['late', 'late coming', 'late policy'] },
+  { id: 'halfday', keywords: ['half day', 'half-day'] },
+  { id: 'wfh', keywords: ['wfh', 'work from home', 'home'] },
+  { id: 'sandwich', keywords: ['sandwich'] },
+  { id: 'apply', keywords: ['apply', 'how to apply', 'application'] },
+  { id: 'attendance', keywords: ['attendance', 'present', 'days'] },
+  { id: 'timing', keywords: ['office timing', 'timing', 'hours'] },
+];
+
+function quickAskKeywordMatches(lowerQuestion, keyword) {
+  const esc = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('\\b' + esc + '\\b', 'i').test(lowerQuestion);
+}
+
+function matchQuickAskCategories(question) {
+  const q = question.toLowerCase();
+  const matched = [];
+  for (const cat of QUICK_ASK_CATEGORIES) {
+    if (cat.keywords.some((k) => quickAskKeywordMatches(q, k))) matched.push(cat.id);
+  }
+  // Also match any holiday's own name (e.g. "Durga Puja Maha Sashthi") --
+  // generalizes to whatever's actually in the holidays list, not a fixed
+  // hardcoded festival list.
+  if (!matched.includes('holiday')) {
+    const hitsHolidayName = (holidays || []).some((h) => h && h.name && q.includes(h.name.toLowerCase()));
+    if (hitsHolidayName) matched.push('holiday');
+  }
+  return matched;
+}
+
+function buildQuickAskAnswer(categoryId, todayStr, policies) {
+  switch (categoryId) {
+    case 'holiday': {
+      const upcoming = upcomingHolidays(holidays, todayStr);
+      if (!upcoming.length) return 'No upcoming holidays are listed right now.';
+      const next = upcoming[0];
+      const rest = upcoming.slice(1, 5).map((h) => `${h.name} (${fmtD(h.date)})`).join(', ');
+      return `The next holiday is ${next.name} on ${fmtD(next.date)}.` + (rest ? ` Upcoming after that: ${rest}.` : '');
+    }
+    case 'casual': {
+      const me = users.find((u) => u.id === currentUser.id);
+      const bal = me ? ` You currently have ${me.casLeft} CL left. ${QUICK_ASK_CAVEAT}` : '';
+      return hrInfoPolicyText(policies, 'casualLeave') + bal;
+    }
+    case 'medical': {
+      const me = users.find((u) => u.id === currentUser.id);
+      const bal = me ? ` You currently have ${me.medLeft} ML left. ${QUICK_ASK_CAVEAT}` : '';
+      return hrInfoPolicyText(policies, 'medicalLeave') + bal;
+    }
+    case 'balance': {
+      const me = users.find((u) => u.id === currentUser.id);
+      return me
+        ? `You have ${me.casLeft} Casual Leave and ${me.medLeft} Medical Leave left. ${QUICK_ASK_CAVEAT}`
+        : 'Could not find your leave balance record.';
+    }
+    case 'late': return hrInfoPolicyText(policies, 'latePolicy');
+    case 'halfday': return hrInfoPolicyText(policies, 'halfDay');
+    case 'wfh': return hrInfoPolicyText(policies, 'wfh');
+    case 'sandwich': return hrInfoPolicyText(policies, 'sandwichRule');
+    case 'apply': return hrInfoPolicyText(policies, 'leaveApplicationProcess');
+    case 'attendance': {
+      const firstOfMonth = `${todayStr.slice(0, 7)}-01`;
+      const myLogsThisMonth = timeLogs.filter((l) => l.userId === currentUser.id && l.date >= firstOfMonth);
+      const daysPresent = countDistinctDates(myLogsThisMonth);
+      return `You've been present ${daysPresent} day${daysPresent === 1 ? '' : 's'} this month (as of ${fmtD(todayStr)}).`;
+    }
+    case 'timing': return hrInfoPolicyText(policies, 'officeTiming');
+    default: return '';
+  }
+}
+
+function handleQuickAsk() {
+  const input = document.getElementById('quickAskInput');
+  const answerEl = document.getElementById('quickAskAnswer');
+  const question = input.value.trim();
+  if (!question) return;
+
+  answerEl.style.display = 'block';
+  if (!hrInfoPoliciesCache) {
+    answerEl.textContent = 'Still loading your info — please try again in a moment.';
+    return;
+  }
+
+  const todayStr = fmt(new Date());
+  const categories = matchQuickAskCategories(question);
+  answerEl.textContent = categories.length
+    ? categories.map((id) => buildQuickAskAnswer(id, todayStr, hrInfoPoliciesCache)).join('\n\n')
+    : QUICK_ASK_NO_MATCH;
+}
+
+document.getElementById('quickAskBtn')?.addEventListener('click', handleQuickAsk);
+document.getElementById('quickAskInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleQuickAsk();
+});
 
 // ═══════════════════════════════════════════════════════
 // WEEKLY PLANNER
