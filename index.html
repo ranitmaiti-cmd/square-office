@@ -104,7 +104,13 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .project-card.over{border-left-color:#C0554A;}
 .project-card.near{border-left-color:#C4874A;}
 .project-card.ok{border-left-color:#6E8F52;}
-.phase-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #F7F5F2;font-size:13px;}
+.phase-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #F7F5F2;font-size:13px;flex-wrap:wrap;}
+/* V27 (project stage-completion): status badge/button sits at the end of
+   the existing phase row, next to the hours bar -- reuses .badge-pending/
+   .badge-approved (already used for leave status) and .btn-ghost.btn-sm
+   (already used for Log Time/Edit on the same card), no new visual
+   language introduced. */
+.phase-status-cell{display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:auto;}
 .phase-row:last-child{border-bottom:none;}
 .phase-name{width:220px;flex-shrink:0;font-weight:500;}
 .phase-bar-wrap{flex:1;background:#E0D8CE;border-radius:4px;height:8px;}
@@ -1446,7 +1452,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-13.1'; // Quick Ask enhanced: suggested-question chips (reusing the app's existing pill convention -- .user-badge/.log-time/.ht-target-pill) + a chat-bubble scrollback (last 5 turns, question right-aligned/brand-filled, answer left-aligned/card-style) instead of a single answer div. Still NOT AI, still zero fetch/api/anthropic. 4 new keyword categories, all own-data or public: Saturday-working-day check (reuses the existing is24Sat()/is24SatLabel()/isHoliday()/getHolidayName() unchanged), pending leave applications, leave history, and a days-until-next-holiday countdown -- all read from leaveRequests/holidays already loaded, zero new fetches. renderLeaves()/the apply flow/approval handlers remain byte-for-byte untouched. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-13.2'; // Project stage-completion / progress-tracking. phaseStatus map on each project doc ({[phaseName]:'ready'|'confirmed'}), written ONLY via saveProjectPhaseStatus()'s targeted dot-path .update() -- NEVER through saveProject()'s full .set(). Two-step flow on Projects & Budget phase rows: Mark Ready (anyone) -> Confirm Done (admin-only, reusing the existing role-gate pattern) -- one click each, no form. At-risk = hours status !=='ok' (>=80% budget, existing thresholds) AND not confirmed; a project-card "N phases at risk" chip surfaces it at a glance. Accountability metadata (readyBy/readyAt/confirmedBy/confirmedAt) stored per phase, mirroring the existing leave approvedBy pattern -- record-keeping only, never aggregated into any per-person metric. REQUIRED collision fix: the Edit Project save handler now explicitly carries forward phaseStatus/phaseStatusMeta before calling saveProject()'s full .set(), or editing a budget would silently wipe all phase-completion status. Write-safety: every status write freeze-checks the current server value first so a stale click can never regress confirmed back to ready. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -1934,6 +1940,71 @@ async function saveProject(project) {
     console.log('✅ Project saved:', project.id);
   } catch(e) {
     console.error('❌ Save project failed:', e);
+  }
+}
+
+// V27 (project stage-completion, 2026-09-13): granular writer for
+// phaseStatus/phaseStatusMeta. Deliberately NEVER goes through
+// saveProject()'s full .set() -- that's the collision this feature has to
+// avoid (see the Edit Project save handler below, which now explicitly
+// carries phaseStatus/phaseStatusMeta forward for the same reason). Uses
+// Firestore dot-path field updates so a status write touches ONLY the one
+// nested key for this one phase -- name/client/dates/phases/every other
+// phase's status are all left completely alone.
+//
+// Freeze-checks the CURRENT server value before writing:
+//   - marking 'ready' never regresses an already-'confirmed' phase (a
+//     stale click on a UI that hasn't yet re-rendered the confirmed state
+//     must not silently demote it)
+//   - confirming is idempotent -- re-confirming an already-'confirmed'
+//     phase is a no-op that preserves the ORIGINAL confirmedBy/confirmedAt
+//     rather than overwriting them on every re-click
+// Returns the actual resulting status so the caller can always re-render
+// correctly, whether the write happened, was skipped, or was blocked.
+async function saveProjectPhaseStatus(projectId, phase, newStatus) {
+  if (staleVersionLockout) return { ok: false, status: null, blocked: false };
+  try {
+    const snap = await db.collection('projects').doc(projectId).get({ source: 'server' });
+    if (!snap.exists) return { ok: false, status: null, blocked: false };
+    const serverProject = snap.data();
+    const currentStatus = (serverProject.phaseStatus || {})[phase] || null;
+
+    if (newStatus === 'ready' && currentStatus === 'confirmed') {
+      // Blocked: never regress a confirmed phase back to ready.
+      return { ok: false, status: 'confirmed', blocked: true };
+    }
+    if (newStatus === 'confirmed' && currentStatus === 'confirmed') {
+      // Idempotent no-op: already confirmed, don't overwrite confirmedBy/confirmedAt.
+      return { ok: true, status: 'confirmed', blocked: false, noop: true };
+    }
+
+    const nowIso = new Date().toISOString();
+    const who = currentUser?.name || 'Unknown';
+    const update = { [`phaseStatus.${phase}`]: newStatus };
+    if (newStatus === 'ready') {
+      update[`phaseStatusMeta.${phase}.readyBy`] = who;
+      update[`phaseStatusMeta.${phase}.readyAt`] = nowIso;
+    } else if (newStatus === 'confirmed') {
+      update[`phaseStatusMeta.${phase}.confirmedBy`] = who;
+      update[`phaseStatusMeta.${phase}.confirmedAt`] = nowIso;
+    }
+    await db.collection('projects').doc(projectId).update(update);
+
+    // Keep the in-memory copy in sync so the UI re-renders correctly
+    // without a full reload.
+    const local = projectsData.find((p) => p.id === projectId);
+    if (local) {
+      local.phaseStatus = local.phaseStatus || {};
+      local.phaseStatus[phase] = newStatus;
+      local.phaseStatusMeta = local.phaseStatusMeta || {};
+      local.phaseStatusMeta[phase] = { ...(local.phaseStatusMeta[phase] || {}), ...(newStatus === 'ready' ? { readyBy: who, readyAt: nowIso } : { confirmedBy: who, confirmedAt: nowIso }) };
+    }
+    console.log('✅ Phase status saved:', projectId, phase, newStatus);
+    return { ok: true, status: newStatus, blocked: false };
+  } catch (e) {
+    console.error('❌ Save phase status failed:', e);
+    alert('Could not save phase status — check your connection and try again.');
+    return { ok: false, status: null, blocked: false, error: true };
   }
 }
 
@@ -8042,6 +8113,15 @@ document.getElementById('projBudgetRefreshLink').addEventListener('click', (e) =
   });
 });
 
+// V27 (project stage-completion, 2026-09-13): pure at-risk check -- a
+// phase is at risk when it's already at/near/over its hour budget
+// (reusing the SAME 80%/100% thresholds every other budget bar in this
+// app already uses) but not yet PM-confirmed done. Project-level only:
+// takes a status STRING and an hours-status string, nothing per-person.
+function isPhaseAtRisk(hourStatus, phaseStatusValue) {
+  return hourStatus !== 'ok' && phaseStatusValue !== 'confirmed';
+}
+
 function renderProjectsBudget(){
   // V20: same all-time budget load as renderDashboard() -- no-op if
   // already cached this session. Every phase/project % below reads
@@ -8059,21 +8139,64 @@ function renderProjectsBudget(){
     const loggedH=projectLoggedMinsAllTime(proj.id)/60;
     const pct=totalBudget>0?Math.round((loggedH/totalBudget)*100):0;
     const status=pct>=100?'over':pct>=80?'near':'ok';
+
+    // V27: at-risk count for the project-card summary chip, computed with
+    // the exact same per-phase numbers the rows below render -- no
+    // separate/duplicate computation to drift out of sync.
+    let atRiskCount = 0;
+    PHASES.forEach(ph=>{
+      const budget=proj.phases[ph]||0; if(!budget) return;
+      const loggedHrs=phaseLoggedMinsAllTime(proj.id,ph)/60;
+      const pp=budget>0?Math.min(100,Math.round((loggedHrs/budget)*100)):0;
+      const st=pp>=100?'over':pp>=80?'near':'ok';
+      if (isPhaseAtRisk(st, (proj.phaseStatus||{})[ph]||null)) atRiskCount++;
+    });
+    const atRiskChip = atRiskCount>0
+      ? `<div style="font-size:11px;font-weight:700;color:#C0554A;margin-top:2px;">⚠ ${atRiskCount} phase${atRiskCount!==1?'s':''} at risk</div>`
+      : '';
+
     const card=document.createElement('div'); card.className=`project-card ${status}`;
-    card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px;"><div><div style="font-weight:800;font-size:16px;">${proj.name}</div><div style="font-size:12px;color:#8A7E74;">🏢 ${proj.client} · ${fmtD(proj.startDate)} → ${fmtD(proj.endDate)}</div></div><div style="text-align:right;"><div style="font-size:18px;font-weight:800;color:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};">${pct}% used</div><div style="font-size:12px;color:#8A7E74;">${hrsToHM(loggedH)} of ${totalBudget}h budget</div></div></div><div style="background:#E0D8CE;border-radius:4px;height:8px;margin-bottom:16px;"><div style="height:8px;border-radius:4px;background:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};width:${Math.min(100,pct)}%;transition:width 0.4s;"></div></div><div id="phases-${proj.id}"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="btn btn-ghost btn-sm" data-log="${proj.id}">⏱️ Log Time</button>${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" data-edit="${proj.id}">✏️ Edit</button>`:''}</div>`;
+    card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px;"><div><div style="font-weight:800;font-size:16px;">${proj.name}</div><div style="font-size:12px;color:#8A7E74;">🏢 ${proj.client} · ${fmtD(proj.startDate)} → ${fmtD(proj.endDate)}</div></div><div style="text-align:right;"><div style="font-size:18px;font-weight:800;color:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};">${pct}% used</div><div style="font-size:12px;color:#8A7E74;">${hrsToHM(loggedH)} of ${totalBudget}h budget</div>${atRiskChip}</div></div><div style="background:#E0D8CE;border-radius:4px;height:8px;margin-bottom:16px;"><div style="height:8px;border-radius:4px;background:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};width:${Math.min(100,pct)}%;transition:width 0.4s;"></div></div><div id="phases-${proj.id}"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="btn btn-ghost btn-sm" data-log="${proj.id}">⏱️ Log Time</button>${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" data-edit="${proj.id}">✏️ Edit</button>`:''}</div>`;
     const phasesDiv=card.querySelector(`#phases-${proj.id}`);
     PHASES.forEach(ph=>{
       const budget=proj.phases[ph]||0; if(!budget) return;
       const loggedMins=phaseLoggedMinsAllTime(proj.id,ph); const loggedHrs=loggedMins/60;
       const pp=budget>0?Math.min(100,Math.round((loggedHrs/budget)*100)):0; const st=pp>=100?'over':pp>=80?'near':'ok';
+      // V27: two-step status badge/button, reusing existing badge/button
+      // classes (badge-pending/badge-approved already used for leave
+      // status; btn-ghost.btn-sm already used for Log Time/Edit on this
+      // same card) -- no new visual language.
+      const phStatus=(proj.phaseStatus||{})[ph]||null;
+      const statusHtml = phStatus==='confirmed'
+        ? `<span class="badge badge-approved">✅ Done</span>`
+        : phStatus==='ready'
+          ? `<span class="badge badge-pending">🔵 Ready</span>${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm phase-confirm-btn" data-proj="${proj.id}" data-phase="${ph}">✓ Confirm Done</button>`:''}`
+          : `<button class="btn btn-ghost btn-sm phase-ready-btn" data-proj="${proj.id}" data-phase="${ph}">Mark Ready</button>`;
       const row=document.createElement('div'); row.className='phase-row';
-      row.innerHTML=`<span class="phase-name">${ph}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${st}" style="width:${pp}%;"></div></div><span class="phase-nums">${minsToHM(loggedMins)} / <strong>${budget}h</strong> <span style="color:${st==='over'?'#C0554A':st==='near'?'#C4874A':'#6E8F52'}">(${pp}%)</span></span>`;
+      row.innerHTML=`<span class="phase-name">${ph}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${st}" style="width:${pp}%;"></div></div><span class="phase-nums">${minsToHM(loggedMins)} / <strong>${budget}h</strong> <span style="color:${st==='over'?'#C0554A':st==='near'?'#C4874A':'#6E8F52'}">(${pp}%)</span></span><span class="phase-status-cell">${statusHtml}</span>`;
       phasesDiv.appendChild(row);
     });
     card.querySelector('[data-log]')?.addEventListener('click',()=>openLogModal(proj.id));
     card.querySelector('[data-edit]')?.addEventListener('click',()=>openProjectModal(proj.id));
+    card.querySelectorAll('.phase-ready-btn').forEach(btn=>btn.addEventListener('click',()=>handlePhaseStatusClick(btn.dataset.proj,btn.dataset.phase,'ready')));
+    card.querySelectorAll('.phase-confirm-btn').forEach(btn=>btn.addEventListener('click',()=>handlePhaseStatusClick(btn.dataset.proj,btn.dataset.phase,'confirmed')));
     el.appendChild(card);
   });
+}
+
+// V27: single click handler behind BOTH "Mark Ready" (anyone) and
+// "Confirm Done" (admin-only, gated by the button simply not existing in
+// the DOM for non-admins above -- same pattern renderApprovals() already
+// uses for its own admin-only actions). Always re-renders afterward,
+// whether the write happened, was a no-op, or was blocked by the
+// freeze-check -- so the UI always reflects true server state, never a
+// stale local guess.
+async function handlePhaseStatusClick(projectId, phase, newStatus) {
+  const result = await saveProjectPhaseStatus(projectId, phase, newStatus);
+  if (result.blocked) {
+    alert('This phase was already confirmed done — refreshing to show the current status.');
+  }
+  renderProjectsBudget();
 }
 
 function openProjectModal(projId){
@@ -8115,7 +8238,14 @@ document.getElementById('saveProjBtn').addEventListener('click', async function(
   if(!name||!client){ alert('Project name and client are required'); return; }
   const phases={};
   PHASES.forEach(ph=>{ const v=parseInt(document.getElementById('phase_'+ph.replace(/\s+/g,'_')).value)||0; if(v>0)phases[ph]=v; });
-  const data={id:this._editId||genId(),name,client,startDate:document.getElementById('pStart').value,endDate:document.getElementById('pEnd').value,phases};
+  // V27: saveProject() below does a full .set() (see its own header) --
+  // carry the EXISTING phaseStatus/phaseStatusMeta forward explicitly, or
+  // editing a budget number here would silently wipe every phase's
+  // completion status. This is the required half of the collision fix;
+  // the other half is that phaseStatus is never written any other way
+  // than saveProjectPhaseStatus()'s own targeted dot-path .update().
+  const existingProj = this._editId ? projectsData.find(p=>p.id===this._editId) : null;
+  const data={id:this._editId||genId(),name,client,startDate:document.getElementById('pStart').value,endDate:document.getElementById('pEnd').value,phases,phaseStatus:existingProj?.phaseStatus||{},phaseStatusMeta:existingProj?.phaseStatusMeta||{}};
   if(this._editId){ const i=projectsData.findIndex(p=>p.id===this._editId); projectsData[i]=data; }
   else {
     projectsData.push(data);
