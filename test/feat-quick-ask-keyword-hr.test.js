@@ -121,12 +121,19 @@ function extractDivBlock(html, startMarker) {
     extractDivBlock(src, '<div class="modal-backdrop" id="leaveModal">') ===
     extractDivBlock(mainSrc, '<div class="modal-backdrop" id="leaveModal">'));
 
-  console.log('\n=== renderHrInfo() changed by exactly the one intended cache line ===');
+  // Structural, not a diff-against-main -- a "this branch minus one line
+  // equals main" comparison is only meaningful BEFORE this branch is
+  // merged; once merged, main already contains the line, so that
+  // comparison becomes a false failure against its own former self. The
+  // permanent regression property is structural: the cache assignment
+  // sits immediately after the fetch, and appears nowhere else in the
+  // function (no surprise second write, no accidental duplication).
+  console.log('\n=== renderHrInfo() sets hrInfoPoliciesCache in exactly the right place ===');
   const hrInfoNow = extractFunction(fullScript, 'renderHrInfo').src;
-  const hrInfoMain = extractFunction(mainFullScript, 'renderHrInfo').src;
-  check('renderHrInfo() now sets hrInfoPoliciesCache', hrInfoNow.includes('hrInfoPoliciesCache = policies;'));
-  check('removing just that one line makes it identical to main\'s renderHrInfo()',
-    hrInfoNow.replace('\n  hrInfoPoliciesCache = policies; // 2026-09-12: Quick Ask reuses this -- no new fetch of its own.', '') === hrInfoMain);
+  check('renderHrInfo() sets hrInfoPoliciesCache immediately after fetching policies',
+    /const policies = await fetchHrPolicies\(\);\s*\n\s*hrInfoPoliciesCache = policies;/.test(hrInfoNow));
+  check('hrInfoPoliciesCache is assigned exactly once inside renderHrInfo() (no surprise duplicate write)',
+    (hrInfoNow.match(/hrInfoPoliciesCache\s*=/g) || []).length === 1);
 
   // ─────────────────────────────────────────────────────────────
   console.log('\n=== Quick Ask box markup sits at the TOP of page-leaves, before the balance-grid ===');
