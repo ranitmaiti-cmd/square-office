@@ -320,7 +320,7 @@ function extractBlockFrom(source, anchor) {
     const atRiskCount = vm.runInContext('atRiskCount', sandbox);
     const atRiskChip = vm.runInContext('atRiskChip', sandbox);
     check('exactly 1 phase counted at risk (Final Design: 90%, unconfirmed)', atRiskCount === 1);
-    check('the chip text reads "1 phase at risk" (singular)', atRiskChip.includes('1 phase at risk'));
+    check('the chip text reads "1 at risk" (V28: compact chip moved next to the title)', atRiskChip.includes('1 at risk'));
   }
   {
     // Zero at-risk -> no chip rendered at all.
@@ -365,15 +365,26 @@ function extractBlockFrom(source, anchor) {
   }
   const codeOnlyFullScript = stripComments(fullScript);
   const codeOnlySaveStatusSrc = stripComments(saveStatusSrc);
+  // V28: saveProjectPhaseStatusUndo() and renderProjectsBudget() now
+  // legitimately READ these fields too (undo ownership check: is the
+  // clicking user the original readyBy; the flag-after-done check reads
+  // confirmedAt) -- so "write-only inside one function" is no longer the
+  // right invariant. What must still hold: every occurrence is accounted
+  // for by one of these three known, audited call sites, and NONE of them
+  // aggregate/group the values BY PERSON into a ranking/speed metric.
+  const undoSrc = extractFunction(fullScript, 'saveProjectPhaseStatusUndo');
+  const codeOnlyUndoSrc = stripComments(undoSrc);
+  const codeOnlyRenderPBSrc = stripComments(extractFunction(fullScript, 'renderProjectsBudget'));
+  const codeOnlyAfterDoneSrc = stripComments(extractFunction(fullScript, 'minsLoggedAfterDone'));
   const metaFieldNames = ['readyBy', 'readyAt', 'confirmedBy', 'confirmedAt'];
   for (const field of metaFieldNames) {
     const occurrences = (codeOnlyFullScript.match(new RegExp(field, 'g')) || []).length;
-    // Every LIVE-CODE occurrence must be inside saveProjectPhaseStatus()
-    // (write-only) -- if it appears more times than inside that one
-    // function, some OTHER code is reading/aggregating it, which must
-    // never exist.
-    const countInSaveFn = (codeOnlySaveStatusSrc.match(new RegExp(field, 'g')) || []).length;
-    check(`"${field}" appears ONLY inside saveProjectPhaseStatus() as live code (write-only, never read/aggregated elsewhere)`, occurrences === countInSaveFn && occurrences > 0);
+    const accountedFor =
+      (codeOnlySaveStatusSrc.match(new RegExp(field, 'g')) || []).length +
+      (codeOnlyUndoSrc.match(new RegExp(field, 'g')) || []).length +
+      (codeOnlyRenderPBSrc.match(new RegExp(field, 'g')) || []).length +
+      (codeOnlyAfterDoneSrc.match(new RegExp(field, 'g')) || []).length;
+    check(`"${field}" appears ONLY inside the four audited call sites (saveProjectPhaseStatus/saveProjectPhaseStatusUndo/renderProjectsBudget/minsLoggedAfterDone), never elsewhere`, occurrences === accountedFor && occurrences > 0);
   }
   check('no function name anywhere suggests per-person completion speed/ranking (e.g. "PhaseSpeed", "CompletionRate", "PersonProgress")',
     !/function\s+\w*(PhaseSpeed|CompletionRate|PersonProgress|ReadySpeed|ConfirmSpeed)\w*/i.test(fullScript));
