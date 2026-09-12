@@ -538,7 +538,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
            apAdminScores) removed together; see FINDINGS-2026-08-10.md. -->
       <div class="nav-item" data-page="leaves"><span class="nav-icon">◌</span>Leave</div>
       <div class="nav-item" data-page="teamleave"><span class="nav-icon">◫</span>Team Leave</div>
-      <div class="nav-item" data-page="asksquare"><span class="nav-icon">🤖</span>Ask Square</div>
+      <div class="nav-item" data-page="hrinfo"><span class="nav-icon">ℹ</span>HR Info</div>
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
       <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">◈</span>Manage</div>
       <div class="nav-item admin-only" data-page="studiohealth" style="display:none;"><span class="nav-icon">❖</span>Studio Health</div>
@@ -741,19 +741,49 @@ textarea.form-control{min-height:70px;resize:vertical;}
         <div id="myLeaveList"></div>
       </div>
 
-      <!-- ASK SQUARE -- OMS's first LLM-powered feature. Read-only Q&A over
-           the asking person's OWN data + public policy/holiday info only.
-           See FINDINGS-2026-08-10.md for the full architecture (server-side
-           endpoint, hard-coded own-data filter, grounded facts). -->
-      <div class="page" id="page-asksquare">
-        <h2 class="page-title">🤖 Ask Square</h2>
-        <div style="font-size:12px;color:#8A7E74;margin-bottom:16px;max-width:520px;">Ask about your own leave, attendance, and company policies. Ask Square only knows YOUR data and public company info — it can't see anyone else's records, and it can't approve, change, or delete anything.</div>
-        <div style="display:flex;gap:8px;margin-bottom:12px;max-width:600px;">
-          <input type="text" id="askSquareInput" placeholder="e.g. How much casual leave do I have left?" maxlength="500" style="flex:1;padding:10px 12px;border:1.5px solid #DBC9A8;border-radius:8px;font-size:13px;">
-          <button class="btn btn-primary" id="askSquareBtn">Ask</button>
+      <!-- HR INFO -- read-only structured HR info page (2026-09-12 pivot,
+           replaces the earlier AI-chatbot approach: no LLM, no API key, no
+           per-use cost. Reuses the same grounded data logic the chatbot
+           build already worked out -- days-present/next-holiday computation,
+           own-data scoping -- just displayed directly instead of phrased by
+           a model. Pure client-side read, same trust model as every other
+           OMS page (e.g. renderLeaves()): shows the viewer's OWN
+           attendance/balance from data already loaded, plus public
+           holidays/policy text. See FINDINGS-2026-08-10.md. -->
+      <div class="page" id="page-hrinfo">
+        <h2 class="page-title">ℹ️ HR Info</h2>
+        <div style="font-size:12px;color:#8A7E74;margin-bottom:16px;max-width:600px;">Your own attendance and leave balance, plus company-wide holidays and policies. This page only shows YOUR data and public company info — never anyone else's.</div>
+
+        <div class="card">
+          <div class="card-title">📅 My Attendance</div>
+          <div id="hrInfoAttendance"></div>
         </div>
-        <div id="askSquareStatus" style="display:none;font-size:12px;color:#8A7E74;margin-bottom:10px;max-width:600px;"></div>
-        <div id="askSquareAnswer" style="display:none;background:#fff;border:1px solid #E0D8CE;border-radius:10px;padding:16px;font-size:13px;line-height:1.6;color:#3D332A;max-width:600px;white-space:pre-wrap;"></div>
+
+        <div class="card">
+          <div class="card-title">🏦 My Leave Balance</div>
+          <div id="hrInfoBalance"></div>
+          <div style="margin-top:10px;font-size:11px;color:#A96E35;background:#FBF3E7;border-radius:6px;padding:8px 10px;">⚠ Leave balances are currently being reconciled — please confirm with HR before relying on this number.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🌴 Leave Policy</div>
+          <div id="hrInfoLeavePolicy"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">📆 Holidays</div>
+          <div id="hrInfoHolidays"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🕐 Office Timing, Late & Half-Day, WFH</div>
+          <div id="hrInfoTimingPolicy"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">📝 How to Apply for Leave</div>
+          <div id="hrInfoHowToApply"></div>
+        </div>
       </div>
 
       <!-- TEAM LEAVE CALENDAR -->
@@ -1392,7 +1422,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-11.2'; // Ask Square: OMS's first LLM-powered feature. New "Ask Square" tab (visible to everyone, own-data-only) posts { question, userId } to the new server-side api/ask-square.js, which hard-filters Firestore reads to the requester's own userId (plus public holidays/policy text), computes every fact in plain code, and makes ONE Anthropic Messages API call (claude-haiku-4-5) whose only job is to phrase the pre-computed facts -- never to invent a number. ANTHROPIC_API_KEY lives in Vercel env vars only. Rate-limited 20 questions/user/day (askSquareUsage collection). Leave-balance answers carry a mandatory reconciliation caveat until the auto-deduction fix lands. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-12.1'; // HR Info page (pivot away from the earlier AI-chatbot direction -- no LLM, no API key, no per-use cost, no server endpoint). New "HR Info" tab, visible to everyone: My Attendance (days present this month, own timeLogs only), My Leave Balance (own medLeft/casLeft, with a mandatory reconciliation caveat), Leave Policy / Office Timing & Late & Half-Day & WFH / How to Apply (all from companyData/hrPolicies, fetched fresh on open), Holidays (upcoming list, next one highlighted). Pure client-side read, same trust model as every other "my own data" page (renderLeaves() etc.) -- own attendance/balance from data already loaded, plus public policy/holiday text, never anyone else's. Reuses the grounded computation logic (days-present, next-holiday, policy-text fallback) the earlier chatbot build already worked out. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -6190,7 +6220,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='projects')   renderProjectsBudget();
     if(page==='timereport') initTimeReport();
     if(page==='leaves')     renderLeaves();
-    if(page==='asksquare')  renderAskSquare();
+    if(page==='hrinfo')     renderHrInfo();
     if(page==='teamleave')  { renderTeamLeave(); renderTeamLeaveBank(); }
     if(page==='approvals')  renderApprovals();
     if(page==='manage')       renderManage();
@@ -7291,68 +7321,114 @@ window.deleteHoliday=async function(id){
 };
 
 // ═══════════════════════════════════════════════════════
-// ASK SQUARE -- OMS's first LLM-powered feature (2026-09-11). Pure client:
-// POSTs { question, userId } to api/ask-square.js and displays whatever
-// text comes back. The ANTHROPIC_API_KEY, the own-data hard filter, and the
-// grounding logic all live server-side -- this file never sees any of it.
-// See FINDINGS-2026-08-10.md for the full architecture.
+// HR INFO -- read-only structured HR info page (2026-09-12 pivot away from
+// the earlier AI-chatbot direction: no LLM, no API key, no per-use cost, no
+// server endpoint). Reuses the SAME grounded data logic the chatbot build
+// already worked out (days-present computation, next-holiday lookup, own-
+// data scoping) -- just displayed directly instead of phrased by a model.
+// Pure client-side read, same trust model as every other "my own data" page
+// in this app (renderLeaves() etc.): the viewer sees THEIR OWN attendance/
+// balance from data already loaded, plus public holidays/policy text. No
+// cross-person data, ever -- same client-auth reality as the rest of OMS,
+// no worse, no better. See FINDINGS-2026-08-10.md.
 // ═══════════════════════════════════════════════════════
-function renderAskSquare() {
-  // Nothing to fetch on open -- no server-side state belongs to this page
-  // itself. Just make the input ready to type into.
-  document.getElementById('askSquareInput')?.focus();
+
+// Pure: count distinct dates with any productive time recorded. Ported
+// unchanged from the earlier api/ask-square.js build.
+function countDistinctDates(logs) {
+  const dates = new Set();
+  for (const log of logs || []) {
+    if (log.date && (log.durationMins || 0) > 0) dates.add(log.date);
+  }
+  return dates.size;
 }
 
-document.getElementById('askSquareBtn')?.addEventListener('click', submitAskSquareQuestion);
-document.getElementById('askSquareInput')?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') submitAskSquareQuestion();
-});
+// Pure: every holiday on or after todayStr, sorted ascending. Extended from
+// the chatbot build's earliestHolidayOnOrAfter() -- this page shows the
+// whole upcoming list with the next one highlighted, not just the first.
+function upcomingHolidays(holidaysList, todayStr) {
+  return (holidaysList || [])
+    .filter((h) => h && h.date >= todayStr)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
 
-async function submitAskSquareQuestion() {
-  const input = document.getElementById('askSquareInput');
-  const statusEl = document.getElementById('askSquareStatus');
-  const answerEl = document.getElementById('askSquareAnswer');
-  const btn = document.getElementById('askSquareBtn');
-  const question = input.value.trim();
-  if (!question) return;
+const HR_INFO_NOT_DOCUMENTED = 'Not documented yet — contact HR.';
 
-  btn.disabled = true;
-  answerEl.style.display = 'none';
-  statusEl.style.display = 'block';
-  statusEl.textContent = '🤔 Thinking…'; // V26: OMS's first "wait for a response" moment
+function hrInfoPolicyText(policies, field) {
+  const val = policies && policies[field];
+  return (typeof val === 'string' && val.trim()) ? val : HR_INFO_NOT_DOCUMENTED;
+}
 
-  // ~20s timeout, per scope -- Haiku is fast, so this only ever fires on a
-  // genuinely stuck request, not a slow-but-normal one.
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
-
+// hrPolicies is public, small, and rarely changes -- fetched fresh on every
+// page open (same "don't trust a stale snapshot" discipline Studio Health's
+// own on-demand tabs already use) rather than folded into the main 90-day
+// loadData() baseline.
+async function fetchHrPolicies() {
   try {
-    const resp = await fetch('/api/ask-square', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, userId: currentUser.id }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    const data = await resp.json().catch(() => ({}));
-    if (resp.ok && data.answer) {
-      answerEl.textContent = data.answer;
-      answerEl.style.display = 'block';
-      statusEl.style.display = 'none';
-    } else {
-      // Covers 429 (rate limit), 400 (bad input), 5xx (misconfigured/Anthropic
-      // failure) uniformly -- the server already put a friendly message in
-      // `message` for every one of these; never show a raw error to the user.
-      statusEl.textContent = data.message || 'Could not get an answer right now — try again, or ask HR directly.';
-    }
+    const snap = await db.collection('companyData').doc('hrPolicies').get({ source: 'server' });
+    return snap.exists ? snap.data() : {};
   } catch (e) {
-    clearTimeout(timeoutId);
-    statusEl.textContent = (e && e.name === 'AbortError')
-      ? 'This is taking longer than expected — try again, or ask HR directly.'
-      : 'Could not reach Ask Square right now — check your connection and try again.';
-  } finally {
-    btn.disabled = false;
+    console.error('[HR Info] failed to load hrPolicies:', e);
+    return {}; // fail to "not documented" for every field, never a broken page
   }
+}
+
+function hrInfoPolicyBlock(policies, rows) {
+  return rows.map(([label, field]) =>
+    `<div style="margin-bottom:10px;"><div style="font-weight:700;font-size:12px;margin-bottom:2px;">${label}</div><div style="font-size:12px;color:#5C4F42;">${hrInfoPolicyText(policies, field)}</div></div>`
+  ).join('');
+}
+
+async function renderHrInfo() {
+  // 1. My Attendance -- own timeLogs ONLY, this month so far.
+  const todayStr = fmt(new Date());
+  const firstOfMonth = todayStr.slice(0, 7) + '-01';
+  const myLogsThisMonth = timeLogs.filter(l => l.userId === currentUser.id && l.date >= firstOfMonth);
+  const daysPresent = countDistinctDates(myLogsThisMonth);
+  document.getElementById('hrInfoAttendance').innerHTML =
+    `<div style="font-size:24px;font-weight:700;color:#3D332A;">${daysPresent}</div>
+     <div style="font-size:12px;color:#8A7E74;">day${daysPresent === 1 ? '' : 's'} present this month (as of ${fmtD(todayStr)})</div>`;
+
+  // 2. My Leave Balance -- own user record ONLY.
+  const me = users.find(u => u.id === currentUser.id);
+  document.getElementById('hrInfoBalance').innerHTML = me
+    ? `<div style="display:flex;gap:24px;">
+         <div><div style="font-size:20px;font-weight:700;color:#6E8F52;">${me.casLeft}</div><div style="font-size:11px;color:#8A7E74;">Casual Leave left</div></div>
+         <div><div style="font-size:20px;font-weight:700;color:#6E8F52;">${me.medLeft}</div><div style="font-size:11px;color:#8A7E74;">Medical Leave left</div></div>
+       </div>`
+    : `<div style="color:#8A7E74;font-size:12px;">Could not find your leave balance record.</div>`;
+
+  // Public policy/holiday data -- no identity dimension, fetched fresh below.
+  const policies = await fetchHrPolicies();
+
+  // 3. Leave Policy
+  document.getElementById('hrInfoLeavePolicy').innerHTML = hrInfoPolicyBlock(policies, [
+    ['Casual Leave', 'casualLeave'],
+    ['Medical Leave', 'medicalLeave'],
+    ['Sandwich Rule', 'sandwichRule'],
+    ['Extra Leave (beyond entitlement)', 'extraLeave'],
+  ]);
+
+  // 4. Holidays -- upcoming only, next one highlighted.
+  const upcoming = upcomingHolidays(holidays, todayStr);
+  document.getElementById('hrInfoHolidays').innerHTML = upcoming.length
+    ? upcoming.map((h, i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;margin-bottom:4px;border-radius:6px;${i === 0 ? 'background:#EEF6E7;font-weight:700;' : 'border-bottom:1px solid #F0E6D6;'}"><span>${h.name}${i === 0 ? ' — next up' : ''}</span><span>${fmtD(h.date)}</span></div>`).join('')
+    : `<div style="color:#8A7E74;font-size:12px;">No upcoming holidays listed.</div>`;
+
+  // 5. Office Timing / Late / Half-Day / WFH
+  document.getElementById('hrInfoTimingPolicy').innerHTML = hrInfoPolicyBlock(policies, [
+    ['Office Timing', 'officeTiming'],
+    ['Late Policy', 'latePolicy'],
+    ['Half-Day', 'halfDay'],
+    ['Work From Home', 'wfh'],
+  ]);
+
+  // 6. How to Apply -- leaveApplicationProcess is not yet a real field in
+  // companyData/hrPolicies (see FINDINGS-2026-08-10.md); this correctly
+  // falls back to "contact HR" until the owner writes that content, and
+  // will pick it up automatically once added.
+  document.getElementById('hrInfoHowToApply').innerHTML =
+    `<div style="font-size:12px;color:#5C4F42;">${hrInfoPolicyText(policies, 'leaveApplicationProcess')}</div>`;
 }
 
 // ═══════════════════════════════════════════════════════
