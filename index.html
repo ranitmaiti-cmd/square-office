@@ -536,9 +536,8 @@ textarea.form-control{min-height:70px;resize:vertical;}
            appraisalData docs ever written. Nav item, page div, and
            renderAppraisal() (+ its local getApQtr/computeScores/apQtrOffset/
            apAdminScores) removed together; see FINDINGS-2026-08-10.md. -->
-      <div class="nav-item" data-page="leaves"><span class="nav-icon">◌</span>Leave</div>
+      <div class="nav-item" data-page="leaves"><span class="nav-icon">◌</span>Leave & HR</div>
       <div class="nav-item" data-page="teamleave"><span class="nav-icon">◫</span>Team Leave</div>
-      <div class="nav-item" data-page="hrinfo"><span class="nav-icon">ℹ</span>HR Info</div>
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
       <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">◈</span>Manage</div>
       <div class="nav-item admin-only" data-page="studiohealth" style="display:none;"><span class="nav-icon">❖</span>Studio Health</div>
@@ -730,39 +729,30 @@ textarea.form-control{min-height:70px;resize:vertical;}
         </div>
       </div>
 
-      <!-- LEAVE -->
+      <!-- LEAVE & HR -- id/data-page deliberately left as "leaves" (2026-09-12
+           tab merge: folds the former standalone HR Info page into this one,
+           see FINDINGS-2026-08-10.md). Apply-for-leave stays the primary
+           action at the top, UNCHANGED -- renderLeaves(), applyLeaveBtn,
+           the leave modal, cancelLeave(), and the approval handlers are not
+           touched by this merge, only where their container markup sits.
+           The HR Info sections (renderHrInfo(), also unchanged internally)
+           are appended below. HR Info's own separate balance card was
+           dropped -- the reconciliation caveat is attached directly under
+           the EXISTING balance-grid below instead, so the balance is shown
+           exactly once, not twice. -->
       <div class="page" id="page-leaves">
-        <h2 class="page-title">🌴 Leave Management</h2>
+        <h2 class="page-title">🌴 Leave & HR</h2>
         <div class="balance-grid" id="leaveBalance"></div>
+        <div style="margin-top:-6px;margin-bottom:16px;font-size:11px;color:#A96E35;background:#FBF3E7;border-radius:6px;padding:8px 10px;">⚠ Leave balances are currently being reconciled — please confirm with HR before relying on this number.</div>
         <div class="section-header">
           <h3 style="font-weight:700;">My Applications</h3>
           <button class="btn btn-primary" id="applyLeaveBtn">+ Apply</button>
         </div>
         <div id="myLeaveList"></div>
-      </div>
 
-      <!-- HR INFO -- read-only structured HR info page (2026-09-12 pivot,
-           replaces the earlier AI-chatbot approach: no LLM, no API key, no
-           per-use cost. Reuses the same grounded data logic the chatbot
-           build already worked out -- days-present/next-holiday computation,
-           own-data scoping -- just displayed directly instead of phrased by
-           a model. Pure client-side read, same trust model as every other
-           OMS page (e.g. renderLeaves()): shows the viewer's OWN
-           attendance/balance from data already loaded, plus public
-           holidays/policy text. See FINDINGS-2026-08-10.md. -->
-      <div class="page" id="page-hrinfo">
-        <h2 class="page-title">ℹ️ HR Info</h2>
-        <div style="font-size:12px;color:#8A7E74;margin-bottom:16px;max-width:600px;">Your own attendance and leave balance, plus company-wide holidays and policies. This page only shows YOUR data and public company info — never anyone else's.</div>
-
-        <div class="card">
+        <div class="card" style="margin-top:24px;">
           <div class="card-title">📅 My Attendance</div>
           <div id="hrInfoAttendance"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">🏦 My Leave Balance</div>
-          <div id="hrInfoBalance"></div>
-          <div style="margin-top:10px;font-size:11px;color:#A96E35;background:#FBF3E7;border-radius:6px;padding:8px 10px;">⚠ Leave balances are currently being reconciled — please confirm with HR before relying on this number.</div>
         </div>
 
         <div class="card">
@@ -1422,7 +1412,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-12.1'; // HR Info page (pivot away from the earlier AI-chatbot direction -- no LLM, no API key, no per-use cost, no server endpoint). New "HR Info" tab, visible to everyone: My Attendance (days present this month, own timeLogs only), My Leave Balance (own medLeft/casLeft, with a mandatory reconciliation caveat), Leave Policy / Office Timing & Late & Half-Day & WFH / How to Apply (all from companyData/hrPolicies, fetched fresh on open), Holidays (upcoming list, next one highlighted). Pure client-side read, same trust model as every other "my own data" page (renderLeaves() etc.) -- own attendance/balance from data already loaded, plus public policy/holiday text, never anyone else's. Reuses the grounded computation logic (days-present, next-holiday, policy-text fallback) the earlier chatbot build already worked out. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-12.2'; // Merge the Leave and HR Info tabs into one "Leave & HR" tab (Option A). id="page-leaves"/data-page="leaves" kept internally unchanged -- only the visible label changed. Apply-for-leave stays the primary action at the top, completely untouched: renderLeaves()/applyLeaveBtn/the leave modal/cancelLeave()/the approval handlers have zero lines changed, only where their container markup sits. HR Info's sections (My Attendance, Leave Policy, Holidays, Office Timing/Late/Half-Day/WFH, How to Apply) are appended below; its separate "My Leave Balance" card was dropped to avoid showing the balance twice -- the reconciliation caveat now sits as static markup directly under the existing balance-grid instead. The standalone HR Info tab/page/nav-item are gone, no dangling references. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -6219,8 +6209,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='timelog')    renderTimeLog();
     if(page==='projects')   renderProjectsBudget();
     if(page==='timereport') initTimeReport();
-    if(page==='leaves')     renderLeaves();
-    if(page==='hrinfo')     renderHrInfo();
+    if(page==='leaves')     { renderLeaves(); renderHrInfo(); } // 2026-09-12 tab merge: HR Info folded into Leave & HR, both render side by side, neither touched internally
     if(page==='teamleave')  { renderTeamLeave(); renderTeamLeaveBank(); }
     if(page==='approvals')  renderApprovals();
     if(page==='manage')       renderManage();
@@ -7389,19 +7378,17 @@ async function renderHrInfo() {
     `<div style="font-size:24px;font-weight:700;color:#3D332A;">${daysPresent}</div>
      <div style="font-size:12px;color:#8A7E74;">day${daysPresent === 1 ? '' : 's'} present this month (as of ${fmtD(todayStr)})</div>`;
 
-  // 2. My Leave Balance -- own user record ONLY.
-  const me = users.find(u => u.id === currentUser.id);
-  document.getElementById('hrInfoBalance').innerHTML = me
-    ? `<div style="display:flex;gap:24px;">
-         <div><div style="font-size:20px;font-weight:700;color:#6E8F52;">${me.casLeft}</div><div style="font-size:11px;color:#8A7E74;">Casual Leave left</div></div>
-         <div><div style="font-size:20px;font-weight:700;color:#6E8F52;">${me.medLeft}</div><div style="font-size:11px;color:#8A7E74;">Medical Leave left</div></div>
-       </div>`
-    : `<div style="color:#8A7E74;font-size:12px;">Could not find your leave balance record.</div>`;
+  // 2026-09-12 tab merge: the separate "My Leave Balance" section was
+  // dropped here -- the page-leaves balance-grid above (renderLeaves(),
+  // untouched) already shows medLeft/casLeft; showing it a second time in
+  // a different style would be redundant. The reconciliation caveat now
+  // lives as static markup directly under that existing balance-grid
+  // instead. See FINDINGS-2026-08-10.md.
 
   // Public policy/holiday data -- no identity dimension, fetched fresh below.
   const policies = await fetchHrPolicies();
 
-  // 3. Leave Policy
+  // 2. Leave Policy
   document.getElementById('hrInfoLeavePolicy').innerHTML = hrInfoPolicyBlock(policies, [
     ['Casual Leave', 'casualLeave'],
     ['Medical Leave', 'medicalLeave'],
@@ -7409,13 +7396,13 @@ async function renderHrInfo() {
     ['Extra Leave (beyond entitlement)', 'extraLeave'],
   ]);
 
-  // 4. Holidays -- upcoming only, next one highlighted.
+  // 3. Holidays -- upcoming only, next one highlighted.
   const upcoming = upcomingHolidays(holidays, todayStr);
   document.getElementById('hrInfoHolidays').innerHTML = upcoming.length
     ? upcoming.map((h, i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;margin-bottom:4px;border-radius:6px;${i === 0 ? 'background:#EEF6E7;font-weight:700;' : 'border-bottom:1px solid #F0E6D6;'}"><span>${h.name}${i === 0 ? ' — next up' : ''}</span><span>${fmtD(h.date)}</span></div>`).join('')
     : `<div style="color:#8A7E74;font-size:12px;">No upcoming holidays listed.</div>`;
 
-  // 5. Office Timing / Late / Half-Day / WFH
+  // 4. Office Timing / Late / Half-Day / WFH
   document.getElementById('hrInfoTimingPolicy').innerHTML = hrInfoPolicyBlock(policies, [
     ['Office Timing', 'officeTiming'],
     ['Late Policy', 'latePolicy'],
@@ -7423,7 +7410,7 @@ async function renderHrInfo() {
     ['Work From Home', 'wfh'],
   ]);
 
-  // 6. How to Apply -- leaveApplicationProcess is not yet a real field in
+  // 5. How to Apply -- leaveApplicationProcess is not yet a real field in
   // companyData/hrPolicies (see FINDINGS-2026-08-10.md); this correctly
   // falls back to "contact HR" until the owner writes that content, and
   // will pick it up automatically once added.

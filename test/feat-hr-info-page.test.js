@@ -1,24 +1,27 @@
-// Fixture for the HR Info page (2026-09-12) -- the pivot away from the
-// earlier AI-chatbot direction. No LLM, no API key, no server endpoint:
-// a pure client-side read/display page, same trust model as every other
-// "my own data" page in this app (renderLeaves() etc.).
+// Fixture for renderHrInfo() and its helpers -- originally the standalone
+// HR Info page (2026-09-12 AI-chatbot pivot), now folded into the merged
+// "Leave & HR" tab (2026-09-12, see test/fix-merge-leave-hrinfo-tabs.test.js
+// for the tab-structure/no-dangling-references/apply-flow-untouched claims).
+// This file covers what's still true regardless of which tab hosts these
+// sections: renderHrInfo()'s own internal correctness.
 //
 // Central claims under test:
 //  - own-data scoping: rendered against a store holding a SECOND user's
-//    timeLogs/balance, the page shows ONLY the current user's own
-//    days-present count and leave balance -- zero mention of the other
-//    user's name or numbers anywhere across all 6 rendered sections
+//    timeLogs, the page shows ONLY the current user's own days-present
+//    count -- zero mention of the other user's name/numbers/salary
+//    anywhere across the sections renderHrInfo() still owns (My
+//    Attendance, Leave Policy, Holidays, Office Timing, How to Apply --
+//    NOT balance, which renderHrInfo() no longer renders at all post-merge)
 //  - countDistinctDates()/upcomingHolidays() are pure and correct
 //    (zero-duration logs excluded, holiday-on-today included, past
 //    holidays excluded, correct sort/highlight of the next one)
 //  - policy text falls back to "contact HR" for missing/empty fields,
 //    including leaveApplicationProcess (not yet a real hrPolicies field)
+//  - renderHrInfo() no longer touches any balance element at all (the
+//    merge fixture proves #hrInfoBalance is gone file-wide; this proves
+//    the function itself doesn't try to write to it)
 //  - the leave-balance reconciliation caveat is present UNCONDITIONALLY
-//    (static markup, not something that could be silently dropped)
-//  - the nav tab is visible to EVERYONE (no admin-only gate)
-//  - the AI-chatbot approach is genuinely gone: no /api/ask-square
-//    reference, no AbortController-based fetch, submitAskSquareQuestion
-//    no longer exists as a live identifier
+//    somewhere in the page (static markup, not something JS could omit)
 //  - fetchHrPolicies() reads companyData/hrPolicies with source:'server'
 //
 // Run with: node test/feat-hr-info-page.test.js
@@ -166,15 +169,14 @@ function extractConstLine(source, name) {
   await vm.runInContext('renderHrInfo()', sandbox);
 
   const attendanceHtml = elements.hrInfoAttendance.innerHTML;
-  const balanceHtml = elements.hrInfoBalance.innerHTML;
-  const allSectionsHtml = ['hrInfoAttendance', 'hrInfoBalance', 'hrInfoLeavePolicy', 'hrInfoHolidays', 'hrInfoTimingPolicy', 'hrInfoHowToApply']
+  const allSectionsHtml = ['hrInfoAttendance', 'hrInfoLeavePolicy', 'hrInfoHolidays', 'hrInfoTimingPolicy', 'hrInfoHowToApply']
     .map((id) => elements[id] ? elements[id].innerHTML : '').join('\n');
 
   check('attendance shows 2 distinct present days (Alice\'s own logs only, zero-duration excluded)', attendanceHtml.includes('>2<'));
-  check('balance shows Alice\'s own numbers (4 medical, 3.5 casual)', balanceHtml.includes('>4<') && balanceHtml.includes('>3.5<'));
-  check('ZERO mention of the other user\'s name anywhere across all 6 rendered sections', !allSectionsHtml.includes('Bob'));
+  check('ZERO mention of the other user\'s name anywhere across renderHrInfo()\'s sections', !allSectionsHtml.includes('Bob'));
   check('ZERO mention of the other user\'s balances (99/77) anywhere', !allSectionsHtml.includes('99') && !allSectionsHtml.includes('77'));
   check('ZERO mention of the other user\'s salary field', !allSectionsHtml.includes('999999'));
+  check('renderHrInfo() never even attempts to create/touch a #hrInfoBalance element (post-merge: no separate balance section)', elements.hrInfoBalance === undefined);
 
   check('leave policy section shows the real casualLeave/medicalLeave/sandwichRule/extraLeave text', elements.hrInfoLeavePolicy.innerHTML.includes('5 CL/year') && elements.hrInfoLeavePolicy.innerHTML.includes('Forward-only'));
   check('timing policy section shows officeTiming/halfDay/wfh text', elements.hrInfoTimingPolicy.innerHTML.includes('No rigid start/end time') && elements.hrInfoTimingPolicy.innerHTML.includes('2:30 PM'));
@@ -193,14 +195,10 @@ function extractConstLine(source, name) {
   check('the reconciliation caveat text is in the page markup itself, not something JS could omit',
     /being reconciled.*confirm with HR/i.test(src));
 
-  console.log('\n=== Nav tab: visible to EVERYONE, not admin-gated ===');
-  const navLineMatch = src.match(/<div class="nav-item[^"]*" data-page="hrinfo">[\s\S]{0,80}/);
-  assert.ok(navLineMatch, 'could not find the HR Info nav-item markup');
-  check('nav item has NO "admin-only" class', !navLineMatch[0].includes('admin-only'));
-  check('nav item has NO inline display:none', !navLineMatch[0].includes('display:none'));
-  check('nav item label reads "HR Info"', navLineMatch[0].includes('HR Info'));
-  check('page div #page-hrinfo exists', src.includes('id="page-hrinfo"'));
-  check("routing wires data-page='hrinfo' to renderHrInfo()", /if\(page===['"]hrinfo['"]\)\s*renderHrInfo\(\);/.test(fullScript));
+  // Nav-tab visibility, page-container id, and routing are now the merged
+  // "Leave & HR" tab's concern (data-page="leaves", not "hrinfo") --
+  // covered in full by test/fix-merge-leave-hrinfo-tabs.test.js, not
+  // re-tested here to avoid asserting on markup this file no longer owns.
 
   // ─────────────────────────────────────────────────────────────
   console.log('\n=== The AI-chatbot approach is genuinely gone ===');
