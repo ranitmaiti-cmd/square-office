@@ -140,7 +140,10 @@ function extractDivBlock(html, startMarker) {
   const pageLeavesBlock = extractDivBlock(src, '<div class="page" id="page-leaves">');
   check('#quickAskInput exists inside page-leaves', pageLeavesBlock.includes('id="quickAskInput"'));
   check('#quickAskBtn exists inside page-leaves', pageLeavesBlock.includes('id="quickAskBtn"'));
-  check('#quickAskAnswer exists inside page-leaves', pageLeavesBlock.includes('id="quickAskAnswer"'));
+  // 2026-09-13: the single-answer div was replaced by the #quickAskHistory
+  // bubble scrollback -- see test/feat-quick-ask-enhancements.test.js for
+  // full coverage of chips/bubbles/the new categories.
+  check('#quickAskHistory exists inside page-leaves', pageLeavesBlock.includes('id="quickAskHistory"'));
   check('Quick Ask markup appears BEFORE the balance-grid (it is at the top)',
     pageLeavesBlock.indexOf('id="quickAskInput"') < pageLeavesBlock.indexOf('id="leaveBalance"'));
 
@@ -171,7 +174,13 @@ function extractDivBlock(html, startMarker) {
   const keywordMatchFn = extractFunction(fullScript, 'quickAskKeywordMatches').src;
 
   function el(elements, id) {
-    if (!elements[id]) elements[id] = { value: '', style: { display: 'none' }, _text: '', set textContent(v) { this._text = v; }, get textContent() { return this._text; } };
+    if (!elements[id]) {
+      elements[id] = {
+        value: '', style: { display: 'none' }, _html: '',
+        set textContent(v) { this._html = v; }, get textContent() { return this._html; },
+        set innerHTML(v) { this._html = v; }, get innerHTML() { return this._html; },
+      };
+    }
     return elements[id];
   }
 
@@ -196,6 +205,7 @@ function extractDivBlock(html, startMarker) {
         { date: '2026-10-17', name: 'Durga Puja Maha Sashthi' },
         { date: '2026-12-25', name: 'Christmas' },
       ],
+      leaveRequests: [], // pending/history categories aren't exercised by this file -- see feat-quick-ask-enhancements.test.js
       hrInfoPoliciesCache: hrInfoPoliciesCacheValue,
     };
   }
@@ -211,18 +221,23 @@ function extractDivBlock(html, startMarker) {
     // leaveApplicationProcess deliberately OMITTED -- must fall back
   };
 
+  const maxHistoryConst = extractConstLine(fullScript, 'QUICK_ASK_MAX_HISTORY');
+  const renderHistorySrc = extractFunction(fullScript, 'renderQuickAskHistory').src;
+
   function buildAndRun(question, hrInfoPoliciesCacheValue) {
     const elements = {};
     const sandbox = makeSandbox(elements, hrInfoPoliciesCacheValue);
     vm.createContext(sandbox);
     vm.runInContext([
       fmtSrc, fmtDSrc, countSrc, upcomingSrc, notDocConst, policyTextSrc,
-      caveatConst, noMatchConst, categoriesConst, keywordMatchFn,
-      matchFn.src, buildFn.src, handleFn.src,
+      caveatConst, noMatchConst, maxHistoryConst, categoriesConst, keywordMatchFn,
+      matchFn.src, buildFn.src, 'let quickAskHistory = [];', renderHistorySrc, handleFn.src,
     ].join('\n'), sandbox);
     el(elements, 'quickAskInput').value = question;
     vm.runInContext('handleQuickAsk()', sandbox);
-    return { answer: elements.quickAskAnswer._text, shown: elements.quickAskAnswer.style.display, sandbox };
+    const history = vm.runInContext('quickAskHistory', sandbox);
+    const last = history[history.length - 1];
+    return { answer: last ? last.answer : '', history, sandbox };
   }
 
   const KEYWORD_CASES = [
