@@ -1473,7 +1473,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-13.5'; // V29 (Recognition only -- What's Due was descoped, see FINDINGS-2026-08-10.md: project due dates at Square are per-submission and shift, so a single project.dueDate field was the wrong shape; What's Due needs a rethink as submission-based tracking, separate future work). WINS THIS QUARTER: PROJECT-level positive facts only, read-only, capped to 4, never a ranking, never person-level (see FINDINGS-2026-08-10.md's scoping note on why person-level "recognition" was deliberately excluded -- mentoring etc. isn't an objective fact anywhere in this codebase, only a private per-person admin review rating). Extracts a shared computeProjectStats(proj) helper out of renderProjectsBudget() (same formulas, zero behavior change there) so Recognition and Projects & Budget never risk a second, drifting definition of "on track."
+const APP_VERSION = '2026-09-13.6'; // V30: runAttendanceAutoDeduction() converted from AUTO-DEDUCT to FLAG-FOR-REVIEW. Trigger condition unchanged (working day, no approved leave, zero OMS timeLog activity that day -- still never checks biometric data, none exists in-app). What changed: instead of writing status:'approved'+autoDeducted:true and decrementing casLeft/medLeft immediately, it now writes a status:'pending' leaveRequests doc (isSystemFlagged:true, autoDeducted:false) and stops -- no balance write happens in this function anymore. The EXISTING renderApprovals() Approve/Reject flow decides from there: Approve is the ONLY place autoDeducted flips to true and the ONLY place casLeft/medLeft changes (so the 3-consecutive-months warning, which reads autoDeducted, only ever counts confirmed absences); Reject dismisses with zero balance impact. renderApprovals() shows a distinct "🚩 Possible Absence" label for system-flagged items so an admin can't confuse them with a person's own leave request. Visible passively in the person's own Leave & HR (renderLeaves()) same as any pending request, but with no Cancel button -- employee self-dismiss is deliberately out of scope this build. Reversing the 264 pre-existing auto-deducted docs from before this fix is a separate, deliberately unstarted next step. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -5864,6 +5864,29 @@ const ATTENDANCE_EXCLUDED = ['debaleena','rajkumar','rajesh kumar','gayaram'];
 const POLICY_EFFECTIVE_DATE = '2026-05-06'; // 1.5 CL, sandwich rule, same-day block — all from this date
 const ATTENDANCE_DEDUCT_KEY = 'lastAttendanceCheck'; // stored in companyData
 
+// V30 (flag-for-review, 2026-09-13): was AUTO-DEDUCT -- this scan used to
+// write status:'approved' + decrement casLeft/medLeft the instant it found
+// a working day with no approved leave and no OMS timeLog activity, with
+// zero human check in between. Read-only scoping (FINDINGS-2026-08-10.md)
+// found the trigger never consults biometric data at all (none exists
+// in-app to check) and confirmed 264 auto-deducted records already exist
+// in production from this over-broad trigger, including impossible
+// negative CL balances (Souvik, Rai) that a manual correction couldn't
+// make stick -- because this function kept generating new ones on every
+// admin login. The trigger condition is UNCHANGED (Checks 1-3 below,
+// byte-identical in logic); only the CONSEQUENCE changes: instead of
+// deducting, it now writes a status:'pending' leaveRequests doc and lets
+// the EXISTING renderApprovals() Approve/Reject flow decide, the same
+// path a manually-submitted leave request already goes through. This
+// function itself never writes to casLeft/medLeft anymore -- that write
+// moved entirely into the Approve button handler (see its own comment
+// there). autoDeducted is deliberately left false here and set true only
+// on Approve, so the 3-month-warning block below (unchanged) keeps
+// counting CONFIRMED absences, not merely-flagged ones.
+//
+// Reversing the 264 pre-existing auto-deducted docs is explicitly OUT OF
+// SCOPE for this build -- a separate, careful per-person step (same
+// discipline as the 2026-09-11 holiday-error reversal), not bundled here.
 async function runAttendanceAutoDeduction() {
   if (!currentUser?.isAdmin) return;
 
@@ -5901,13 +5924,7 @@ async function runAttendanceAutoDeduction() {
     !ATTENDANCE_EXCLUDED.includes(u.name.toLowerCase().trim())
   );
 
-  const deductions = []; // { user, date, deductAmt, deductFrom }
-  let clUpdates = {}; // userId -> new casLeft when ML exhausted
-  const userUpdates = {}; // userId -> new medLeft value
-
-  staffToCheck.forEach(user => {
-    userUpdates[user.id] = user.medLeft ?? 12;
-  });
+  const flags = []; // { user, date, deductAmt, deductFrom } -- deductFrom is a PROVISIONAL suggestion only
 
   for (const ds of workDaysToCheck) {
     for (const user of staffToCheck) {
@@ -5939,20 +5956,21 @@ async function runAttendanceAutoDeduction() {
       // log entry that day, regardless of productive flag or inProgress
       // state. Deliberately lenient: a false "not absent" costs nothing (an
       // admin catches genuine absences in monthly biometric review anyway),
-      // a false "absent" wrongly docks real leave.
+      // a false "absent" wrongly docks real leave. NOTE: this is exactly
+      // the case V30 above stops trusting blindly -- it's still the
+      // trigger, but now only a FLAG, not an automatic deduction.
       const hasAnyActivity = timeLogs.some(l => l.userId === user.id && l.date === ds);
       if (hasAnyActivity) continue;
 
-      // → Mark as absent: ML first, fallback to CL if ML exhausted
-      // V14.2.45: Forward sandwich — if absent day is followed by closed days, count them too
-      // But only count sandwich days not already covered by another absence/leave record
+      // → Flag as a possible absence: ML first, fallback to CL if ML
+      // exhausted. V14.2.45: Forward sandwich — if the flagged day is
+      // followed by closed days, count them too, only where not already
+      // covered by another approved leave/absence record.
       let deductAmt = 1.0;
-      // Check forward sandwich: walk forward from ds, count consecutive closed days
       const absentDate = new Date(ds);
       let probe = new Date(absentDate); probe.setDate(probe.getDate()+1);
       while(probe.getDay()===0 || is24Sat(probe)){
         const probeStr = fmt(probe);
-        // Only sandwich if no existing leave/deduction on that closed day
         const probeHasLeave = leaveRequests.some(l =>
           l.userId === user.id && l.status === 'approved' &&
           probeStr >= l.startDate && probeStr <= l.endDate
@@ -5960,33 +5978,37 @@ async function runAttendanceAutoDeduction() {
         if(!probeHasLeave) deductAmt += 1.0;
         probe.setDate(probe.getDate()+1);
       }
-      const curML = userUpdates[user.id] ?? user.medLeft ?? 12;
-      if(curML > 0){
-        userUpdates[user.id] = Math.round((curML - deductAmt) * 10) / 10;
-        deductions.push({ user, date: ds, deductAmt, deductFrom: 'medical' });
-      } else {
-        // ML exhausted — deduct from CL
-        if(!clUpdates) clUpdates = {};
-        if(clUpdates[user.id] === undefined) clUpdates[user.id] = user.casLeft ?? 5;
-        clUpdates[user.id] = Math.round((clUpdates[user.id] - deductAmt) * 10) / 10;
-        deductions.push({ user, date: ds, deductAmt, deductFrom: 'casual' });
-      }
+      // V30: this is now purely a SUGGESTED bank for the admin to see on
+      // the flagged card -- nothing is actually decremented here, so
+      // there's no need to track a running virtual depletion across
+      // multiple flagged days in the same scan. Read straight off the
+      // person's CURRENT balance; the real, authoritative choice happens
+      // fresh at Approve time against whatever the balance is by then,
+      // exactly like a manually-submitted leave request already works.
+      const deductFrom = (user.medLeft ?? 12) > 0 ? 'medical' : 'casual';
+      flags.push({ user, date: ds, deductAmt, deductFrom });
     }
   }
 
-  if (deductions.length === 0) {
-    console.log('✅ Attendance check: no absences found');
+  if (flags.length === 0) {
+    console.log('✅ Attendance check: no possible absences found');
   } else {
-    console.log(`⚠️ Attendance check: ${deductions.length} auto-deductions to apply`);
+    console.log(`🚩 Attendance check: ${flags.length} possible absence(s) flagged for admin review`);
   }
 
-  // Apply deductions to Firebase
-  for (const { user, date, deductAmt, deductFrom } of deductions) {
-    // Calculate sandwich end date
+  // V30: write each as a PENDING leave request for admin review -- no
+  // status:'approved', no autoDeducted:true, no balance write. The doc is
+  // otherwise shaped exactly like a real leave request (type/leaveType/
+  // days/dates) so it flows through the SAME renderApprovals() Approve/
+  // Reject UI and the SAME renderLeaves() "My Leave" visibility a
+  // manually-submitted request already gets -- isSystemFlagged is the one
+  // new field that lets both of those distinguish "the system flagged
+  // this" from "the person asked for this."
+  for (const { user, date, deductAmt, deductFrom } of flags) {
     let sandwichEnd = new Date(date);
     let sp = new Date(sandwichEnd); sp.setDate(sp.getDate()+1);
     while(sp.getDay()===0 || is24Sat(sp)){ sandwichEnd=new Date(sp); sp.setDate(sp.getDate()+1); }
-    const autoLeave = {
+    const flagRecord = {
       id: genId(),
       userId: user.id,
       userName: user.name,
@@ -5996,46 +6018,24 @@ async function runAttendanceAutoDeduction() {
       endDate: fmt(sandwichEnd),
       days: deductAmt,
       isHalf: false,
-      reason: 'Absent (no timelog activity)', // V14.3.23: was 'Absent (biometric)' -- nothing biometric is actually checked
-      status: 'approved',
-      autoDeducted: true,
-      date: fmt(new Date()),
-      approvedBy: 'System',
-      approvedAt: new Date().toISOString()
+      reason: '🚩 System-flagged: possible absence — no OMS activity logged',
+      status: 'pending',
+      autoDeducted: false, // set true ONLY on admin Approve -- see renderApprovals()
+      isSystemFlagged: true,
+      date: fmt(new Date())
     };
     try {
-      await db.collection('leaveRequests').doc(autoLeave.id).set(autoLeave);
-      leaveRequests.push(autoLeave);
-      console.log(`  Auto-deducted: ${user.name} on ${date}`);
-    } catch(e) { console.error('Failed to save auto-leave for', user.name, date, e); }
+      await db.collection('leaveRequests').doc(flagRecord.id).set(flagRecord);
+      leaveRequests.push(flagRecord);
+      console.log(`  Flagged for review: ${user.name} on ${date}`);
+    } catch(e) { console.error('Failed to save flagged absence for', user.name, date, e); }
   }
 
-  // Update user balances (ML and CL separately)
-  // V14.2.48: Write to BOTH users/{id} AND squareDB.users array to ensure dashboard consistency
-  let anyBalanceChanged = false;
-  for (const user of staffToCheck) {
-    let changed = false;
-    const newML = userUpdates[user.id];
-    if (newML !== undefined && newML !== (user.medLeft ?? 12)) {
-      user.medLeft = newML;
-      changed = true;
-    }
-    const newCL = clUpdates[user.id];
-    if (newCL !== undefined && newCL !== (user.casLeft ?? 5)) {
-      user.casLeft = newCL;
-      changed = true;
-    }
-    if(changed){
-      anyBalanceChanged = true;
-      try {
-        await saveUser(user);
-        console.log(`  Balance updated: ${user.name} ML=${user.medLeft} CL=${user.casLeft}`);
-      } catch(e) { console.error('Failed to update balance for', user.name, e); }
-    }
-  }
-
-  // V14.2.40: Check for 3 consecutive months of auto-deductions
-  if (deductions.length > 0 || true) { // always check pattern
+  // V14.2.40: Check for 3 consecutive months of auto-deductions. Reads
+  // l.autoDeducted, which V30 now only sets true at admin CONFIRM time --
+  // so this still counts genuinely confirmed absences, never merely
+  // flagged-and-pending ones. Unchanged otherwise.
+  {
     const staffToWarn = users.filter(u => !u.isAdmin && !ATTENDANCE_EXCLUDED.includes(u.name.toLowerCase().trim()));
     for (const user of staffToWarn) {
       // Get last 3 months
@@ -6078,17 +6078,17 @@ async function runAttendanceAutoDeduction() {
     console.log(`✅ Attendance check complete. lastAttendanceCheck updated to ${fmt(yesterday)}`);
   } catch(e) { console.error('Failed to update lastAttendanceCheck', e); }
 
-  // Show summary toast if any deductions were made
-  if (deductions.length > 0) {
+  // Show summary toast if any possible absences were flagged
+  if (flags.length > 0) {
     const summary = {};
-    deductions.forEach(({user, date}) => {
+    flags.forEach(({user, date}) => {
       if (!summary[user.name]) summary[user.name] = [];
       summary[user.name].push(date);
     });
     const lines = Object.entries(summary).map(([name, dates]) =>
-      `${name}: ${dates.length} day(s) auto-deducted`
+      `${name}: ${dates.length} day(s) flagged for review`
     ).join('\n');
-    try { showToast(`📋 Attendance check complete:\n${lines}`, 6000); } catch(e) {}
+    try { showToast(`🚩 Attendance check complete — possible absences flagged, awaiting your review in Approvals:\n${lines}`, 6000); } catch(e) {}
     // Refresh dashboard and leave views
     renderDashboard();
     updateApprovalBadge();
@@ -9048,7 +9048,12 @@ function renderLeaves(){
   if(!my.length){ el.innerHTML='<p style="color:#8A7E74;padding:16px;">No applications yet.</p>'; return; }
   el.innerHTML=my.map(lv=>{
     const dateRange = lv.isHalf ? fmtD(lv.startDate) + ' (Half Day)' : `${fmtD(lv.startDate)} → ${fmtD(lv.endDate)}`;
-    const cancelBtn = lv.status==='pending' ? `<button class="btn btn-danger btn-sm" onclick="cancelLeave('${lv.id}')" style="margin-left:8px;">Cancel</button>` : '';
+    // V30: a system-flagged possible absence gets NO Cancel button here --
+    // self-dismiss is explicitly out of scope for this build (the owner
+    // wants to see every flag reviewed by an admin first). It's still
+    // fully VISIBLE in this list like any other request, satisfying the
+    // "notify the person" intent -- they just can't dismiss it themselves.
+    const cancelBtn = (lv.status==='pending' && !lv.isSystemFlagged) ? `<button class="btn btn-danger btn-sm" onclick="cancelLeave('${lv.id}')" style="margin-left:8px;">Cancel</button>` : '';
     return `<div class="approval-card"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">${lv.type==='medical'?'🏥 Medical':'🌴 Casual'} Leave${lv.isHalf?' 🕐':''}</div><div style="font-size:11px;color:#8A7E74;">${dateRange} · ${lv.days} day${lv.days!==1?'s':''}</div></div><span class="badge badge-${lv.status}">${lv.status}${cancelBtn}</span></div><div style="font-size:12px;color:#5C4F42;">${lv.reason}</div></div>`;
   }).join('');
 }
@@ -9390,7 +9395,21 @@ function renderApprovals(){
     const c=document.createElement('div'); c.className='approval-card';
     const dateRange = lv.isHalf ? `${fmtD(lv.startDate)} (Half Day)` : `${fmtD(lv.startDate)} → ${fmtD(lv.endDate)}`;
     const halfIcon = lv.isHalf ? ' 🕐' : '';
-    c.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">🌴 Leave · ${lv.userName}${halfIcon}</div><div style="font-size:11px;color:#8A7E74;">${lv.type} · ${dateRange} · ${lv.days}d</div></div><span class="badge badge-pending">Pending</span></div><div style="font-size:12px;margin-bottom:10px;">${lv.reason}</div><div style="display:flex;gap:8px;"><button class="btn btn-success btn-sm">✓ Approve</button><button class="btn btn-danger btn-sm">✗ Reject</button></div>`;
+    // V30 (flag-for-review): a system-flagged possible absence is a
+    // leaveRequests doc shaped just like any other -- same type/days/
+    // dates, same Approve/Reject buttons below -- but isSystemFlagged
+    // marks it as "the system noticed no OMS activity," not "the person
+    // asked for time off," so the card and its body text say so plainly
+    // instead of showing the generic "🌴 Leave" header + reason text (an
+    // admin approving a real request shouldn't be able to mistake it for
+    // one of these, or vice versa).
+    const headerLabel = lv.isSystemFlagged
+      ? `🚩 Possible Absence · ${lv.userName}${halfIcon}`
+      : `🌴 Leave · ${lv.userName}${halfIcon}`;
+    const bodyHtml = lv.isSystemFlagged
+      ? `<div style="font-size:12px;margin-bottom:10px;color:#8B2E24;font-weight:600;">🚩 System-flagged: no OMS activity logged this day. Approve only if genuinely absent — reject if this was a timer/logging issue.</div>`
+      : `<div style="font-size:12px;margin-bottom:10px;">${lv.reason}</div>`;
+    c.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;"><div><div style="font-weight:700;">${headerLabel}</div><div style="font-size:11px;color:#8A7E74;">${lv.type} · ${dateRange} · ${lv.days}d</div></div><span class="badge badge-pending">Pending</span></div>${bodyHtml}<div style="display:flex;gap:8px;"><button class="btn btn-success btn-sm">✓ Approve</button><button class="btn btn-danger btn-sm">✗ Reject</button></div>`;
     c.querySelector('.btn-success').onclick= async ()=>{
       // V14.2.6: Direct granular save — don't rely on batch autoSave for status changes
       lv.status='approved';
@@ -9405,9 +9424,18 @@ function renderApprovals(){
           status: 'approved',
           approvedBy: currentUser.name,
           approvedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
+          // V30: THIS is where a system-flagged item becomes a confirmed
+          // absence -- autoDeducted only ever turns true here, on an
+          // explicit admin Approve click, never at flag time. The
+          // 3-consecutive-months warning in runAttendanceAutoDeduction()
+          // reads exactly this field, so it only ever counts absences a
+          // human actually confirmed.
+          ...(lv.isSystemFlagged ? { autoDeducted: true } : {})
         });
-        // Save updated user leave balance
+        // Save updated user leave balance -- the ONLY place casLeft/medLeft
+        // ever changes for a system-flagged item now; runAttendanceAutoDeduction()
+        // itself no longer touches either field.
         await saveUser(u);
         // V14.2.9: Reload leave requests from server to sync in-memory array
         const fresh = await db.collection("leaveRequests").get({source:'server'});

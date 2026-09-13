@@ -109,15 +109,68 @@ function extractDivBlock(html, startMarker) {
 (async () => {
   // ─────────────────────────────────────────────────────────────
   console.log('=== Apply-for-leave logic: STILL byte-for-byte identical to main ===');
-  check('renderLeaves() is byte-for-byte unchanged from main',
-    extractFunction(fullScript, 'renderLeaves') === extractFunction(mainFullScript, 'renderLeaves'));
+  // V30 (2026-09-13, attendance flag-for-review): renderLeaves()/renderApprovals()
+  // LEGITIMATELY changed -- a system-flagged possible absence needs a
+  // Cancel-button guard (renderLeaves, self-dismiss is out of scope) and a
+  // distinct card label + autoDeducted-on-approve (renderApprovals). Proven
+  // safe by stripping exactly those known V30 additions back out and
+  // confirming byte-identity to main holds for everything else -- this
+  // still catches any OTHER, unrelated drift the old blanket check caught.
+  check('renderLeaves() unchanged from main except the V30 isSystemFlagged Cancel-button guard', (() => {
+    const cur = extractFunction(fullScript, 'renderLeaves');
+    const main = extractFunction(mainFullScript, 'renderLeaves');
+    const commentBlock = "    // V30: a system-flagged possible absence gets NO Cancel button here --\n" +
+      "    // self-dismiss is explicitly out of scope for this build (the owner\n" +
+      "    // wants to see every flag reviewed by an admin first). It's still\n" +
+      "    // fully VISIBLE in this list like any other request, satisfying the\n" +
+      "    // \"notify the person\" intent -- they just can't dismiss it themselves.\n";
+    let stripped = cur.replace(commentBlock, '');
+    stripped = stripped.replace("(lv.status==='pending' && !lv.isSystemFlagged)", "lv.status==='pending'");
+    return stripped === main;
+  })());
   check('the submitLeaveBtn handler is byte-for-byte unchanged',
     extractBlockFrom(fullScript, "getElementById('submitLeaveBtn').addEventListener('click'") ===
     extractBlockFrom(mainFullScript, "getElementById('submitLeaveBtn').addEventListener('click'"));
   check('cancelLeave() is byte-for-byte unchanged',
     extractBlockFrom(fullScript, 'window.cancelLeave = function') === extractBlockFrom(mainFullScript, 'window.cancelLeave = function'));
-  check('renderApprovals() is byte-for-byte unchanged',
-    extractFunction(fullScript, 'renderApprovals') === extractFunction(mainFullScript, 'renderApprovals'));
+  check('renderApprovals() unchanged from main except the V30 system-flagged label/autoDeducted-on-approve additions', (() => {
+    const cur = extractFunction(fullScript, 'renderApprovals');
+    const main = extractFunction(mainFullScript, 'renderApprovals');
+    const block1 = `    // V30 (flag-for-review): a system-flagged possible absence is a
+    // leaveRequests doc shaped just like any other -- same type/days/
+    // dates, same Approve/Reject buttons below -- but isSystemFlagged
+    // marks it as "the system noticed no OMS activity," not "the person
+    // asked for time off," so the card and its body text say so plainly
+    // instead of showing the generic "🌴 Leave" header + reason text (an
+    // admin approving a real request shouldn't be able to mistake it for
+    // one of these, or vice versa).
+    const headerLabel = lv.isSystemFlagged
+      ? \`🚩 Possible Absence · \${lv.userName}\${halfIcon}\`
+      : \`🌴 Leave · \${lv.userName}\${halfIcon}\`;
+    const bodyHtml = lv.isSystemFlagged
+      ? \`<div style="font-size:12px;margin-bottom:10px;color:#8B2E24;font-weight:600;">🚩 System-flagged: no OMS activity logged this day. Approve only if genuinely absent — reject if this was a timer/logging issue.</div>\`
+      : \`<div style="font-size:12px;margin-bottom:10px;">\${lv.reason}</div>\`;
+`;
+    let stripped = cur.replace(block1, '');
+    stripped = stripped.replace('${headerLabel}', '🌴 Leave · ${lv.userName}${halfIcon}');
+    stripped = stripped.replace('${bodyHtml}', '<div style="font-size:12px;margin-bottom:10px;">${lv.reason}</div>');
+    const block2 = `          updatedAt: new Date().toISOString(),
+          // V30: THIS is where a system-flagged item becomes a confirmed
+          // absence -- autoDeducted only ever turns true here, on an
+          // explicit admin Approve click, never at flag time. The
+          // 3-consecutive-months warning in runAttendanceAutoDeduction()
+          // reads exactly this field, so it only ever counts absences a
+          // human actually confirmed.
+          ...(lv.isSystemFlagged ? { autoDeducted: true } : {})
+`;
+    stripped = stripped.replace(block2, '          updatedAt: new Date().toISOString()\n');
+    const block3 = `        // Save updated user leave balance -- the ONLY place casLeft/medLeft
+        // ever changes for a system-flagged item now; runAttendanceAutoDeduction()
+        // itself no longer touches either field.
+`;
+    stripped = stripped.replace(block3, '        // Save updated user leave balance\n');
+    return stripped === main;
+  })());
 
   // ─────────────────────────────────────────────────────────────
   console.log('\n=== Suggested-question chips: markup ===');
