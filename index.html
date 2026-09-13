@@ -110,7 +110,15 @@ textarea.form-control{min-height:70px;resize:vertical;}
    .badge-approved (already used for leave status) and .btn-ghost.btn-sm
    (already used for Log Time/Edit on the same card), no new visual
    language introduced. */
-.phase-status-cell{display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:auto;}
+/* V28 (layout fix): moved to sit right after .phase-name, before the bar --
+   no more margin-left:auto. Right-anchoring was the actual bug: it put the
+   status at the mercy of however much space the bar/numbers left over,
+   which is exactly what broke on narrower/zoomed screens. Left-anchored
+   here, it's visible at any width by construction. */
+.phase-status-cell{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex-shrink:0;min-width:150px;}
+.phase-undo-link{font-size:11px;color:#8A7E74;text-decoration:underline;cursor:pointer;}
+.phase-undo-link:hover{color:#5C4F42;}
+.phase-afterdone-flag{font-size:11px;color:#C0554A;padding:0 0 8px 0;margin-top:-4px;}
 .phase-row:last-child{border-bottom:none;}
 .phase-name{width:220px;flex-shrink:0;font-weight:500;}
 .phase-bar-wrap{flex:1;background:#E0D8CE;border-radius:4px;height:8px;}
@@ -1452,7 +1460,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-13.2'; // Project stage-completion / progress-tracking. phaseStatus map on each project doc ({[phaseName]:'ready'|'confirmed'}), written ONLY via saveProjectPhaseStatus()'s targeted dot-path .update() -- NEVER through saveProject()'s full .set(). Two-step flow on Projects & Budget phase rows: Mark Ready (anyone) -> Confirm Done (admin-only, reusing the existing role-gate pattern) -- one click each, no form. At-risk = hours status !=='ok' (>=80% budget, existing thresholds) AND not confirmed; a project-card "N phases at risk" chip surfaces it at a glance. Accountability metadata (readyBy/readyAt/confirmedBy/confirmedAt) stored per phase, mirroring the existing leave approvedBy pattern -- record-keeping only, never aggregated into any per-person metric. REQUIRED collision fix: the Edit Project save handler now explicitly carries forward phaseStatus/phaseStatusMeta before calling saveProject()'s full .set(), or editing a budget would silently wipe all phase-completion status. Write-safety: every status write freeze-checks the current server value first so a stale click can never regress confirmed back to ready. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-13.3'; // V28: layout fix + flag-work-after-done + reversibility on top of the stage-completion feature (V27, see prior comment history / FINDINGS-2026-08-10.md). LAYOUT: per-phase status cell moved left, right after .phase-name and before the bar (no more margin-left:auto -- right-anchoring was the bug, it broke on narrow/zoomed screens); the "N at risk" chip moved from the right-side stats block to sit next to the project TITLE. Purely repositioning -- same badges/data/logic. FLAG-AFTER-DONE: minsLoggedAfterDone() is a pure read of already-loaded timeLog data comparing log dates to phaseStatusMeta[phase].confirmedAt; renders a small warning line under a confirmed phase's row when logging continued past the done date. Never blocks logging. REVERSIBILITY: new saveProjectPhaseStatusUndo(projectId,phase,action) -- deliberately separate from saveProjectPhaseStatus() (that one protectively blocks accidental regression; this one performs an intentional undo) -- supports clear-ready (ready->none, by original marker or admin), revert-to-ready (confirmed->ready, admin-only), clear-confirmed (confirmed->none, admin-only), via freeze-checked dot-path .update() using FieldValue.delete() on now-stale meta fields. Small undo/clear links on each badge. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -2005,6 +2013,94 @@ async function saveProjectPhaseStatus(projectId, phase, newStatus) {
     console.error('❌ Save phase status failed:', e);
     alert('Could not save phase status — check your connection and try again.');
     return { ok: false, status: null, blocked: false, error: true };
+  }
+}
+
+// V28 (reversibility): deliberately a SEPARATE function from
+// saveProjectPhaseStatus(), not a shared helper -- that function's whole
+// job is to protectively BLOCK accidental regression (ready-over-confirmed,
+// re-confirm no-op); this one's whole job is to perform an INTENTIONAL
+// undo the user explicitly clicked for. Mixing the two would either weaken
+// the protection above or make undo silently no-op. Same write-safety
+// posture though: freeze-check, a fresh server-state read, dot-path
+// .update(), and FieldValue.delete() to cleanly remove now-stale meta
+// fields rather than leaving them dangling with a status that no longer
+// matches them.
+//   action: 'clear-ready'      ready -> none       (original marker or admin)
+//   action: 'revert-to-ready'  confirmed -> ready  (admin only)
+//   action: 'clear-confirmed'  confirmed -> none   (admin only)
+async function saveProjectPhaseStatusUndo(projectId, phase, action) {
+  if (staleVersionLockout) return { ok: false, blocked: false };
+  try {
+    const snap = await db.collection('projects').doc(projectId).get({ source: 'server' });
+    if (!snap.exists) return { ok: false, blocked: false };
+    const serverProject = snap.data();
+    const currentStatus = (serverProject.phaseStatus || {})[phase] || null;
+    const currentMeta = (serverProject.phaseStatusMeta || {})[phase] || {};
+    const isAdmin = !!currentUser?.isAdmin;
+    const isReadyOwner = currentMeta.readyBy === (currentUser?.name || '');
+
+    if (action === 'clear-ready') {
+      if (currentStatus !== 'ready') return { ok: false, blocked: true, reason: 'stale' };
+      if (!isAdmin && !isReadyOwner) return { ok: false, blocked: true, reason: 'forbidden' };
+    } else if (action === 'revert-to-ready') {
+      if (currentStatus !== 'confirmed') return { ok: false, blocked: true, reason: 'stale' };
+      if (!isAdmin) return { ok: false, blocked: true, reason: 'forbidden' };
+    } else if (action === 'clear-confirmed') {
+      if (currentStatus !== 'confirmed') return { ok: false, blocked: true, reason: 'stale' };
+      if (!isAdmin) return { ok: false, blocked: true, reason: 'forbidden' };
+    } else {
+      return { ok: false, blocked: true, reason: 'invalid' };
+    }
+
+    const del = firebase.firestore.FieldValue.delete();
+    const update = {};
+    let newStatus;
+    if (action === 'clear-ready') {
+      newStatus = null;
+      update[`phaseStatus.${phase}`] = del;
+      update[`phaseStatusMeta.${phase}.readyBy`] = del;
+      update[`phaseStatusMeta.${phase}.readyAt`] = del;
+    } else if (action === 'revert-to-ready') {
+      newStatus = 'ready';
+      update[`phaseStatus.${phase}`] = 'ready';
+      update[`phaseStatusMeta.${phase}.confirmedBy`] = del;
+      update[`phaseStatusMeta.${phase}.confirmedAt`] = del;
+    } else {
+      newStatus = null;
+      update[`phaseStatus.${phase}`] = del;
+      update[`phaseStatusMeta.${phase}.readyBy`] = del;
+      update[`phaseStatusMeta.${phase}.readyAt`] = del;
+      update[`phaseStatusMeta.${phase}.confirmedBy`] = del;
+      update[`phaseStatusMeta.${phase}.confirmedAt`] = del;
+    }
+    await db.collection('projects').doc(projectId).update(update);
+
+    const local = projectsData.find((p) => p.id === projectId);
+    if (local) {
+      local.phaseStatus = local.phaseStatus || {};
+      local.phaseStatusMeta = local.phaseStatusMeta || {};
+      if (newStatus === null) {
+        delete local.phaseStatus[phase];
+      } else {
+        local.phaseStatus[phase] = newStatus;
+      }
+      if (action === 'clear-ready') {
+        delete local.phaseStatusMeta[phase]?.readyBy;
+        delete local.phaseStatusMeta[phase]?.readyAt;
+      } else if (action === 'revert-to-ready') {
+        delete local.phaseStatusMeta[phase]?.confirmedBy;
+        delete local.phaseStatusMeta[phase]?.confirmedAt;
+      } else {
+        delete local.phaseStatusMeta[phase];
+      }
+    }
+    console.log('✅ Phase status undo saved:', projectId, phase, action);
+    return { ok: true, blocked: false };
+  } catch (e) {
+    console.error('❌ Undo phase status failed:', e);
+    alert('Could not undo phase status — check your connection and try again.');
+    return { ok: false, blocked: false, error: true };
   }
 }
 
@@ -8122,6 +8218,24 @@ function isPhaseAtRisk(hourStatus, phaseStatusValue) {
   return hourStatus !== 'ok' && phaseStatusValue !== 'confirmed';
 }
 
+// V28 (flag work-after-done): pure -- minutes logged to this phase with a
+// work DATE strictly after the day it was confirmed done. Never blocks
+// logging; purely a display signal computed from data already loaded.
+// Reuses the SAME *AllTime data source phaseLoggedMinsAllTime() already
+// reads from (allTimeBudgetLogs once loaded, else the 90-day timeLogs
+// fallback), so it's consistent with the hours-vs-budget figures above it.
+// Uses the log's own work `date` (present on every timeLog doc) compared
+// to confirmedAt's date portion -- the finest-grained comparison available
+// without depending on a field ("logged at" timestamp) that isn't
+// guaranteed to exist on every historical timeLog doc.
+function minsLoggedAfterDone(projectId, phase, confirmedAt) {
+  if (!confirmedAt) return 0;
+  const cutoffDate = confirmedAt.slice(0, 10);
+  return (allTimeBudgetLogs || timeLogs)
+    .filter((l) => l.projectId === projectId && l.phase === phase && l.date > cutoffDate)
+    .reduce((s, l) => s + (l.durationMins || 0), 0);
+}
+
 function renderProjectsBudget(){
   // V20: same all-time budget load as renderDashboard() -- no-op if
   // already cached this session. Every phase/project % below reads
@@ -8151,35 +8265,58 @@ function renderProjectsBudget(){
       const st=pp>=100?'over':pp>=80?'near':'ok';
       if (isPhaseAtRisk(st, (proj.phaseStatus||{})[ph]||null)) atRiskCount++;
     });
+    // V28 (layout fix): the chip now sits next to the project TITLE, not
+    // buried under the right-side stats block -- top-LEFT primary reading
+    // position, visible before you even look to the right of the card.
     const atRiskChip = atRiskCount>0
-      ? `<div style="font-size:11px;font-weight:700;color:#C0554A;margin-top:2px;">⚠ ${atRiskCount} phase${atRiskCount!==1?'s':''} at risk</div>`
+      ? `<span style="font-size:11px;font-weight:700;color:#C0554A;background:#F5E0DC;padding:2px 8px;border-radius:10px;white-space:nowrap;">⚠ ${atRiskCount} at risk</span>`
       : '';
 
     const card=document.createElement('div'); card.className=`project-card ${status}`;
-    card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px;"><div><div style="font-weight:800;font-size:16px;">${proj.name}</div><div style="font-size:12px;color:#8A7E74;">🏢 ${proj.client} · ${fmtD(proj.startDate)} → ${fmtD(proj.endDate)}</div></div><div style="text-align:right;"><div style="font-size:18px;font-weight:800;color:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};">${pct}% used</div><div style="font-size:12px;color:#8A7E74;">${hrsToHM(loggedH)} of ${totalBudget}h budget</div>${atRiskChip}</div></div><div style="background:#E0D8CE;border-radius:4px;height:8px;margin-bottom:16px;"><div style="height:8px;border-radius:4px;background:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};width:${Math.min(100,pct)}%;transition:width 0.4s;"></div></div><div id="phases-${proj.id}"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="btn btn-ghost btn-sm" data-log="${proj.id}">⏱️ Log Time</button>${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" data-edit="${proj.id}">✏️ Edit</button>`:''}</div>`;
+    card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px;"><div><div style="font-weight:800;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${proj.name}${atRiskChip}</div><div style="font-size:12px;color:#8A7E74;">🏢 ${proj.client} · ${fmtD(proj.startDate)} → ${fmtD(proj.endDate)}</div></div><div style="text-align:right;"><div style="font-size:18px;font-weight:800;color:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};">${pct}% used</div><div style="font-size:12px;color:#8A7E74;">${hrsToHM(loggedH)} of ${totalBudget}h budget</div></div></div><div style="background:#E0D8CE;border-radius:4px;height:8px;margin-bottom:16px;"><div style="height:8px;border-radius:4px;background:${status==='over'?'#C0554A':status==='near'?'#C4874A':'#6E8F52'};width:${Math.min(100,pct)}%;transition:width 0.4s;"></div></div><div id="phases-${proj.id}"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="btn btn-ghost btn-sm" data-log="${proj.id}">⏱️ Log Time</button>${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" data-edit="${proj.id}">✏️ Edit</button>`:''}</div>`;
     const phasesDiv=card.querySelector(`#phases-${proj.id}`);
     PHASES.forEach(ph=>{
       const budget=proj.phases[ph]||0; if(!budget) return;
       const loggedMins=phaseLoggedMinsAllTime(proj.id,ph); const loggedHrs=loggedMins/60;
       const pp=budget>0?Math.min(100,Math.round((loggedHrs/budget)*100)):0; const st=pp>=100?'over':pp>=80?'near':'ok';
-      // V27: two-step status badge/button, reusing existing badge/button
-      // classes (badge-pending/badge-approved already used for leave
-      // status; btn-ghost.btn-sm already used for Log Time/Edit on this
-      // same card) -- no new visual language.
+      // V27/V28: two-step status badge/button, reusing existing badge/
+      // button classes (badge-pending/badge-approved already used for
+      // leave status; btn-ghost.btn-sm already used for Log Time/Edit on
+      // this same card) -- no new visual language. V28 layout fix: now
+      // positioned right after the phase NAME, before the bar -- left-
+      // anchored, guaranteed visible at any width (see .phase-status-cell).
+      // V28 reversibility: small undo/clear links alongside each badge.
       const phStatus=(proj.phaseStatus||{})[ph]||null;
+      const phMeta=(proj.phaseStatusMeta||{})[ph]||{};
+      const isReadyOwner = phMeta.readyBy === (currentUser?.name || '');
       const statusHtml = phStatus==='confirmed'
-        ? `<span class="badge badge-approved">✅ Done</span>`
+        ? `<span class="badge badge-approved">✅ Done</span>${currentUser.isAdmin?`<a href="#" class="phase-undo-link" data-proj="${proj.id}" data-phase="${ph}" data-action="revert-to-ready">↩ revert</a><a href="#" class="phase-undo-link" data-proj="${proj.id}" data-phase="${ph}" data-action="clear-confirmed">✕ clear</a>`:''}`
         : phStatus==='ready'
-          ? `<span class="badge badge-pending">🔵 Ready</span>${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm phase-confirm-btn" data-proj="${proj.id}" data-phase="${ph}">✓ Confirm Done</button>`:''}`
+          ? `<span class="badge badge-pending">🔵 Ready</span>${(currentUser.isAdmin||isReadyOwner)?`<a href="#" class="phase-undo-link" data-proj="${proj.id}" data-phase="${ph}" data-action="clear-ready">✕ clear</a>`:''}${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm phase-confirm-btn" data-proj="${proj.id}" data-phase="${ph}">✓ Confirm Done</button>`:''}`
           : `<button class="btn btn-ghost btn-sm phase-ready-btn" data-proj="${proj.id}" data-phase="${ph}">Mark Ready</button>`;
       const row=document.createElement('div'); row.className='phase-row';
-      row.innerHTML=`<span class="phase-name">${ph}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${st}" style="width:${pp}%;"></div></div><span class="phase-nums">${minsToHM(loggedMins)} / <strong>${budget}h</strong> <span style="color:${st==='over'?'#C0554A':st==='near'?'#C4874A':'#6E8F52'}">(${pp}%)</span></span><span class="phase-status-cell">${statusHtml}</span>`;
+      row.innerHTML=`<span class="phase-name">${ph}</span><span class="phase-status-cell">${statusHtml}</span><div class="phase-bar-wrap"><div class="phase-bar-fill ${st}" style="width:${pp}%;"></div></div><span class="phase-nums">${minsToHM(loggedMins)} / <strong>${budget}h</strong> <span style="color:${st==='over'?'#C0554A':st==='near'?'#C4874A':'#6E8F52'}">(${pp}%)</span></span>`;
       phasesDiv.appendChild(row);
+
+      // V28: flag work logged AFTER this phase was marked done. Never
+      // blocks logging -- purely informational, appended as its own small
+      // line right under the row so it reads as "about that phase" without
+      // needing to restructure the row itself.
+      if (phStatus === 'confirmed' && phMeta.confirmedAt) {
+        const afterMins = minsLoggedAfterDone(proj.id, ph, phMeta.confirmedAt);
+        if (afterMins > 0) {
+          const flagRow = document.createElement('div');
+          flagRow.className = 'phase-afterdone-flag';
+          flagRow.textContent = `⚠ ${minsToHM(afterMins)} logged to ${ph} after marked done.`;
+          phasesDiv.appendChild(flagRow);
+        }
+      }
     });
     card.querySelector('[data-log]')?.addEventListener('click',()=>openLogModal(proj.id));
     card.querySelector('[data-edit]')?.addEventListener('click',()=>openProjectModal(proj.id));
     card.querySelectorAll('.phase-ready-btn').forEach(btn=>btn.addEventListener('click',()=>handlePhaseStatusClick(btn.dataset.proj,btn.dataset.phase,'ready')));
     card.querySelectorAll('.phase-confirm-btn').forEach(btn=>btn.addEventListener('click',()=>handlePhaseStatusClick(btn.dataset.proj,btn.dataset.phase,'confirmed')));
+    card.querySelectorAll('.phase-undo-link').forEach(link=>link.addEventListener('click',(e)=>{e.preventDefault();handlePhaseStatusUndo(link.dataset.proj,link.dataset.phase,link.dataset.action);}));
     el.appendChild(card);
   });
 }
@@ -8195,6 +8332,18 @@ async function handlePhaseStatusClick(projectId, phase, newStatus) {
   const result = await saveProjectPhaseStatus(projectId, phase, newStatus);
   if (result.blocked) {
     alert('This phase was already confirmed done — refreshing to show the current status.');
+  }
+  renderProjectsBudget();
+}
+
+async function handlePhaseStatusUndo(projectId, phase, action) {
+  const result = await saveProjectPhaseStatusUndo(projectId, phase, action);
+  if (result.blocked) {
+    if (result.reason === 'forbidden') {
+      alert('Only an admin (or whoever marked it ready) can undo this.');
+    } else if (result.reason === 'stale') {
+      alert('This phase status already changed — refreshing to show the current status.');
+    }
   }
   renderProjectsBudget();
 }
