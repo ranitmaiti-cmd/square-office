@@ -572,7 +572,21 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="page active" id="page-dashboard">
         <h2 class="page-title">📊 Dashboard</h2>
         <div class="stats-grid" id="dashAnalytics" style="margin-bottom:20px;"></div>
-        
+
+        <!-- V29 (What's Due): due-soon/overdue projects, paired with the
+             SAME on-track signals (budget %, at-risk count) Projects &
+             Budget already computes -- see computeProjectStats(). Visible
+             to everyone, same as the rest of Dashboard. -->
+        <div class="card" id="whatsDueCard" style="margin-bottom:20px;display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;font-size:16px;font-weight:700;color:#3D332A;">📅 What's Due</h3>
+            <span id="whatsDueCount" style="font-size:12px;color:#8A7E74;font-weight:600;">0 upcoming</span>
+          </div>
+          <div id="whatsDueFeed" style="display:flex;flex-direction:column;gap:8px;">
+            <div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">Nothing due soon</div>
+          </div>
+        </div>
+
         <!-- V13.4: Live Timer Widget -->
         <div class="card" style="margin-bottom:20px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -606,6 +620,19 @@ textarea.form-control{min-height:70px;resize:vertical;}
           </div>
         </div>
         
+        <!-- V29 (Wins This Quarter): project-level positive facts only,
+             read-only, capped short list -- celebratory, not a scoreboard.
+             Placed BELOW the operational cards above (Who's Working Now /
+             Needs Reconciliation / Recent Time Logs), since it's not
+             action-needed. See computeQuarterWins() for what "clean"/
+             "under budget" mean and why this never goes person-level. -->
+        <div class="card" id="quarterWinsCard" style="margin-bottom:20px;display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;font-size:16px;font-weight:700;color:#3D332A;">🎉 Wins This Quarter</h3>
+          </div>
+          <div id="quarterWinsFeed" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+
         <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
           <button class="btn btn-primary btn-sm" id="dashAddHoliday">📅 Add Holiday</button>
           <button class="btn btn-ghost btn-sm" id="dashViewHolidays">View Holidays</button>
@@ -1173,6 +1200,9 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="form-group"><label class="form-label">Start Date</label><input type="date" class="form-control" id="pStart"></div>
       <div class="form-group"><label class="form-label">End Date</label><input type="date" class="form-control" id="pEnd"></div>
     </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Next Due Date (optional)</label><input type="date" class="form-control" id="pDueDate"></div>
+    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:4px;">
       <div style="font-weight:700;font-size:14px;">⏱️ Phase Budgets (hours)</div>
       <a href="#" id="pManageTemplatesLink" style="font-size:11px;color:#A96E35;">Manage Templates</a>
@@ -1460,7 +1490,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-13.3'; // V28: layout fix + flag-work-after-done + reversibility on top of the stage-completion feature (V27, see prior comment history / FINDINGS-2026-08-10.md). LAYOUT: per-phase status cell moved left, right after .phase-name and before the bar (no more margin-left:auto -- right-anchoring was the bug, it broke on narrow/zoomed screens); the "N at risk" chip moved from the right-side stats block to sit next to the project TITLE. Purely repositioning -- same badges/data/logic. FLAG-AFTER-DONE: minsLoggedAfterDone() is a pure read of already-loaded timeLog data comparing log dates to phaseStatusMeta[phase].confirmedAt; renders a small warning line under a confirmed phase's row when logging continued past the done date. Never blocks logging. REVERSIBILITY: new saveProjectPhaseStatusUndo(projectId,phase,action) -- deliberately separate from saveProjectPhaseStatus() (that one protectively blocks accidental regression; this one performs an intentional undo) -- supports clear-ready (ready->none, by original marker or admin), revert-to-ready (confirmed->ready, admin-only), clear-confirmed (confirmed->none, admin-only), via freeze-checked dot-path .update() using FieldValue.delete() on now-stale meta fields. Small undo/clear links on each badge. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-13.4'; // V29: two read-mostly Dashboard cards, built on the stage-completion/at-risk machinery (V27/V28). WHAT'S DUE: one new plain field, project.dueDate, entered on the existing Edit Project form next to startDate/endDate and carried in that same handler's rebuilt data object -- NOT a second write path like phaseStatus, so no collision-fix discipline needed. New "📅 What's Due" Dashboard card lists projects overdue or due within 14 days (fully-confirmed projects excluded -- nothing left to catch up on), each row pairing the due date with the SAME pct/status/atRiskCount computeProjectStats() already gives Projects & Budget. WINS THIS QUARTER: PROJECT-level positive facts only, read-only, capped to 4, never a ranking, never person-level (see FINDINGS-2026-08-10.md's scoping note on why person-level "recognition" was deliberately excluded -- mentoring etc. isn't an objective fact anywhere in this codebase, only a private per-person admin review rating). Both cards extract a shared computeProjectStats(proj) helper out of renderProjectsBudget() (same formulas, zero behavior change there) so Dashboard never risks a second, drifting definition of "on track."
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -6577,9 +6607,15 @@ function renderDashboard(){
   
   // V13.4: Start live timer updates
   startLiveTimerUpdates();
-  
+
   // V13.3: Render live time log feed
   renderLiveTimeLogFeed();
+
+  // V29: What's Due / Wins This Quarter -- both pure-read from
+  // projectsData already loaded for Projects & Budget, so (unlike the
+  // reconciliation queue) neither needs its own async Firestore fetch.
+  renderWhatsDue();
+  renderQuarterWins();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -8236,6 +8272,153 @@ function minsLoggedAfterDone(projectId, phase, confirmedAt) {
     .reduce((s, l) => s + (l.durationMins || 0), 0);
 }
 
+// V29 (Dashboard What's Due / Wins This Quarter): pure aggregation of a
+// single project's overall budget %, status, and at-risk count -- this is
+// the EXACT computation renderProjectsBudget() has always done per card,
+// pulled out unchanged so the two new Dashboard cards read the identical
+// numbers instead of a second implementation that could quietly drift out
+// of sync with what Projects & Budget itself shows. Every caller (this
+// function included) reads *AllTime() data, so results are accurate
+// regardless of how old the logged hours are.
+function computeProjectStats(proj) {
+  const totalBudget=Object.values(proj.phases).reduce((s,h)=>s+h,0);
+  const loggedH=projectLoggedMinsAllTime(proj.id)/60;
+  const pct=totalBudget>0?Math.round((loggedH/totalBudget)*100):0;
+  const status=pct>=100?'over':pct>=80?'near':'ok';
+
+  let atRiskCount = 0;
+  let phaseCount = 0;
+  let confirmedCount = 0;
+  PHASES.forEach(ph=>{
+    const budget=proj.phases[ph]||0; if(!budget) return;
+    phaseCount++;
+    const loggedHrs=phaseLoggedMinsAllTime(proj.id,ph)/60;
+    const pp=budget>0?Math.min(100,Math.round((loggedHrs/budget)*100)):0;
+    const st=pp>=100?'over':pp>=80?'near':'ok';
+    const phStatus=(proj.phaseStatus||{})[ph]||null;
+    if (phStatus==='confirmed') confirmedCount++;
+    if (isPhaseAtRisk(st, phStatus)) atRiskCount++;
+  });
+  const allPhasesConfirmed = phaseCount>0 && confirmedCount===phaseCount;
+
+  return { totalBudget, loggedH, pct, status, atRiskCount, phaseCount, confirmedCount, allPhasesConfirmed };
+}
+
+// V29 (What's Due): pure day-count between today and a 'YYYY-MM-DD' due
+// date string. Both sides truncated to midnight first so time-of-day can
+// never shift the result by a day.
+function daysUntil(dateStr) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const due = new Date(dateStr + 'T00:00:00');
+  return Math.round((due - today) / 86400000);
+}
+
+const WHATS_DUE_SOON_DAYS = 14;
+
+// V29: projects with a dueDate that's overdue or within
+// WHATS_DUE_SOON_DAYS, soonest/most-overdue first, each paired with the
+// SAME pct/status/atRiskCount computeProjectStats() gives every other
+// view -- never a second "is this on track" definition. A project with
+// every phase already confirmed is excluded outright: there's nothing
+// left to catch up on, so it's not meaningfully "due" regardless of the
+// date on file. Projects with no dueDate set are excluded too (this card
+// is about urgency, not a reminder to fill in a field).
+function computeWhatsDue() {
+  return projectsData
+    .filter(p => p.dueDate)
+    .map(p => ({ proj: p, daysLeft: daysUntil(p.dueDate), stats: computeProjectStats(p) }))
+    .filter(x => x.daysLeft <= WHATS_DUE_SOON_DAYS && !x.stats.allPhasesConfirmed)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
+function renderWhatsDue() {
+  const cardEl = document.getElementById('whatsDueCard');
+  const feedEl = document.getElementById('whatsDueFeed');
+  const countEl = document.getElementById('whatsDueCount');
+  if (!cardEl || !feedEl) return;
+  cardEl.style.display = 'block';
+
+  const items = computeWhatsDue();
+  if (countEl) countEl.textContent = items.length === 0 ? '0 upcoming' : items.length === 1 ? '1 upcoming' : `${items.length} upcoming`;
+
+  if (items.length === 0) {
+    feedEl.innerHTML = '<div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">Nothing due soon</div>';
+    return;
+  }
+
+  feedEl.innerHTML = items.map(({ proj, daysLeft, stats }) => {
+    const overdue = daysLeft < 0;
+    // Highlight overdue projects (guaranteed "not all phases confirmed" --
+    // that's already filtered above) and due-soon projects that also carry
+    // at-risk phases. A due-soon project with nothing at risk stays plain.
+    const highlight = overdue || stats.atRiskCount > 0;
+    const dueLabel = overdue
+      ? `⚠ ${Math.abs(daysLeft)} day${Math.abs(daysLeft) !== 1 ? 's' : ''} overdue`
+      : daysLeft === 0 ? 'due today' : `due in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`;
+    const riskChip = stats.atRiskCount > 0 ? ` · <span style="color:#C0554A;font-weight:700;">⚠ ${stats.atRiskCount} at risk</span>` : '';
+    return `<div style="padding:8px 10px;border-radius:8px;font-size:13px;${highlight ? 'background:#FBF0EE;border-left:3px solid #C0554A;' : 'background:#F8F4EE;'}"><strong>${proj.name}</strong> — <span style="color:${overdue ? '#C0554A' : '#8A7E74'};font-weight:${overdue ? '700' : '400'};">${dueLabel}</span> · ${stats.pct}% used${riskChip}</div>`;
+  }).join('');
+}
+
+// V29 (Wins This Quarter): PROJECT-level positive facts only, read-only,
+// never a ranking. See FINDINGS-2026-08-10.md's read-only scoping note
+// for why this deliberately stops at project-level: person-level
+// "recognition" (e.g. mentoring) isn't an objective fact anywhere in this
+// codebase, only a private per-person admin review rating (Studio
+// Health's Employee Review) -- surfacing that publicly would mean
+// exposing private review content, a different and much bigger decision
+// than this read-only card makes.
+//
+// "This quarter" = a project's endDate falls inside the current FY
+// quarter (reuses getQuarter()/quarterEndDate(), already used by Studio
+// Health -- one definition of "quarter" across the app). Ongoing
+// projects (no endDate) are excluded from these facts: there's no
+// completion date to test, so they're neither included nor implied to be
+// doing badly by omission. Reuses computeProjectStats() -- a project can
+// never read "clean" here and "at risk" on Projects & Budget at once.
+function computeQuarterWins() {
+  const qtr = getQuarter(0);
+  const qStart = fmt(new Date(qtr.months[0].year, qtr.months[0].month, 1));
+  const qEnd = fmt(quarterEndDate(qtr));
+
+  const facts = [];
+  let cleanCount = 0;
+  projectsData.forEach(proj => {
+    if (!proj.endDate || proj.endDate < qStart || proj.endDate > qEnd) return;
+    const stats = computeProjectStats(proj);
+    if (stats.allPhasesConfirmed && stats.atRiskCount === 0) {
+      cleanCount++;
+      facts.push(`${proj.name}: all phases confirmed done, zero at-risk`);
+    }
+    if (stats.totalBudget > 0 && stats.loggedH < stats.totalBudget) {
+      facts.push(`${proj.name}: completed under its overall hour budget`);
+    }
+  });
+  if (cleanCount > 0) {
+    facts.unshift(`${cleanCount} project${cleanCount !== 1 ? 's' : ''} completed clean this quarter`);
+  }
+
+  // Capped short list -- celebratory, not a scoreboard. No project is
+  // ever named as NOT on this list; silence isn't a negative signal, and
+  // nothing here is ordered by how "good" a project did relative to
+  // another.
+  return facts.slice(0, 4);
+}
+
+function renderQuarterWins() {
+  const cardEl = document.getElementById('quarterWinsCard');
+  const feedEl = document.getElementById('quarterWinsFeed');
+  if (!cardEl || !feedEl) return;
+  cardEl.style.display = 'block';
+
+  const wins = computeQuarterWins();
+  if (wins.length === 0) {
+    feedEl.innerHTML = '<div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">Nothing to show yet this quarter</div>';
+    return;
+  }
+  feedEl.innerHTML = wins.map(text => `<div style="padding:8px 10px;border-radius:8px;background:#EFF5E8;border-left:3px solid #6E8F52;font-size:13px;color:#3D332A;">🎉 ${text}</div>`).join('');
+}
+
 function renderProjectsBudget(){
   // V20: same all-time budget load as renderDashboard() -- no-op if
   // already cached this session. Every phase/project % below reads
@@ -8249,22 +8432,8 @@ function renderProjectsBudget(){
   if(!projectsData.length){ el.innerHTML='<p style="color:#8A7E74;padding:20px;">No projects yet.</p>'; return; }
   el.innerHTML='';
   projectsData.forEach(proj=>{
-    const totalBudget=Object.values(proj.phases).reduce((s,h)=>s+h,0);
-    const loggedH=projectLoggedMinsAllTime(proj.id)/60;
-    const pct=totalBudget>0?Math.round((loggedH/totalBudget)*100):0;
-    const status=pct>=100?'over':pct>=80?'near':'ok';
+    const { totalBudget, loggedH, pct, status, atRiskCount } = computeProjectStats(proj);
 
-    // V27: at-risk count for the project-card summary chip, computed with
-    // the exact same per-phase numbers the rows below render -- no
-    // separate/duplicate computation to drift out of sync.
-    let atRiskCount = 0;
-    PHASES.forEach(ph=>{
-      const budget=proj.phases[ph]||0; if(!budget) return;
-      const loggedHrs=phaseLoggedMinsAllTime(proj.id,ph)/60;
-      const pp=budget>0?Math.min(100,Math.round((loggedHrs/budget)*100)):0;
-      const st=pp>=100?'over':pp>=80?'near':'ok';
-      if (isPhaseAtRisk(st, (proj.phaseStatus||{})[ph]||null)) atRiskCount++;
-    });
     // V28 (layout fix): the chip now sits next to the project TITLE, not
     // buried under the right-side stats block -- top-LEFT primary reading
     // position, visible before you even look to the right of the card.
@@ -8357,6 +8526,7 @@ function openProjectModal(projId){
   if(proj?.client) clientSel.value=proj.client;
   document.getElementById('pNewClientDiv').style.display='none'; document.getElementById('pNewClient').value='';
   document.getElementById('pStart').value=proj?.startDate||fmt(new Date()); document.getElementById('pEnd').value=proj?.endDate||'';
+  document.getElementById('pDueDate').value=proj?.dueDate||'';
   const pf=document.getElementById('phaseBudgetFields'); pf.innerHTML='';
   PHASES.forEach(ph=>{
     const row=document.createElement('div'); row.className='form-row'; row.style.marginBottom='10px';
@@ -8394,7 +8564,12 @@ document.getElementById('saveProjBtn').addEventListener('click', async function(
   // the other half is that phaseStatus is never written any other way
   // than saveProjectPhaseStatus()'s own targeted dot-path .update().
   const existingProj = this._editId ? projectsData.find(p=>p.id===this._editId) : null;
-  const data={id:this._editId||genId(),name,client,startDate:document.getElementById('pStart').value,endDate:document.getElementById('pEnd').value,phases,phaseStatus:existingProj?.phaseStatus||{},phaseStatusMeta:existingProj?.phaseStatusMeta||{}};
+  // V29 (What's Due): dueDate is a plain field on this SAME form, read
+  // straight from its own input like startDate/endDate already are --
+  // unlike phaseStatus, nothing else ever writes to it, so there's no
+  // second write path for this save's full .set() to collide with and
+  // nothing to carry forward defensively.
+  const data={id:this._editId||genId(),name,client,startDate:document.getElementById('pStart').value,endDate:document.getElementById('pEnd').value,dueDate:document.getElementById('pDueDate').value||null,phases,phaseStatus:existingProj?.phaseStatus||{},phaseStatusMeta:existingProj?.phaseStatusMeta||{}};
   if(this._editId){ const i=projectsData.findIndex(p=>p.id===this._editId); projectsData[i]=data; }
   else {
     projectsData.push(data);

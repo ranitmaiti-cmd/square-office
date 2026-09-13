@@ -292,16 +292,19 @@ function extractBlockFrom(source, anchor) {
 
   // ─────────────────────────────────────────────────────────────
   console.log('\n=== "N phases at risk" project-card summary chip ===');
+  // V29: the at-risk COUNT is now computed by the shared computeProjectStats()
+  // helper (extracted so Dashboard's What's Due/Wins This Quarter cards read
+  // the identical numbers), and renderProjectsBudget() only builds the CHIP
+  // TEXT from that count. Test both real pieces directly rather than the old
+  // single inline block, since that block no longer exists as one unit.
+  const computeStatsSrc = extractFunction(fullScript, 'computeProjectStats');
+  const chipTextMatch = renderPBSrc.match(/const atRiskChip = atRiskCount>0[\s\S]*?: '';/);
+  assert.ok(chipTextMatch, 'could not find the at-risk chip text logic inside renderProjectsBudget()');
   {
-    const isRiskSrc = atRiskSrc;
     const sandbox = { console, Math, Object };
     vm.createContext(sandbox);
-    // Recreate the exact chip-building logic renderProjectsBudget() uses,
-    // sourced from the real function body via a targeted slice, so the
-    // count logic under test is the real code, not a re-description of it.
-    const chipLogicMatch = renderPBSrc.match(/let atRiskCount = 0;[\s\S]*?const atRiskChip = atRiskCount>0[\s\S]*?: '';/);
-    assert.ok(chipLogicMatch, 'could not find the at-risk chip logic inside renderProjectsBudget()');
-    vm.runInContext(isRiskSrc, sandbox);
+    vm.runInContext(atRiskSrc, sandbox);
+    vm.runInContext(computeStatsSrc, sandbox);
     vm.runInContext(`
       var proj = {
         phases: { 'Schematic Design': 40, 'Final Design': 40, 'Construction Documents': 40 },
@@ -315,7 +318,9 @@ function extractBlockFrom(source, anchor) {
         if (ph === 'Construction Documents') return 20 * 60;
         return 0;
       }
-      ${chipLogicMatch[0]}
+      function projectLoggedMinsAllTime() { return (40 + 36 + 20) * 60; }
+      var atRiskCount = computeProjectStats(proj).atRiskCount;
+      ${chipTextMatch[0]}
     `, sandbox);
     const atRiskCount = vm.runInContext('atRiskCount', sandbox);
     const atRiskChip = vm.runInContext('atRiskChip', sandbox);
@@ -327,12 +332,14 @@ function extractBlockFrom(source, anchor) {
     const sandbox = { console, Math, Object };
     vm.createContext(sandbox);
     vm.runInContext(atRiskSrc, sandbox);
-    const chipLogicMatch = renderPBSrc.match(/let atRiskCount = 0;[\s\S]*?const atRiskChip = atRiskCount>0[\s\S]*?: '';/);
+    vm.runInContext(computeStatsSrc, sandbox);
     vm.runInContext(`
       var proj = { phases: { 'Schematic Design': 40 }, phaseStatus: { 'Schematic Design': 'confirmed' } };
       var PHASES = ['Schematic Design'];
       function phaseLoggedMinsAllTime() { return 40 * 60; }
-      ${chipLogicMatch[0]}
+      function projectLoggedMinsAllTime() { return 40 * 60; }
+      var atRiskCount = computeProjectStats(proj).atRiskCount;
+      ${chipTextMatch[0]}
     `, sandbox);
     check('zero at-risk phases -> empty chip (nothing rendered)', vm.runInContext('atRiskChip', sandbox) === '');
   }

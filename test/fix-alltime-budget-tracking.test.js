@@ -77,6 +77,11 @@ const phaseAllTimeSrc = extractFunction(fullScript, 'phaseLoggedMinsAllTime');
 const projectAllTimeSrc = extractFunction(fullScript, 'projectLoggedMinsAllTime');
 const renderDashboardSrc = extractFunction(fullScript, 'renderDashboard');
 const renderProjectsBudgetSrc = extractFunction(fullScript, 'renderProjectsBudget');
+// V29: the overall project % moved into a shared computeProjectStats()
+// helper (extracted so Dashboard's What's Due/Wins This Quarter cards read
+// the identical numbers renderProjectsBudget() always has) -- it's no
+// longer computed inline inside renderProjectsBudget() itself.
+const computeProjectStatsSrc = extractFunction(fullScript, 'computeProjectStats');
 const dashboardRefreshSrc = extractFunction(fullScript, 'startDashboardAutoRefresh');
 const fetchActiveTimersSrc = extractFunction(fullScript, 'fetchActiveTimersFromFirebase');
 const loadReconciliationQueueSrc = extractFunction(fullScript, 'loadReconciliationQueue');
@@ -224,7 +229,8 @@ async function runLoaderTests() {
 console.log('=== Source-text: renderDashboard()/renderProjectsBudget() use the *AllTime functions ===');
 check('renderDashboard()\'s overBudgetCount uses phaseLoggedMinsAllTime(), not the 90-day phaseLoggedMins()', /overBudgetCount\+\+/.test(renderDashboardSrc) && renderDashboardSrc.includes('phaseLoggedMinsAllTime(proj.id,phase)') && !/[^r]phaseLoggedMins\(proj\.id,phase\)/.test(renderDashboardSrc));
 check('renderDashboard() calls ensureAllTimeBudgetLogsLoaded()', renderDashboardSrc.includes('ensureAllTimeBudgetLogsLoaded('));
-check('renderProjectsBudget() uses projectLoggedMinsAllTime() for the overall project %', renderProjectsBudgetSrc.includes('projectLoggedMinsAllTime(proj.id)') && !renderProjectsBudgetSrc.includes('projectLoggedMins(proj.id)/60'));
+check('computeProjectStats() (renderProjectsBudget()\'s overall project % helper) uses projectLoggedMinsAllTime()', computeProjectStatsSrc.includes('projectLoggedMinsAllTime(proj.id)') && !computeProjectStatsSrc.includes('projectLoggedMins(proj.id)/60'));
+check('renderProjectsBudget() itself calls computeProjectStats() rather than recomputing the project % inline', /computeProjectStats\(proj\)/.test(renderProjectsBudgetSrc));
 check('renderProjectsBudget() uses phaseLoggedMinsAllTime() for each phase bar', renderProjectsBudgetSrc.includes('phaseLoggedMinsAllTime(proj.id,ph)') && !renderProjectsBudgetSrc.includes('=phaseLoggedMins(proj.id,ph)'));
 check('renderProjectsBudget() calls ensureAllTimeBudgetLogsLoaded()', renderProjectsBudgetSrc.includes('ensureAllTimeBudgetLogsLoaded('));
 
