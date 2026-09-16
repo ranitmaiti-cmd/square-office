@@ -98,6 +98,15 @@ textarea.form-control{min-height:70px;resize:vertical;}
 .chip-task.planned{background:#F0E6D6;border-color:#A96E35;}
 .chip-leave{background:#F5E0DC;color:#7A2E28;border-color:#C0554A;}
 .chip-log{background:#F5EFE8;border-color:#6B5A4E;}
+/* V31 (Submission Tracker): day-level/project-level markers on the
+   existing weekly calendar -- a dedicated non-user row, not attached to
+   any person's cells. .open = not yet due; .overdue = plannedDate passed,
+   still open (slip stays visible, never moved); .done = ticked; .actual =
+   the echo shown on actualDate when it differs from plannedDate. */
+.chip-submission.open{background:#EDF2F5;color:#3A5A7A;border-color:#5A7A9A;}
+.chip-submission.overdue{background:#FBEAEA;color:#8B2E24;border-color:#C0554A;opacity:0.85;}
+.chip-submission.done{background:#EFF5E8;color:#3A5A2E;border-color:#6E8F52;}
+.chip-submission.actual{background:#F5ECD8;color:#7A5A18;border-color:#C4874A;}
 
 /* PROJECT BUDGET */
 .project-card{background:white;border:1px solid #E0D8CE;border-radius:12px;padding:16px;margin-bottom:12px;border-left:5px solid #A96E35;}
@@ -617,6 +626,19 @@ textarea.form-control{min-height:70px;resize:vertical;}
             <h3 style="margin:0;font-size:16px;font-weight:700;color:#3D332A;">🎉 Wins This Quarter</h3>
           </div>
           <div id="quarterWinsFeed" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+
+        <!-- V31 (Submission Tracker): founder-only slippage KPI, aggregated
+             strictly by PROJECT -- planned-vs-actual, on-time vs slipped,
+             slip magnitude. Same admin-only posture as the salary/Hours
+             Tracker figures elsewhere -- never a per-person on-time score,
+             that would be a surveillance metric. Gated in JS (hidden for
+             non-admins), same pattern as the reconciliation queue card. -->
+        <div class="card" id="submissionsKpiCard" style="margin-bottom:20px;display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;font-size:16px;font-weight:700;color:#3D332A;">📊 Submission Slippage (by project)</h3>
+          </div>
+          <div id="submissionsKpiFeed" style="display:flex;flex-direction:column;gap:6px;"></div>
         </div>
 
         <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
@@ -1210,6 +1232,30 @@ textarea.form-control{min-height:70px;resize:vertical;}
   </div>
 </div>
 
+<!-- V31 (Submission Tracker): a submission is a day-level, project-level
+     marker on the weekly calendar -- not a per-project sub-record, not
+     attached to a person. Own Firestore collection (see the JS section),
+     never duplicated into the project doc or the calendar's own day
+     structure. Marker + remark + project only, deliberately no
+     deliverables checklist. Opened by clicking a day cell in the
+     calendar's own "📅 Submissions" row -- plannedDate arrives prefilled
+     from whichever day was clicked, but stays editable before the first
+     save (it's fixed only from then on). -->
+<div class="modal-backdrop" id="addSubmissionModal">
+  <div class="modal-box">
+    <div class="modal-head"><h3>Add Submission</h3><button class="close-btn" onclick="closeModal('addSubmissionModal')">×</button></div>
+    <div class="form-group"><label class="form-label">Project *</label>
+      <select class="form-control" id="subProjectSelect"><option value="">Select project...</option></select>
+    </div>
+    <div class="form-group"><label class="form-label">Planned Date *</label><input type="date" class="form-control" id="subPlannedDate"></div>
+    <div class="form-group"><label class="form-label">Remark *</label><input type="text" class="form-control" id="subRemark" placeholder="What's being submitted (e.g. DD Package)"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button class="btn btn-primary" id="subSaveBtn">Add</button>
+      <button class="btn btn-ghost" onclick="closeModal('addSubmissionModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Budget Templates Modal (admin) -- V17 (budget-distribution feature).
      Edits a DRAFT copy (budgetTemplatesDraft), only committed to the live
      budgetTemplates array + saved on "Save Templates" -- same
@@ -1473,7 +1519,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-13.6'; // V30: runAttendanceAutoDeduction() converted from AUTO-DEDUCT to FLAG-FOR-REVIEW. Trigger condition unchanged (working day, no approved leave, zero OMS timeLog activity that day -- still never checks biometric data, none exists in-app). What changed: instead of writing status:'approved'+autoDeducted:true and decrementing casLeft/medLeft immediately, it now writes a status:'pending' leaveRequests doc (isSystemFlagged:true, autoDeducted:false) and stops -- no balance write happens in this function anymore. The EXISTING renderApprovals() Approve/Reject flow decides from there: Approve is the ONLY place autoDeducted flips to true and the ONLY place casLeft/medLeft changes (so the 3-consecutive-months warning, which reads autoDeducted, only ever counts confirmed absences); Reject dismisses with zero balance impact. renderApprovals() shows a distinct "🚩 Possible Absence" label for system-flagged items so an admin can't confuse them with a person's own leave request. Visible passively in the person's own Leave & HR (renderLeaves()) same as any pending request, but with no Cancel button -- employee self-dismiss is deliberately out of scope this build. Reversing the 264 pre-existing auto-deducted docs from before this fix is a separate, deliberately unstarted next step. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-16.1'; // V31: Submission Tracker (hybrid: calendar marker + own store + founder KPI). New Firestore collection `submissions`, one doc per submission -- {id, projectId, plannedDate, actualDate|null, remark, status:'open'|'done', createdAt} -- never duplicated onto the project doc or into planEntries/the calendar's own day structure (single-store, granular per-doc writes, merge:true, never bare .set()). Displayed as a dedicated non-user "📅 Submissions" row on the EXISTING weekly calendar (team-visible, day-level/project-level only, no person attribution) -- plannedDate is set once and never moves; ticking "submitted" stamps actualDate (which may be later) and is reversible; an unticked past-plannedDate submission shows overdue ON its planned day, never silently moved. Founder-only KPI card aggregates strictly by project (on-time vs slipped, slip-days) -- never per-person, that would be a surveillance score. No deliverables checklist (deliberately leaner than the abandoned project-doc-embedded prototype -- see FINDINGS-2026-08-10.md). No reminder/notification wiring -- pull-based display only.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -1590,6 +1636,14 @@ let planEntries   = [];
 let timeLogs      = [];
 let holidays      = [];
 let leaveRequests = [];
+// V31 (Submission Tracker): own Firestore collection, one doc per
+// submission -- { id, projectId, plannedDate, actualDate|null, remark,
+// status:'open'|'done', createdAt }. Never duplicated into projectsData
+// or into planEntries/the calendar's own day structure -- loaded here as
+// its own array, read by both the calendar row (by plannedDate/
+// actualDate) and the founder-only KPI (by projectId). One store, two
+// reads.
+let submissionsData = [];
 let changeRequests= [];
 let notifications = [];
 
@@ -3629,7 +3683,15 @@ async function loadData() {
       leaveRequests = [];
       leaveRequestsSnapshot.forEach(doc => { leaveRequests.push(doc.data()); });
       console.log('✅ Loaded leave requests from server:', leaveRequests.length);
-      
+
+      // V31 (Submission Tracker): own collection, loaded the same way as
+      // leaveRequests -- granular writes only, never part of the
+      // dataToSave batch payload below.
+      const submissionsSnapshot = await db.collection("submissions").get({source:'server'});
+      submissionsData = [];
+      submissionsSnapshot.forEach(doc => { submissionsData.push({ ...doc.data(), id: doc.id }); });
+      console.log('✅ Loaded submissions from server:', submissionsData.length);
+
       // Fallback: Migrate old structure if subcollections empty
       if (projectsData.length === 0 && data.projectsData) {
         console.log('📦 Migrating projects from old structure...');
@@ -6548,6 +6610,11 @@ function renderDashboard(){
     return `<div class="cal-head-cell" style="${isWeekendDay?'color:#C0554A;background:#FBF0EE;':''}${tod?'color:#A96E35;background:#F0E6D6;font-weight:800;':''}">${d}<br><small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
   }).join(''); grid.appendChild(head);
 
+  // V31 (Submission Tracker): a dedicated, non-user row -- day-level and
+  // project-level only, deliberately NOT one of the per-person rows below
+  // it, so a submission marker can never read as "assigned to someone."
+  grid.appendChild(renderSubmissionsCalendarRow(days));
+
   users.forEach(user=>{
     const row=document.createElement('div'); row.className='cal-row';
     const nc=document.createElement('div'); nc.className='cal-name'; 
@@ -6598,6 +6665,9 @@ function renderDashboard(){
   // for Projects & Budget, so (unlike the reconciliation queue) it needs
   // no async Firestore fetch of its own.
   renderQuarterWins();
+  // V31: Submission slippage KPI -- founder-only, pure-read from
+  // projectsData + submissionsData, both already loaded.
+  renderSubmissionsKPI();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -8285,6 +8355,217 @@ function computeProjectStats(proj) {
   const allPhasesConfirmed = phaseCount>0 && confirmedCount===phaseCount;
 
   return { totalBudget, loggedH, pct, status, atRiskCount, phaseCount, confirmedCount, allPhasesConfirmed };
+}
+
+// ═══════════════════════════════════════════════════════
+// V31 (Submission Tracker, 2026-09-16, revised spec): a submission is a
+// day-level, project-level marker on the EXISTING weekly calendar, backed
+// by its own Firestore collection `submissions` -- one doc per
+// submission: { id, projectId, plannedDate, actualDate|null, remark,
+// status:'open'|'done', createdAt }. Deliberately NOT stored on the
+// project doc and NOT duplicated into the calendar's own day/planEntries
+// structure -- a submission is written to exactly ONE place, ever, so
+// editing a project (saveProject()'s own full .set(), a different
+// collection entirely) or editing a calendar day's work assignments
+// (planEntries, also a different collection) cannot structurally touch
+// it at all. No collision-fix carry-forward is needed here the way
+// phaseStatus/phaseStatusMeta needed one on the project doc -- there's no
+// shared document to collide on in the first place.
+//
+// Slip handling is the load-bearing rule: plannedDate is set once at
+// creation and NEVER moves. Ticking "submitted" sets status:'done' and
+// stamps actualDate to today, whatever that is relative to plannedDate --
+// the gap between the two IS the slip, and it's never rewritten away.
+// Reversible: unticking clears status back to 'open' and actualDate back
+// to null. Until ticked, a submission whose plannedDate has passed shows
+// as overdue on that same planned day -- never silently rescheduled.
+//
+// Marker + remark + project only, deliberately no deliverables checklist
+// (leaner than the prior, now-abandoned project-doc-embedded design --
+// see FINDINGS-2026-08-10.md). No person attribution anywhere in this
+// shape: no userId/assignee on a submission, no "who ticked it" stamp --
+// strictly project-level, matching the guardrail that this is a display
+// feature, never a "who's behind" surveillance tool. No reminder/
+// notification wiring anywhere below -- purely pull-based rendering.
+
+function isSubmissionOverdue(sub, todayStr) {
+  return sub.status === 'open' && sub.plannedDate < todayStr;
+}
+
+// Founder-only slippage KPI, aggregated STRICTLY by project -- never by
+// person. On-time/slipped/slip-days are only meaningful for DONE
+// submissions (an open one hasn't produced an outcome yet).
+function computeSubmissionsKPI(projectsData, submissionsData) {
+  const byProject = {};
+  submissionsData.forEach((sub) => {
+    if (!byProject[sub.projectId]) byProject[sub.projectId] = { total: 0, done: 0, onTime: 0, slipped: 0, totalSlipDays: 0 };
+    const agg = byProject[sub.projectId];
+    agg.total++;
+    if (sub.status === 'done' && sub.actualDate) {
+      agg.done++;
+      const slipDays = Math.round((new Date(sub.actualDate) - new Date(sub.plannedDate)) / 86400000);
+      if (slipDays > 0) { agg.slipped++; agg.totalSlipDays += slipDays; }
+      else agg.onTime++;
+    }
+  });
+  return Object.entries(byProject).map(([projectId, agg]) => {
+    const proj = projectsData.find((p) => p.id === projectId);
+    return {
+      projectId,
+      projectName: proj?.name || '(unknown project)',
+      total: agg.total,
+      open: agg.total - agg.done,
+      done: agg.done,
+      onTime: agg.onTime,
+      slipped: agg.slipped,
+      avgSlipDays: agg.slipped > 0 ? Math.round((agg.totalSlipDays / agg.slipped) * 10) / 10 : 0,
+    };
+  }).sort((a, b) => a.projectName.localeCompare(b.projectName));
+}
+
+// Granular, single-document, merge:true writer -- never a bare .set(),
+// never touches any other submission doc, never touches the projects or
+// planEntries collections.
+async function saveSubmissionDoc(sub) {
+  if (staleVersionLockout) return { ok: false };
+  try {
+    await db.collection('submissions').doc(sub.id).set(sub, { merge: true });
+    return { ok: true };
+  } catch (e) {
+    console.error('❌ Save submission failed:', e);
+    alert('Could not save — check your connection and try again.');
+    return { ok: false, error: true };
+  }
+}
+
+async function createSubmission(projectId, plannedDate, remark) {
+  const sub = {
+    id: genId(), projectId, plannedDate, actualDate: null,
+    remark: (remark || '').trim(), status: 'open', createdAt: new Date().toISOString(),
+  };
+  const result = await saveSubmissionDoc(sub);
+  if (result.ok) submissionsData.push(sub);
+  return result;
+}
+
+// Reversible single toggle: done -> open clears actualDate; open -> done
+// stamps actualDate to TODAY (never a chosen/backdated date -- the stamp
+// records when it was actually marked submitted).
+async function toggleSubmissionDone(submissionId) {
+  const sub = submissionsData.find((s) => s.id === submissionId);
+  if (!sub) return { ok: false };
+  const goingDone = sub.status !== 'done';
+  const patch = goingDone
+    ? { status: 'done', actualDate: fmt(new Date()) }
+    : { status: 'open', actualDate: null };
+  const result = await saveSubmissionDoc({ id: submissionId, ...patch });
+  if (result.ok) Object.assign(sub, patch);
+  return result;
+}
+
+// Every chip that should appear on calendar day `ds`: the planned-day
+// marker always lives on plannedDate (open, overdue, or done-but-late are
+// all shown there so the slip never disappears from where it was due),
+// PLUS a second "submitted" echo on actualDate when a late submission's
+// actual day differs from its planned day -- so you can see both where it
+// was due and where it actually landed.
+function submissionChipsForDate(ds, todayStr) {
+  const chips = [];
+  submissionsData.forEach((sub) => {
+    const proj = projectsData.find((p) => p.id === sub.projectId);
+    const projName = proj?.name || '(unknown project)';
+    if (sub.plannedDate === ds) {
+      if (sub.status === 'done') {
+        const late = sub.actualDate && sub.actualDate !== sub.plannedDate;
+        chips.push({ id: sub.id, cls: 'done', text: `${late ? '✅ (late) ' : '✅ '}${projName} — ${sub.remark}` });
+      } else {
+        const overdue = isSubmissionOverdue(sub, todayStr);
+        chips.push({ id: sub.id, cls: overdue ? 'overdue' : 'open', text: `${overdue ? '⚠' : '📅'} ${projName} — ${sub.remark}` });
+      }
+    } else if (sub.status === 'done' && sub.actualDate === ds) {
+      chips.push({ id: sub.id, cls: 'done actual', text: `✅ Submitted: ${projName} — ${sub.remark}`, isEcho: true });
+    }
+  });
+  return chips;
+}
+
+function renderSubmissionsCalendarRow(days) {
+  const row = document.createElement('div'); row.className = 'cal-row';
+  const nc = document.createElement('div'); nc.className = 'cal-name';
+  nc.innerHTML = '<span style="font-weight:700;color:#5C4F42;">📅 Submissions</span>';
+  row.appendChild(nc);
+  const todayStr = fmt(new Date());
+  days.forEach((day) => {
+    const ds = fmt(day);
+    const cell = document.createElement('div');
+    cell.className = 'cal-cell' + (ds === todayStr ? ' today' : '');
+    submissionChipsForDate(ds, todayStr).forEach((chip) => {
+      const c = document.createElement('div');
+      c.className = 'chip chip-submission ' + chip.cls;
+      c.textContent = chip.text;
+      if (!chip.isEcho) {
+        // Only the planned-day marker toggles -- the actualDate echo is
+        // read-only, so there's exactly one place to click per submission.
+        c.title = 'Click to toggle submitted';
+        c.addEventListener('click', () => toggleSubmissionDoneAndRefresh(chip.id));
+      } else {
+        c.style.cursor = 'default';
+      }
+      cell.appendChild(c);
+    });
+    const addBtn = document.createElement('div');
+    addBtn.textContent = '+ submission';
+    addBtn.style.cssText = 'font-size:10px;color:#B0A89E;cursor:pointer;margin-top:2px;';
+    addBtn.addEventListener('click', () => openAddSubmissionModal(ds));
+    cell.appendChild(addBtn);
+    row.appendChild(cell);
+  });
+  return row;
+}
+
+async function toggleSubmissionDoneAndRefresh(submissionId) {
+  await toggleSubmissionDone(submissionId);
+  renderDashboard();
+}
+
+function openAddSubmissionModal(plannedDate) {
+  const sel = document.getElementById('subProjectSelect');
+  sel.innerHTML = '<option value="">Select project...</option>' + projectsData.map((p) => `<option value="${p.id}">${p.name}</option>`).join('');
+  document.getElementById('subPlannedDate').value = plannedDate;
+  document.getElementById('subRemark').value = '';
+  openModal('addSubmissionModal');
+}
+
+document.getElementById('subSaveBtn').addEventListener('click', async () => {
+  const projectId = document.getElementById('subProjectSelect').value;
+  const plannedDate = document.getElementById('subPlannedDate').value;
+  const remark = document.getElementById('subRemark').value.trim();
+  if (!projectId || !plannedDate || !remark) { alert('Select a project, a planned date, and a remark.'); return; }
+  await createSubmission(projectId, plannedDate, remark);
+  closeModal('addSubmissionModal');
+  renderDashboard();
+});
+
+// Founder-only: admin-gated the same way the reconciliation queue card
+// is (hidden entirely for non-admins). Aggregated strictly by project --
+// see computeSubmissionsKPI()'s own header for why this never goes
+// per-person.
+function renderSubmissionsKPI() {
+  const cardEl = document.getElementById('submissionsKpiCard');
+  const feedEl = document.getElementById('submissionsKpiFeed');
+  if (!cardEl || !feedEl) return;
+  if (!currentUser?.isAdmin) { cardEl.style.display = 'none'; return; }
+  cardEl.style.display = 'block';
+
+  const rows = computeSubmissionsKPI(projectsData, submissionsData);
+  if (rows.length === 0) {
+    feedEl.innerHTML = '<div style="color:#B0A89E;font-size:13px;padding:12px;text-align:center;">No submissions logged yet</div>';
+    return;
+  }
+  feedEl.innerHTML = rows.map((r) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:6px;background:#F8F4EE;font-size:12px;">
+    <strong>${r.projectName}</strong>
+    <span style="color:#8A7E74;">${r.done}/${r.total} done · <span style="color:#6E8F52;">${r.onTime} on-time</span> · <span style="color:${r.slipped > 0 ? '#C0554A' : '#8A7E74'};">${r.slipped} slipped${r.slipped > 0 ? ` (avg ${r.avgSlipDays}d late)` : ''}</span></span>
+  </div>`).join('');
 }
 
 // V29 (Wins This Quarter): PROJECT-level positive facts only, read-only,

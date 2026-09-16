@@ -269,23 +269,14 @@ function makeFakeDom(ids) {
   check('saveProject() is byte-for-byte unchanged', extractFunction(fullScript, 'saveProject') === extractFunction(mainFullScript, 'saveProject'));
   check('saveProjectPhaseStatus() is byte-for-byte unchanged', extractFunction(fullScript, 'saveProjectPhaseStatus') === extractFunction(mainFullScript, 'saveProjectPhaseStatus'));
   check('saveTimeLog() is byte-for-byte unchanged', extractFunction(fullScript, 'saveTimeLog') === extractFunction(mainFullScript, 'saveTimeLog'));
-  // V30 (2026-09-13, attendance flag-for-review): renderLeaves() LEGITIMATELY
-  // changed -- a system-flagged possible absence needs a Cancel-button guard
-  // (self-dismiss is out of scope for that build). Proven safe by stripping
-  // exactly that known V30 addition back out and confirming byte-identity to
-  // main holds for everything else.
-  check('renderLeaves() unchanged from main except the V30 isSystemFlagged Cancel-button guard', (() => {
-    const cur = extractFunction(fullScript, 'renderLeaves');
-    const main = extractFunction(mainFullScript, 'renderLeaves');
-    const commentBlock = "    // V30: a system-flagged possible absence gets NO Cancel button here --\n" +
-      "    // self-dismiss is explicitly out of scope for this build (the owner\n" +
-      "    // wants to see every flag reviewed by an admin first). It's still\n" +
-      "    // fully VISIBLE in this list like any other request, satisfying the\n" +
-      "    // \"notify the person\" intent -- they just can't dismiss it themselves.\n";
-    let stripped = cur.replace(commentBlock, '');
-    stripped = stripped.replace("(lv.status==='pending' && !lv.isSystemFlagged)", "lv.status==='pending'");
-    return stripped === main;
-  })());
+  // V30 shipped to main last session (2026-09-13), so main now ALREADY
+  // contains the isSystemFlagged Cancel-button guard -- a "strip the V30
+  // addition out of this branch, then compare to main" check would now
+  // be comparing against main's OWN former self and false-fail forever.
+  // Same structural fix already applied elsewhere in this codebase for
+  // the identical post-merge situation: assert plain byte-identity now
+  // (both sides have the change), same as any other isolation check.
+  check('renderLeaves() is byte-for-byte unchanged from main', extractFunction(fullScript, 'renderLeaves') === extractFunction(mainFullScript, 'renderLeaves'));
 
   console.log('\n=== the inline <script> still parses ===');
   check('new Function(fullScript) does not throw', (() => {
