@@ -194,6 +194,54 @@ function makeMockDb() {
   }
 
   // ─────────────────────────────────────────────────────────────
+  console.log('\n=== The row and the KPI card NEVER hide on zero records -- there must always be a way to create the first one ===');
+  function makeFakeElement() {
+    const el = { className: '', innerHTML: '', textContent: '', style: {}, children: [], _listeners: {} };
+    el.createElement = undefined;
+    el.appendChild = (child) => { el.children.push(child); return child; };
+    el.addEventListener = (evt, fn) => { el._listeners[evt] = fn; };
+    return el;
+  }
+  function makeFakeDocumentForRow() {
+    return { createElement: () => makeFakeElement() };
+  }
+  {
+    const renderRowSrc = extractFunction(fullScript, 'renderSubmissionsCalendarRow');
+    const sandbox = { console, Date, Math };
+    vm.createContext(sandbox);
+    vm.runInContext(fmtSrc, sandbox);
+    vm.runInContext(isOverdueSrc, sandbox);
+    vm.runInContext(chipsForDateSrc, sandbox);
+    sandbox.document = makeFakeDocumentForRow();
+    sandbox.projectsData = [];
+    sandbox.submissionsData = []; // ZERO records
+    sandbox.toggleSubmissionDoneAndRefresh = () => {};
+    sandbox.openAddSubmissionModal = () => {};
+    vm.runInContext(renderRowSrc, sandbox);
+    const days = [new Date('2026-09-14'), new Date('2026-09-15')];
+    sandbox.days = days;
+    const row = vm.runInContext('renderSubmissionsCalendarRow(days)', sandbox);
+    check('the row still renders with zero submissions (not skipped/hidden)', !!row);
+    check('every day cell still has a "+ submission" entry point even with zero records', row.children.slice(1).every((cell) => cell.children.some((c) => c.textContent === '+ submission')));
+  }
+  {
+    const renderKpiSrc = extractFunction(fullScript, 'renderSubmissionsKPI');
+    const sandbox = { console, Math, Object };
+    vm.createContext(sandbox);
+    vm.runInContext(computeKpiSrc, sandbox);
+    const cardEl = { style: {} };
+    const feedEl = { innerHTML: '' };
+    sandbox.document = { getElementById: (id) => (id === 'submissionsKpiCard' ? cardEl : id === 'submissionsKpiFeed' ? feedEl : null) };
+    sandbox.currentUser = { isAdmin: true };
+    sandbox.projectsData = [];
+    sandbox.submissionsData = []; // ZERO records
+    vm.runInContext(renderKpiSrc, sandbox);
+    vm.runInContext('renderSubmissionsKPI()', sandbox);
+    check('the KPI card is still shown (not hidden) for an admin with zero submissions logged', cardEl.style.display === 'block');
+    check('it shows an explanatory empty state instead of disappearing', feedEl.innerHTML.includes('No submissions logged yet'));
+  }
+
+  // ─────────────────────────────────────────────────────────────
   console.log('\n=== Structural: nothing anywhere ever rewrites plannedDate ===');
   const v31Block = fullScript.slice(fullScript.indexOf('function isSubmissionOverdue'), fullScript.indexOf('function renderSubmissionsKPI') + 2000);
   check('no assignment to .plannedDate anywhere in the V31 code (it is only ever READ, and set once at creation inside the object literal)', !/\.plannedDate\s*=[^=]/.test(v31Block.replace(/plannedDate,/g, '')));
@@ -298,16 +346,25 @@ function makeMockDb() {
 
   {
     // renderDashboard() legitimately changed -- it now also calls
-    // renderSubmissionsCalendarRow()/renderSubmissionsKPI(). Prove that's
-    // the ONLY delta by stripping exactly those known additions back out
-    // and confirming byte-identity to main holds for the rest, the same
-    // discipline used for prior legitimate renderDashboard()-adjacent
-    // changes in this codebase.
+    // renderSubmissionsKPI() (founder-only KPI card). The marker ROW
+    // itself lives on Weekly Planner, NOT here -- Dashboard's calendar is
+    // a read-only view, not the surface work actually gets assigned on.
+    // Prove the KPI call is the ONLY delta by stripping it back out and
+    // confirming byte-identity to main holds for the rest.
     const cur = extractFunction(fullScript, 'renderDashboard');
     const main = extractFunction(mainFullScript, 'renderDashboard');
-    let stripped = cur.replace(/\n\s*\/\/ V31 \(Submission Tracker\)[\s\S]*?grid\.appendChild\(renderSubmissionsCalendarRow\(days\)\);\n/, '\n');
-    stripped = stripped.replace(/\n\s*\/\/ V31: Submission slippage KPI[\s\S]*?renderSubmissionsKPI\(\);/, '');
-    check('renderDashboard() unchanged from main except the two V31 render calls', stripped === main);
+    const stripped = cur.replace(/\n\s*\/\/ V31: Submission slippage KPI[\s\S]*?renderSubmissionsKPI\(\);/, '');
+    check('renderDashboard() unchanged from main except the one V31 KPI render call', stripped === main);
+    check('renderDashboard() does NOT render the submissions marker row (wrong surface -- that belongs on Weekly Planner)', !cur.includes('renderSubmissionsCalendarRow'));
+  }
+  {
+    // renderPlanner() legitimately changed -- it's the ACTUAL surface used
+    // to assign/self-assign work, so the submissions marker row lives
+    // here. Prove that's the only delta the same way.
+    const cur = extractFunction(fullScript, 'renderPlanner');
+    const main = extractFunction(mainFullScript, 'renderPlanner');
+    const stripped = cur.replace(/\n\n\s*\/\/ V31 \(Submission Tracker\)[\s\S]*?grid\.appendChild\(renderSubmissionsCalendarRow\(days\)\);\n/, '');
+    check('renderPlanner() unchanged from main except the one V31 marker-row render call', stripped === main);
   }
 
   console.log('\n=== the inline <script> still parses ===');

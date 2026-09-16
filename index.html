@@ -6610,11 +6610,6 @@ function renderDashboard(){
     return `<div class="cal-head-cell" style="${isWeekendDay?'color:#C0554A;background:#FBF0EE;':''}${tod?'color:#A96E35;background:#F0E6D6;font-weight:800;':''}">${d}<br><small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
   }).join(''); grid.appendChild(head);
 
-  // V31 (Submission Tracker): a dedicated, non-user row -- day-level and
-  // project-level only, deliberately NOT one of the per-person rows below
-  // it, so a submission marker can never read as "assigned to someone."
-  grid.appendChild(renderSubmissionsCalendarRow(days));
-
   users.forEach(user=>{
     const row=document.createElement('div'); row.className='cal-row';
     const nc=document.createElement('div'); nc.className='cal-name'; 
@@ -7950,6 +7945,14 @@ function renderPlanner(){
     const dt=days[i],hol=isHoliday(dt)||is24Sat(dt),tod=fmt(dt)===fmt(new Date());
     return `<div class="planner-head-cell" style="${hol?'background:#F5ECD8;color:#C4874A;':''}${tod?'background:#F0E6D6;color:#A96E35;font-weight:800;':''}">${d} <small>${dt.getDate()}/${dt.getMonth()+1}</small></div>`;
   }).join(''); grid.appendChild(head);
+
+  // V31 (Submission Tracker): a dedicated, non-user row -- day-level and
+  // project-level only, deliberately NOT one of the per-person rows below
+  // it, so a submission marker can never read as "assigned to someone."
+  // Lives HERE (Weekly Planner), not on Dashboard's calendar -- this is
+  // the actual surface used to assign/self-assign work.
+  grid.appendChild(renderSubmissionsCalendarRow(days));
+
   users.forEach(user=>{
     const row=document.createElement('div'); row.className='planner-row';
     // V14.2.24: Highlight current user's own row
@@ -8489,16 +8492,22 @@ function submissionChipsForDate(ds, todayStr) {
   return chips;
 }
 
+// V31 (Submission Tracker): lives on WEEKLY PLANNER (plannerGrid), NOT
+// Dashboard's read-only calendar -- the planner is the actual surface
+// used to assign/self-assign work, per spec ("created as a day-level
+// marker on the existing weekly calendar, the SAME surface used to
+// assign/self-assign work"). Reuses planner-row/planner-cell/planner-name
+// so it lines up with the planner's own grid, not cal-row/cal-cell.
 function renderSubmissionsCalendarRow(days) {
-  const row = document.createElement('div'); row.className = 'cal-row';
-  const nc = document.createElement('div'); nc.className = 'cal-name';
+  const row = document.createElement('div'); row.className = 'planner-row';
+  const nc = document.createElement('div'); nc.className = 'planner-name';
   nc.innerHTML = '<span style="font-weight:700;color:#5C4F42;">📅 Submissions</span>';
   row.appendChild(nc);
   const todayStr = fmt(new Date());
   days.forEach((day) => {
     const ds = fmt(day);
     const cell = document.createElement('div');
-    cell.className = 'cal-cell' + (ds === todayStr ? ' today' : '');
+    cell.className = 'planner-cell' + (ds === todayStr ? ' today' : '');
     submissionChipsForDate(ds, todayStr).forEach((chip) => {
       const c = document.createElement('div');
       c.className = 'chip chip-submission ' + chip.cls;
@@ -8525,7 +8534,7 @@ function renderSubmissionsCalendarRow(days) {
 
 async function toggleSubmissionDoneAndRefresh(submissionId) {
   await toggleSubmissionDone(submissionId);
-  renderDashboard();
+  renderPlanner();
 }
 
 function openAddSubmissionModal(plannedDate) {
@@ -8543,7 +8552,7 @@ document.getElementById('subSaveBtn').addEventListener('click', async () => {
   if (!projectId || !plannedDate || !remark) { alert('Select a project, a planned date, and a remark.'); return; }
   await createSubmission(projectId, plannedDate, remark);
   closeModal('addSubmissionModal');
-  renderDashboard();
+  renderPlanner();
 });
 
 // Founder-only: admin-gated the same way the reconciliation queue card
