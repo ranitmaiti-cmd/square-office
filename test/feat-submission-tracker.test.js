@@ -117,6 +117,7 @@ function makeMockDb() {
 
 (async () => {
   const isOverdueSrc = extractFunction(fullScript, 'isSubmissionOverdue');
+  const computeOutcomeSrc = extractFunction(fullScript, 'computeSubmissionOutcome');
   const computeKpiSrc = extractFunction(fullScript, 'computeSubmissionsKPI');
   const saveSubDocSrc = extractFunction(fullScript, 'saveSubmissionDoc');
   const createSubSrc = extractFunction(fullScript, 'createSubmission');
@@ -216,6 +217,7 @@ function makeMockDb() {
     vm.createContext(sandbox);
     vm.runInContext(fmtSrc, sandbox);
     vm.runInContext(isOverdueSrc, sandbox);
+    vm.runInContext(computeOutcomeSrc, sandbox);
     vm.runInContext(chipsForDateSrc, sandbox);
     sandbox.document = makeFakeDocumentForRow();
     sandbox.projectsData = [];
@@ -262,26 +264,69 @@ function makeMockDb() {
     check('done, regardless of date -> NOT overdue (it was submitted, however late)', vm.runInContext("isSubmissionOverdue({status:'done', plannedDate:'2020-01-01'}, '2026-09-16')", sandbox) === false);
   }
 
+  console.log('\n=== computeSubmissionOutcome(): the bug fix -- direction matters, early is NEVER late ===');
+  {
+    const sandbox = { console };
+    vm.createContext(sandbox);
+    vm.runInContext(isOverdueSrc, sandbox);
+    vm.runInContext(computeOutcomeSrc, sandbox);
+
+    console.log('\n--- THE BUG: planned Thu 2026-09-17, ticked done Wed 2026-09-16 (early) -- must NOT be "late" ---');
+    const earlyOutcome = vm.runInContext("computeSubmissionOutcome({status:'done', plannedDate:'2026-09-17', actualDate:'2026-09-16'}, '2026-09-16')", sandbox);
+    check('actualDate BEFORE plannedDate -> kind is "early", never "late"', earlyOutcome.kind === 'early');
+    check('the early outcome carries no lateDays', earlyOutcome.lateDays === undefined);
+
+    const onTimeOutcome = vm.runInContext("computeSubmissionOutcome({status:'done', plannedDate:'2026-09-17', actualDate:'2026-09-17'}, '2026-09-17')", sandbox);
+    check('actualDate === plannedDate (same day) -> kind is "on-time"', onTimeOutcome.kind === 'on-time');
+
+    const lateOutcome = vm.runInContext("computeSubmissionOutcome({status:'done', plannedDate:'2026-09-05', actualDate:'2026-09-08'}, '2026-09-16')", sandbox);
+    check('actualDate AFTER plannedDate -> kind is "late"', lateOutcome.kind === 'late');
+    check('late-by-3-days computed correctly', lateOutcome.lateDays === 3);
+
+    const overdueOutcome = vm.runInContext("computeSubmissionOutcome({status:'open', plannedDate:'2020-01-01'}, '2026-09-16')", sandbox);
+    check('not done, plannedDate in the past -> kind is "overdue"', overdueOutcome.kind === 'overdue');
+
+    const upcomingOutcomeFuture = vm.runInContext("computeSubmissionOutcome({status:'open', plannedDate:'2099-01-01'}, '2026-09-16')", sandbox);
+    check('not done, plannedDate in the future -> kind is "upcoming"', upcomingOutcomeFuture.kind === 'upcoming');
+    const upcomingOutcomeToday = vm.runInContext("computeSubmissionOutcome({status:'open', plannedDate:'2026-09-16'}, '2026-09-16')", sandbox);
+    check('not done, plannedDate is TODAY -> kind is "upcoming", not "overdue"', upcomingOutcomeToday.kind === 'upcoming');
+  }
+
   console.log('\n--- submissionChipsForDate(): the marker renders ON plannedDate even when overdue, plus a late-completion echo on actualDate ---');
   {
     const sandbox = { console };
     vm.createContext(sandbox);
     vm.runInContext(isOverdueSrc, sandbox);
+    vm.runInContext(computeOutcomeSrc, sandbox);
     vm.runInContext(chipsForDateSrc, sandbox);
     sandbox.projectsData = [{ id: 'p1', name: 'BURDWAN RD' }];
     sandbox.submissionsData = [
       { id: 'a', projectId: 'p1', plannedDate: '2026-09-10', actualDate: null, remark: 'Overdue one', status: 'open' },
       { id: 'b', projectId: 'p1', plannedDate: '2026-09-05', actualDate: '2026-09-08', remark: 'Late but done', status: 'done' },
+      { id: 'c', projectId: 'p1', plannedDate: '2026-09-17', actualDate: '2026-09-16', remark: 'Ticked early', status: 'done' },
+      { id: 'd', projectId: 'p1', plannedDate: '2026-09-12', actualDate: '2026-09-12', remark: 'Ticked same day', status: 'done' },
     ];
     const plannedDayChips = vm.runInContext("submissionChipsForDate('2026-09-10', '2026-09-16')", sandbox);
     check('an overdue open submission still shows its chip ON the planned day (never removed/moved)', plannedDayChips.some((c) => c.id === 'a' && c.cls === 'overdue'));
 
     const lateSubmissionPlannedDay = vm.runInContext("submissionChipsForDate('2026-09-05', '2026-09-16')", sandbox);
-    check('a late-but-done submission STILL shows a marker on its ORIGINAL planned day (marked late)', lateSubmissionPlannedDay.some((c) => c.id === 'b' && c.text.includes('(late)')));
+    check('a late-but-done submission STILL shows a marker on its ORIGINAL planned day (marked late, with day count)', lateSubmissionPlannedDay.some((c) => c.id === 'b' && c.text.includes('(late by 3d)')));
 
     const actualDayChips = vm.runInContext("submissionChipsForDate('2026-09-08', '2026-09-16')", sandbox);
     check('the same late submission ALSO shows an echo chip on its actual completion day', actualDayChips.some((c) => c.id === 'b' && c.isEcho === true));
     check('a day with nothing due gets zero chips', vm.runInContext("submissionChipsForDate('2026-01-01', '2026-09-16')", sandbox).length === 0);
+
+    console.log('\n--- THE BUG, end to end through the actual chip renderer: early must read "(early)", never "(late)" ---');
+    const earlyChipDay = vm.runInContext("submissionChipsForDate('2026-09-17', '2026-09-16')", sandbox);
+    const earlyChip = earlyChipDay.find((c) => c.id === 'c');
+    check('a submission ticked done BEFORE its plannedDate shows "(early)"', earlyChip.text.includes('(early)'));
+    check('...and CRITICALLY does NOT show "(late)" anywhere in its text', !earlyChip.text.includes('(late)'));
+    check('its chip class reflects the early outcome', earlyChip.cls === 'done early');
+
+    const onTimeChipDay = vm.runInContext("submissionChipsForDate('2026-09-12', '2026-09-16')", sandbox);
+    const onTimeChip = onTimeChipDay.find((c) => c.id === 'd');
+    check('a submission ticked done on the SAME day as plannedDate shows neither "(late)" nor "(early)"', !onTimeChip.text.includes('(late)') && !onTimeChip.text.includes('(early)'));
+    check('its chip class reflects the on-time outcome', onTimeChip.cls === 'done on-time');
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -289,21 +334,24 @@ function makeMockDb() {
   {
     const sandbox = { console };
     vm.createContext(sandbox);
+    vm.runInContext(isOverdueSrc, sandbox);
+    vm.runInContext(computeOutcomeSrc, sandbox);
     vm.runInContext(computeKpiSrc, sandbox);
     const projectsData = [{ id: 'p1', name: 'BURDWAN RD' }, { id: 'p2', name: 'CHETLA SAMPLE FLAT' }];
     const submissionsData = [
       { id: '1', projectId: 'p1', plannedDate: '2026-09-01', actualDate: '2026-09-01', status: 'done', tickedBy: 'u-priya', tickedAt: '2026-09-01T10:00:00.000Z' }, // on-time
       { id: '2', projectId: 'p1', plannedDate: '2026-09-05', actualDate: '2026-09-08', status: 'done', tickedBy: 'u-tasmin', tickedAt: '2026-09-08T10:00:00.000Z' }, // 3 days slipped
       { id: '3', projectId: 'p1', plannedDate: '2026-09-10', actualDate: null, status: 'open', tickedBy: null, tickedAt: null }, // still open
-      { id: '4', projectId: 'p2', plannedDate: '2026-09-02', actualDate: '2026-09-06', status: 'done', tickedBy: 'u-priya', tickedAt: '2026-09-06T10:00:00.000Z' }, // 4 days slipped
+      { id: '4', projectId: 'p1', plannedDate: '2026-09-17', actualDate: '2026-09-16', status: 'done', tickedBy: 'u-priya', tickedAt: '2026-09-16T10:00:00.000Z' }, // EARLY -- must count as met, not slipped
+      { id: '5', projectId: 'p2', plannedDate: '2026-09-02', actualDate: '2026-09-06', status: 'done', tickedBy: 'u-priya', tickedAt: '2026-09-06T10:00:00.000Z' }, // 4 days slipped
     ];
     sandbox.projectsData = projectsData; sandbox.submissionsData = submissionsData;
     const rows = vm.runInContext('computeSubmissionsKPI(projectsData, submissionsData)', sandbox);
     const p1 = rows.find((r) => r.projectId === 'p1');
     const p2 = rows.find((r) => r.projectId === 'p2');
-    check('p1: total 3, done 2, open 1', p1.total === 3 && p1.done === 2 && p1.open === 1);
-    check('p1: 1 on-time, 1 slipped', p1.onTime === 1 && p1.slipped === 1);
-    check('p1: average slip days for the slipped one is 3', p1.avgSlipDays === 3);
+    check('p1: total 4, done 3, open 1', p1.total === 4 && p1.done === 3 && p1.open === 1);
+    check('p1: 2 on-time (includes the EARLY one), 1 slipped -- early counts as met, not slipped', p1.onTime === 2 && p1.slipped === 1);
+    check('p1: average slip days for the one genuinely slipped submission is 3 (the early one contributes ZERO slip days)', p1.avgSlipDays === 3);
     check('p2: 1 slipped, average slip days 4', p2.slipped === 1 && p2.avgSlipDays === 4);
     check('output rows carry ONLY project fields -- no userId/person/name-of-person anywhere', rows.every((r) => Object.keys(r).every((k) => !/user|person|assignee|by\b/i.test(k))));
     check('tickedBy is NEVER surfaced in the KPI output, even though the input submissions carry it (input has 3 distinct tickedBy values, output has none)', !rows.some((r) => 'tickedBy' in r || 'tickedAt' in r));

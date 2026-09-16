@@ -1519,7 +1519,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-16.2'; // V31.1: toggleSubmissionDone() now stamps tickedBy (currentUser.id) and tickedAt (ISO timestamp) onto the submission doc when marked done, cleared back to null on untick -- "anyone can tick" is unchanged, this only records the fact of who/when. Founder-visible only: never read by submissionChipsForDate()/renderSubmissionsCalendarRow() (the team-facing Weekly Planner row) and never read/aggregated by computeSubmissionsKPI() (still strictly per-project, zero per-person fields) -- both confirmed by source-text sweep, not just by omission. V31 base: Submission Tracker (hybrid: calendar marker + own store + founder KPI) -- see the prior version-bump comment / FINDINGS-2026-08-10.md for the full V31 design (own `submissions` collection, single-store, plannedDate never moves, reversible tick, Weekly Planner surface, founder-only KPI, no notifications).
+const APP_VERSION = '2026-09-16.3'; // V31.2: fixed a bug where a submission ticked done BEFORE its plannedDate (early) was labeled "(late)" -- the old check only tested actualDate !== plannedDate, with no regard for direction. New computeSubmissionOutcome(sub, todayStr) is the single source of truth both submissionChipsForDate() (the calendar chip) and computeSubmissionsKPI() now call: done+actualDate<plannedDate -> 'early', done+actualDate===plannedDate -> 'on-time', done+actualDate>plannedDate -> 'late' (lateDays = actual-planned), not-done+plannedDate-in-past -> 'overdue', not-done+plannedDate-today-or-future -> 'upcoming'. KPI: early and on-time both count as met (onTime bucket); only 'late' counts as slipped, slip-days taken directly from the outcome's own lateDays (always >0 for 'late', so no separate clamp needed). See FINDINGS-2026-08-10.md. Prior version-bump comments cover the full V31 design (own `submissions` collection, single-store, plannedDate never moves, reversible tick, Weekly Planner surface, founder-only KPI, tickedBy/tickedAt, no notifications).
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -8395,9 +8395,35 @@ function isSubmissionOverdue(sub, todayStr) {
   return sub.status === 'open' && sub.plannedDate < todayStr;
 }
 
+// V31.2: single source of truth for a submission's outcome -- both the
+// team-facing calendar chip (submissionChipsForDate()) and the
+// founder-only KPI (computeSubmissionsKPI()) call this, so the two can
+// never disagree on what "late" means. Fixes a bug where a submission
+// ticked done BEFORE its plannedDate (early) was being labeled "(late)"
+// -- the old check only tested actualDate !== plannedDate, with no
+// regard for direction. Compares actualDate to plannedDate directly:
+//   done, actualDate < plannedDate  -> 'early'
+//   done, actualDate === plannedDate -> 'on-time'
+//   done, actualDate > plannedDate  -> 'late', with lateDays = actual - planned (always > 0 here)
+//   not done, plannedDate in the past -> 'overdue'
+//   not done, plannedDate today/future -> 'upcoming'
+function computeSubmissionOutcome(sub, todayStr) {
+  if (sub.status === 'done' && sub.actualDate) {
+    if (sub.actualDate < sub.plannedDate) return { kind: 'early' };
+    if (sub.actualDate === sub.plannedDate) return { kind: 'on-time' };
+    const lateDays = Math.round((new Date(sub.actualDate) - new Date(sub.plannedDate)) / 86400000);
+    return { kind: 'late', lateDays };
+  }
+  return { kind: isSubmissionOverdue(sub, todayStr) ? 'overdue' : 'upcoming' };
+}
+
 // Founder-only slippage KPI, aggregated STRICTLY by project -- never by
 // person. On-time/slipped/slip-days are only meaningful for DONE
-// submissions (an open one hasn't produced an outcome yet).
+// submissions (an open one hasn't produced an outcome yet). Uses the SAME
+// computeSubmissionOutcome() the calendar chip uses -- early and on-time
+// both count as "met" (onTime bucket); only a genuinely late outcome
+// counts as slipped, with slip-days = the outcome's own lateDays (always
+// > 0 for 'late', so never needs a separate max(0, ...) clamp here).
 function computeSubmissionsKPI(projectsData, submissionsData) {
   const byProject = {};
   submissionsData.forEach((sub) => {
@@ -8406,9 +8432,9 @@ function computeSubmissionsKPI(projectsData, submissionsData) {
     agg.total++;
     if (sub.status === 'done' && sub.actualDate) {
       agg.done++;
-      const slipDays = Math.round((new Date(sub.actualDate) - new Date(sub.plannedDate)) / 86400000);
-      if (slipDays > 0) { agg.slipped++; agg.totalSlipDays += slipDays; }
-      else agg.onTime++;
+      const outcome = computeSubmissionOutcome(sub, ''); // todayStr is irrelevant here -- 'done' never falls into the overdue/upcoming branch
+      if (outcome.kind === 'late') { agg.slipped++; agg.totalSlipDays += outcome.lateDays; }
+      else agg.onTime++; // 'early' or 'on-time' both count as met
     }
   });
   return Object.entries(byProject).map(([projectId, agg]) => {
@@ -8486,8 +8512,13 @@ function submissionChipsForDate(ds, todayStr) {
     const projName = proj?.name || '(unknown project)';
     if (sub.plannedDate === ds) {
       if (sub.status === 'done') {
-        const late = sub.actualDate && sub.actualDate !== sub.plannedDate;
-        chips.push({ id: sub.id, cls: 'done', text: `${late ? '✅ (late) ' : '✅ '}${projName} — ${sub.remark}` });
+        // V31.2: uses computeSubmissionOutcome() -- 'early' (actualDate <
+        // plannedDate) must NOT read as "(late)". Only a genuine 'late'
+        // outcome gets the late label (with how many days), 'early' gets
+        // its own label, 'on-time' gets neither.
+        const outcome = computeSubmissionOutcome(sub, todayStr);
+        const label = outcome.kind === 'late' ? ` (late by ${outcome.lateDays}d)` : outcome.kind === 'early' ? ' (early)' : '';
+        chips.push({ id: sub.id, cls: 'done ' + outcome.kind, text: `✅${label} ${projName} — ${sub.remark}` });
       } else {
         const overdue = isSubmissionOverdue(sub, todayStr);
         chips.push({ id: sub.id, cls: overdue ? 'overdue' : 'open', text: `${overdue ? '⚠' : '📅'} ${projName} — ${sub.remark}` });
