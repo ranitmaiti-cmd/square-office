@@ -1519,7 +1519,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-16.1'; // V31: Submission Tracker (hybrid: calendar marker + own store + founder KPI). New Firestore collection `submissions`, one doc per submission -- {id, projectId, plannedDate, actualDate|null, remark, status:'open'|'done', createdAt} -- never duplicated onto the project doc or into planEntries/the calendar's own day structure (single-store, granular per-doc writes, merge:true, never bare .set()). Displayed as a dedicated non-user "📅 Submissions" row on the EXISTING weekly calendar (team-visible, day-level/project-level only, no person attribution) -- plannedDate is set once and never moves; ticking "submitted" stamps actualDate (which may be later) and is reversible; an unticked past-plannedDate submission shows overdue ON its planned day, never silently moved. Founder-only KPI card aggregates strictly by project (on-time vs slipped, slip-days) -- never per-person, that would be a surveillance score. No deliverables checklist (deliberately leaner than the abandoned project-doc-embedded prototype -- see FINDINGS-2026-08-10.md). No reminder/notification wiring -- pull-based display only.
+const APP_VERSION = '2026-09-16.2'; // V31.1: toggleSubmissionDone() now stamps tickedBy (currentUser.id) and tickedAt (ISO timestamp) onto the submission doc when marked done, cleared back to null on untick -- "anyone can tick" is unchanged, this only records the fact of who/when. Founder-visible only: never read by submissionChipsForDate()/renderSubmissionsCalendarRow() (the team-facing Weekly Planner row) and never read/aggregated by computeSubmissionsKPI() (still strictly per-project, zero per-person fields) -- both confirmed by source-text sweep, not just by omission. V31 base: Submission Tracker (hybrid: calendar marker + own store + founder KPI) -- see the prior version-bump comment / FINDINGS-2026-08-10.md for the full V31 design (own `submissions` collection, single-store, plannedDate never moves, reversible tick, Weekly Planner surface, founder-only KPI, no notifications).
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -8454,13 +8454,20 @@ async function createSubmission(projectId, plannedDate, remark) {
 // Reversible single toggle: done -> open clears actualDate; open -> done
 // stamps actualDate to TODAY (never a chosen/backdated date -- the stamp
 // records when it was actually marked submitted).
+// V31.1: tickedBy/tickedAt record WHO ticked a submission and WHEN --
+// founder-visible only (read in renderSubmissionsKPI()'s admin-gated
+// card, never in submissionChipsForDate()/the team-facing calendar row).
+// "Anyone can tick" is unchanged -- this only records the fact, it adds
+// no new gate. Never aggregated by person anywhere (no per-tick-count,
+// no leaderboard) -- a single per-submission fact, same category as
+// actualDate, not a metric.
 async function toggleSubmissionDone(submissionId) {
   const sub = submissionsData.find((s) => s.id === submissionId);
   if (!sub) return { ok: false };
   const goingDone = sub.status !== 'done';
   const patch = goingDone
-    ? { status: 'done', actualDate: fmt(new Date()) }
-    : { status: 'open', actualDate: null };
+    ? { status: 'done', actualDate: fmt(new Date()), tickedBy: currentUser?.id || null, tickedAt: new Date().toISOString() }
+    : { status: 'open', actualDate: null, tickedBy: null, tickedAt: null };
   const result = await saveSubmissionDoc({ id: submissionId, ...patch });
   if (result.ok) Object.assign(sub, patch);
   return result;

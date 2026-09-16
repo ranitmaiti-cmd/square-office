@@ -125,12 +125,13 @@ function makeMockDb() {
   const genIdSrc = extractFunction(fullScript, 'genId');
   const fmtSrc = extractFunction(fullScript, 'fmt');
 
-  function makeSandbox(projectsData, submissionsData) {
+  function makeSandbox(projectsData, submissionsData, currentUser) {
     const { db, calls, store } = makeMockDb();
     const sandbox = {
       console, Date, Math, Object,
       staleVersionLockout: false,
       db, projectsData, submissionsData,
+      currentUser: currentUser || { id: 'u-tester', name: 'Tester', isAdmin: false },
       alert: () => {},
     };
     vm.createContext(sandbox);
@@ -166,20 +167,24 @@ function makeMockDb() {
   console.log('\n=== toggleSubmissionDone(): tick stamps actualDate, reversible, plannedDate NEVER moves ===');
   {
     const submissionsData = [{ id: 'sub1', projectId: 'p1', plannedDate: '2026-09-19', actualDate: null, remark: 'Municipal filing', status: 'open', createdAt: '2026-09-01T00:00:00.000Z' }];
-    const { sandbox, calls, store } = makeSandbox([{ id: 'p1', name: 'X' }], submissionsData);
+    const { sandbox, calls, store } = makeSandbox([{ id: 'p1', name: 'X' }], submissionsData, { id: 'u-ticker', name: 'Priya Sharma', isAdmin: false });
 
     const r1 = await vm.runInContext("toggleSubmissionDone('sub1')", sandbox);
     check('tick succeeds', r1.ok === true);
     check('status flips to done', submissionsData[0].status === 'done');
     check('actualDate is stamped (today, a real date string)', /^\d{4}-\d{2}-\d{2}$/.test(submissionsData[0].actualDate));
     check('plannedDate is UNCHANGED after ticking (2026-09-19, byte-identical)', submissionsData[0].plannedDate === '2026-09-19');
-    check('the Firestore write only touched status/actualDate (partial, granular)', Object.keys(calls[calls.length - 1].data).sort().join(',') === ['actualDate', 'id', 'status'].sort().join(','));
+    check('the Firestore write only touched status/actualDate/tickedBy/tickedAt (partial, granular)', Object.keys(calls[calls.length - 1].data).sort().join(',') === ['actualDate', 'id', 'status', 'tickedAt', 'tickedBy'].sort().join(','));
+    check('tickedBy records the id of whoever ticked it (anyone can tick -- this only records the fact)', submissionsData[0].tickedBy === 'u-ticker');
+    check('tickedAt is a real ISO timestamp', !isNaN(new Date(submissionsData[0].tickedAt).getTime()));
 
     const r2 = await vm.runInContext("toggleSubmissionDone('sub1')", sandbox);
     check('untick succeeds', r2.ok === true);
     check('status reverts to open', submissionsData[0].status === 'open');
     check('actualDate is cleared back to null', submissionsData[0].actualDate === null);
     check('plannedDate is STILL unchanged after the round trip', submissionsData[0].plannedDate === '2026-09-19');
+    check('tickedBy is cleared back to null on untick', submissionsData[0].tickedBy === null);
+    check('tickedAt is cleared back to null on untick', submissionsData[0].tickedAt === null);
   }
 
   console.log('\n--- The Friday-then-Monday provocation: plannedDate stays put, actualDate reads the later day, slip visible ---');
@@ -287,10 +292,10 @@ function makeMockDb() {
     vm.runInContext(computeKpiSrc, sandbox);
     const projectsData = [{ id: 'p1', name: 'BURDWAN RD' }, { id: 'p2', name: 'CHETLA SAMPLE FLAT' }];
     const submissionsData = [
-      { id: '1', projectId: 'p1', plannedDate: '2026-09-01', actualDate: '2026-09-01', status: 'done' }, // on-time
-      { id: '2', projectId: 'p1', plannedDate: '2026-09-05', actualDate: '2026-09-08', status: 'done' }, // 3 days slipped
-      { id: '3', projectId: 'p1', plannedDate: '2026-09-10', actualDate: null, status: 'open' }, // still open
-      { id: '4', projectId: 'p2', plannedDate: '2026-09-02', actualDate: '2026-09-06', status: 'done' }, // 4 days slipped
+      { id: '1', projectId: 'p1', plannedDate: '2026-09-01', actualDate: '2026-09-01', status: 'done', tickedBy: 'u-priya', tickedAt: '2026-09-01T10:00:00.000Z' }, // on-time
+      { id: '2', projectId: 'p1', plannedDate: '2026-09-05', actualDate: '2026-09-08', status: 'done', tickedBy: 'u-tasmin', tickedAt: '2026-09-08T10:00:00.000Z' }, // 3 days slipped
+      { id: '3', projectId: 'p1', plannedDate: '2026-09-10', actualDate: null, status: 'open', tickedBy: null, tickedAt: null }, // still open
+      { id: '4', projectId: 'p2', plannedDate: '2026-09-02', actualDate: '2026-09-06', status: 'done', tickedBy: 'u-priya', tickedAt: '2026-09-06T10:00:00.000Z' }, // 4 days slipped
     ];
     sandbox.projectsData = projectsData; sandbox.submissionsData = submissionsData;
     const rows = vm.runInContext('computeSubmissionsKPI(projectsData, submissionsData)', sandbox);
@@ -301,8 +306,17 @@ function makeMockDb() {
     check('p1: average slip days for the slipped one is 3', p1.avgSlipDays === 3);
     check('p2: 1 slipped, average slip days 4', p2.slipped === 1 && p2.avgSlipDays === 4);
     check('output rows carry ONLY project fields -- no userId/person/name-of-person anywhere', rows.every((r) => Object.keys(r).every((k) => !/user|person|assignee|by\b/i.test(k))));
+    check('tickedBy is NEVER surfaced in the KPI output, even though the input submissions carry it (input has 3 distinct tickedBy values, output has none)', !rows.some((r) => 'tickedBy' in r || 'tickedAt' in r));
   }
-  check('computeSubmissionsKPI()\'s own source never reads/groups by userId or any person field', !/userId|assignee|createdBy/.test(computeKpiSrc));
+  check('computeSubmissionsKPI()\'s own source never reads/groups by userId or any person field, INCLUDING tickedBy/tickedAt', !/userId|assignee|createdBy|tickedBy|tickedAt/.test(computeKpiSrc));
+
+  console.log('\n--- Guardrail: tickedBy/tickedAt never surface in the TEAM-facing calendar row ---');
+  {
+    const chipsSrc = extractFunction(fullScript, 'submissionChipsForDate');
+    const rowSrc = extractFunction(fullScript, 'renderSubmissionsCalendarRow');
+    check('submissionChipsForDate() (feeds the team-visible Weekly Planner row) never references tickedBy/tickedAt', !/tickedBy|tickedAt/.test(chipsSrc));
+    check('renderSubmissionsCalendarRow() never references tickedBy/tickedAt', !/tickedBy|tickedAt/.test(rowSrc));
+  }
 
   // ─────────────────────────────────────────────────────────────
   console.log('\n=== Single-store integrity: a submission is NEVER written into the project doc or planEntries ===');
