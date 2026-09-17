@@ -281,6 +281,101 @@ function makeMockDb(seedByUser) {
   check('runAttendanceAutoDeduction() is byte-for-byte unchanged', extractFunction(fullScript, 'runAttendanceAutoDeduction') === extractFunction(mainFullScript, 'runAttendanceAutoDeduction'));
   check('createSubmission()/toggleSubmissionDone() (Submission Tracker) are byte-for-byte unchanged', extractFunction(fullScript, 'createSubmission') === extractFunction(mainFullScript, 'createSubmission') && extractFunction(fullScript, 'toggleSubmissionDone') === extractFunction(mainFullScript, 'toggleSubmissionDone'));
 
+  // ─────────────────────────────────────────────────────────────
+  // 2026-09-17: a hand-tested preview report claimed Admin's and Tasmin's
+  // accounts showed the SAME growth-goals list. Live Firestore data
+  // showed the opposite -- users/u1/growthGoals and
+  // users/mmllonwbwgp/growthGoals held genuinely distinct docs the whole
+  // time; every user doc's stored `id` field matched its own Firestore
+  // doc key, with zero duplicates and no users/undefined/growthGoals
+  // fallback. The actual cause: the app persists login via a SHARED
+  // localStorage key (`currentSession`) that auto-logs in on every page
+  // load (see the `loadData().then(...)` block) -- opening two tabs of
+  // the SAME browser and logging into a different account in each makes
+  // BOTH tabs snap to whichever account logged in most recently on their
+  // next reload. That's a pre-existing, app-wide property of this app's
+  // session persistence (every per-user page has always worked this way,
+  // not something this feature introduced or could fix on its own), not
+  // a growthGoals scoping bug -- but the earlier fixture only ever
+  // hand-built `currentUser` objects, so it could not have caught a
+  // wrong-account-at-runtime scenario even if one existed. This section
+  // goes through the REAL doLogin() function -- unmodified, not a
+  // reimplementation -- for two sequential real logins, proving the
+  // actual runtime auth path resolves currentUser.id correctly per
+  // login and that loadMyGrowthGoals() reflects the CURRENTLY logged-in
+  // user, never a stale or previous one.
+  console.log('\n=== THE REPORTED CASE: two REAL sequential logins through the actual doLogin() path must see different data ===');
+  {
+    const doLoginSrc = extractFunction(fullScript, 'doLogin');
+
+    function makeFakeLoginDom() {
+      const els = {};
+      const get = (id) => {
+        if (!els[id]) els[id] = { value: '', style: {}, textContent: '' };
+        return els[id];
+      };
+      return { getElementById: get, querySelectorAll: () => [], _els: els };
+    }
+    function makeLocalStorage() {
+      const kv = {};
+      return { getItem: (k) => (k in kv ? kv[k] : null), setItem: (k, v) => { kv[k] = v; }, removeItem: (k) => { delete kv[k]; } };
+    }
+
+    const seedByUser = {
+      u1: { g1: { id: 'g1', skill: 'Site supervision', status: 'learning', addedAt: '2026-09-17T06:15:05.000Z', achievedAt: null }, g2: { id: 'g2', skill: 'Client handling', status: 'achieved', addedAt: '2026-09-17T06:14:52.000Z', achievedAt: '2026-09-17T06:15:07.000Z' } },
+      mmllonwbwgp: { g3: { id: 'g3', skill: 'Leadership', status: 'achieved', addedAt: '2026-09-17T06:50:46.000Z', achievedAt: '2026-09-17T06:50:48.000Z' }, g4: { id: 'g4', skill: 'Material selection', status: 'learning', addedAt: '2026-09-17T06:50:52.000Z', achievedAt: null } },
+    };
+    const { db } = makeMockDb(seedByUser);
+    const users = [
+      { id: 'u1', name: 'Admin User', username: 'admin', password: 'admin123', isAdmin: true },
+      { id: 'mmllonwbwgp', name: 'Tasmin', username: 'tasmin', password: 'tasmin123', isAdmin: false },
+    ];
+
+    const document_ = makeFakeLoginDom();
+    const localStorage = makeLocalStorage();
+    const sandbox = {
+      console, Date, Math, db, users, document: document_, localStorage, window: {},
+      currentUser: null,
+      alert: () => {},
+      // Every OTHER side effect doLogin() fires -- stubbed as harmless
+      // no-ops so the REAL, unmodified doLogin() body can run end to
+      // end without dragging in the whole timer/heartbeat/leave-listener
+      // subsystem, none of which is relevant to identity resolution.
+      initTimeReport: () => {}, renderDashboard: () => {}, updateApprovalBadge: () => {},
+      startInactivityMonitor: () => {}, startEndOfDayMonitor: () => {}, startVersionCheckMonitor: () => {},
+      startBackstopMonitor: () => {}, startLeaveRequestsListener: () => {},
+      cleanupStaleTimers: async () => {}, finalizeStaleHeartbeatSessions: async () => {},
+      finalizeStaleHeartbeatSessionsAllUsers: () => {}, restoreTimerState: async () => {},
+      checkForOrphanedSessionOnLoad: async () => {}, updateTimerVisualState: () => {},
+      runAttendanceAutoDeduction: () => {}, checkTimeLogsCollectionSize: () => {},
+      reliableTickWorkerActive: false, setInterval: () => 0, setTimeout: () => 0,
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(genIdSrc, sandbox);
+    vm.runInContext(loadSrc, sandbox);
+    vm.runInContext(doLoginSrc, sandbox);
+
+    // --- Real login #1: Admin, via the actual doLogin() ---
+    document_.getElementById('loginUsername').value = 'admin';
+    document_.getElementById('loginPassword').value = 'admin123';
+    await vm.runInContext('doLogin()', sandbox);
+    check('after a REAL doLogin() as admin, currentUser.id resolves to u1', sandbox.currentUser?.id === 'u1');
+    const adminGoals = await vm.runInContext('loadMyGrowthGoals()', sandbox);
+    check('loadMyGrowthGoals() after the admin login returns EXACTLY admin\'s 2 goals', adminGoals.length === 2 && adminGoals.some((g) => g.skill === 'Site supervision') && adminGoals.some((g) => g.skill === 'Client handling'));
+    check('...and does NOT include any of Tasmin\'s goals', !adminGoals.some((g) => g.skill === 'Leadership' || g.skill === 'Material selection'));
+
+    // --- Real login #2, same sandbox/session: Tasmin, via the actual doLogin() ---
+    document_.getElementById('loginUsername').value = 'tasmin';
+    document_.getElementById('loginPassword').value = 'tasmin123';
+    await vm.runInContext('doLogin()', sandbox);
+    check('after a SECOND real doLogin() as Tasmin, currentUser.id switches to mmllonwbwgp (not stuck on the previous login)', sandbox.currentUser?.id === 'mmllonwbwgp');
+    const tasminGoals = await vm.runInContext('loadMyGrowthGoals()', sandbox);
+    check('loadMyGrowthGoals() after the Tasmin login returns EXACTLY Tasmin\'s 2 goals', tasminGoals.length === 2 && tasminGoals.some((g) => g.skill === 'Leadership') && tasminGoals.some((g) => g.skill === 'Material selection'));
+    check('...and does NOT include any of admin\'s goals -- THIS is the exact case reported as broken, and it is not', !tasminGoals.some((g) => g.skill === 'Site supervision' || g.skill === 'Client handling'));
+
+    check('the localStorage session key was updated to the SECOND (Tasmin) login, not left on the first', JSON.parse(localStorage.getItem('currentSession')).userId === 'mmllonwbwgp');
+  }
+
   console.log('\n=== the inline <script> still parses ===');
   check('new Function(fullScript) does not throw', (() => {
     try { new Function(fullScript); return true; }
