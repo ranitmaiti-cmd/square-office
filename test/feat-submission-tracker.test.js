@@ -407,26 +407,18 @@ function makeMockDb() {
   check('computeProjectStats() is byte-for-byte unchanged', extractFunction(fullScript, 'computeProjectStats') === extractFunction(mainFullScript, 'computeProjectStats'));
 
   {
-    // renderDashboard() legitimately changed -- it now also calls
-    // renderSubmissionsKPI() (founder-only KPI card). The marker ROW
-    // itself lives on Weekly Planner, NOT here -- Dashboard's calendar is
-    // a read-only view, not the surface work actually gets assigned on.
-    // Prove the KPI call is the ONLY delta by stripping it back out and
-    // confirming byte-identity to main holds for the rest.
-    const cur = extractFunction(fullScript, 'renderDashboard');
-    const main = extractFunction(mainFullScript, 'renderDashboard');
-    const stripped = cur.replace(/\n\s*\/\/ V31: Submission slippage KPI[\s\S]*?renderSubmissionsKPI\(\);/, '');
-    check('renderDashboard() unchanged from main except the one V31 KPI render call', stripped === main);
-    check('renderDashboard() does NOT render the submissions marker row (wrong surface -- that belongs on Weekly Planner)', !cur.includes('renderSubmissionsCalendarRow'));
+    // V31 shipped to main since this check was written (main now already
+    // contains renderDashboard()'s KPI call), so a "strip the addition,
+    // compare to main" check would compare main against its own former
+    // self and false-fail forever -- same post-merge situation this
+    // codebase has hit before (see e.g. feat-quick-ask-keyword-hr.test.js
+    // on renderHrInfo(), or the V30 fixtures after V30 merged). Assert
+    // plain byte-identity now that both sides have the change.
+    check('renderDashboard() is byte-for-byte unchanged from main', extractFunction(fullScript, 'renderDashboard') === extractFunction(mainFullScript, 'renderDashboard'));
+    check('renderDashboard() does NOT render the submissions marker row (wrong surface -- that belongs on Weekly Planner)', !extractFunction(fullScript, 'renderDashboard').includes('renderSubmissionsCalendarRow'));
   }
   {
-    // renderPlanner() legitimately changed -- it's the ACTUAL surface used
-    // to assign/self-assign work, so the submissions marker row lives
-    // here. Prove that's the only delta the same way.
-    const cur = extractFunction(fullScript, 'renderPlanner');
-    const main = extractFunction(mainFullScript, 'renderPlanner');
-    const stripped = cur.replace(/\n\n\s*\/\/ V31 \(Submission Tracker\)[\s\S]*?grid\.appendChild\(renderSubmissionsCalendarRow\(days\)\);\n/, '');
-    check('renderPlanner() unchanged from main except the one V31 marker-row render call', stripped === main);
+    check('renderPlanner() is byte-for-byte unchanged from main', extractFunction(fullScript, 'renderPlanner') === extractFunction(mainFullScript, 'renderPlanner'));
   }
 
   console.log('\n=== the inline <script> still parses ===');

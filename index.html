@@ -570,6 +570,13 @@ textarea.form-control{min-height:70px;resize:vertical;}
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
       <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">◈</span>Manage</div>
       <div class="nav-item admin-only" data-page="studiohealth" style="display:none;"><span class="nav-icon">❖</span>Studio Health</div>
+      <!-- V32 (Personal Growth Goals): its own low-key section, deliberately
+           separate from Admin/Work -- signals "this is a different kind of
+           thing," a private personal tool, not a work-tracking surface.
+           Never admin-only, never gated -- every person (including admins,
+           for THEIR OWN goals) sees the exact same private page. -->
+      <div class="nav-section">Personal</div>
+      <div class="nav-item" data-page="mygrowth"><span class="nav-icon">🌱</span>My Growth</div>
       <div style="border-top:1px solid #E0D8CE;margin:10px 0;"></div>
       <div class="nav-item" id="timerNavBtn" style="color:#6E8F52;font-weight:600;"><span class="nav-icon">▶</span><span id="timerNavLabel">Start Timer</span></div>
     </div>
@@ -713,6 +720,38 @@ textarea.form-control{min-height:70px;resize:vertical;}
           </div>
         </div>
         <div id="projectsBudgetList"></div>
+      </div>
+
+      <!-- V32 (Personal Growth Goals): PRIVATE, self-owned, self-marked.
+           No founder/admin view exists anywhere -- not on this page, not
+           on Dashboard, not in Studio Health. The privacy line below is
+           load-bearing, kept visible on every view of this page, not just
+           first-open. -->
+      <div class="page" id="page-mygrowth">
+        <div class="section-header">
+          <h2 class="page-title" style="margin:0;">🌱 My Growth</h2>
+        </div>
+        <div style="background:#EFF5E8;border:1px solid #B9D6A0;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#3A5A2E;font-weight:600;">
+          🔒 This is private to you. No one else — including admins — can see this.
+        </div>
+        <div style="background:#F7F4EF;padding:10px 12px;border-radius:8px;margin-bottom:16px;">
+          <div style="font-size:11px;font-weight:700;color:#5C4F42;margin-bottom:6px;">Add a skill you want to learn</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select class="form-control" id="growthSkillSelect" style="max-width:220px;"></select>
+            <input type="text" class="form-control" id="growthSkillCustom" placeholder="Type your own skill" style="display:none;max-width:220px;">
+            <button type="button" class="btn btn-primary btn-sm" id="growthAddBtn">+ Add</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div>
+            <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#5C4F42;">Skills I want to learn</div>
+            <div id="growthLearningList" style="display:flex;flex-direction:column;gap:8px;"></div>
+          </div>
+          <div>
+            <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#5C4F42;">Skills I've built</div>
+            <div id="growthAchievedList" style="display:flex;flex-direction:column;gap:8px;"></div>
+          </div>
+        </div>
       </div>
 
       <!-- TIME REPORT -->
@@ -1519,7 +1558,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-16.3'; // V31.2: fixed a bug where a submission ticked done BEFORE its plannedDate (early) was labeled "(late)" -- the old check only tested actualDate !== plannedDate, with no regard for direction. New computeSubmissionOutcome(sub, todayStr) is the single source of truth both submissionChipsForDate() (the calendar chip) and computeSubmissionsKPI() now call: done+actualDate<plannedDate -> 'early', done+actualDate===plannedDate -> 'on-time', done+actualDate>plannedDate -> 'late' (lateDays = actual-planned), not-done+plannedDate-in-past -> 'overdue', not-done+plannedDate-today-or-future -> 'upcoming'. KPI: early and on-time both count as met (onTime bucket); only 'late' counts as slipped, slip-days taken directly from the outcome's own lateDays (always >0 for 'late', so no separate clamp needed). See FINDINGS-2026-08-10.md. Prior version-bump comments cover the full V31 design (own `submissions` collection, single-store, plannedDate never moves, reversible tick, Weekly Planner surface, founder-only KPI, tickedBy/tickedAt, no notifications).
+const APP_VERSION = '2026-09-16.4'; // V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -6488,6 +6527,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='leaves')     { renderLeaves(); renderHrInfo(); } // 2026-09-12 tab merge: HR Info folded into Leave & HR, both render side by side, neither touched internally
     if(page==='teamleave')  { renderTeamLeave(); renderTeamLeaveBank(); }
     if(page==='approvals')  renderApprovals();
+    if(page==='mygrowth')   renderMyGrowth();
     if(page==='manage')       renderManage();
     if(page==='hourstracker') renderHoursTracker();
     // V16.18: Studio Health v1 ships with Individual Insight as the
@@ -8673,6 +8713,136 @@ function renderQuarterWins() {
   }
   feedEl.innerHTML = wins.map(text => `<div style="padding:8px 10px;border-radius:8px;background:#EFF5E8;border-left:3px solid #6E8F52;font-size:13px;color:#3D332A;">🎉 ${text}</div>`).join('');
 }
+
+// ═══════════════════════════════════════════════════════
+// V32 (Personal Growth Goals, 2026-09-16): a PRIVATE, self-owned
+// skill-growth checklist. This is the whole feature's frame, enforced
+// STRUCTURALLY, not by policy:
+//   - no admin view, no aggregate, no "team growth" screen -- none, not
+//     hidden, absent from this file entirely
+//   - only the owner can tick/untick their own goal; isAdmin is never
+//     even CHECKED anywhere in this section, let alone used to unlock
+//     access to someone else's goals
+//   - self-declared, no score/rating/manager-confirmation
+//   - no gamification -- no streaks, no %, no "haven't updated in Xd",
+//     no nudges. An empty list renders with zero prompt.
+//
+// Data lives at users/{currentUser.id}/growthGoals/{goalId} -- a
+// SUBCOLLECTION under the person's own user doc, not a top-level
+// collection filtered by a userId field. This is the actual privacy
+// mechanism, not just a convention: every function below hardcodes
+// `currentUser.id` as the ONLY path segment ever used, and NONE of them
+// accept a userId/targetUser parameter at all. There is no argument you
+// could pass, admin or not, that would make loadMyGrowthGoals()/
+// addGrowthGoal()/toggleGrowthGoal() touch a subcollection other than
+// the CALLING user's own -- the capability to target another user's
+// growth goals simply does not exist in these function signatures, so
+// it can't be misused, guarded wrong, or forgotten in a future edit.
+// Contrast with a top-level `growthGoals` collection filtered by
+// `.where('userId','==', X)` -- that shape would put the entire privacy
+// guarantee on every call site remembering to pass the right X forever;
+// this shape makes the wrong call impossible to express.
+const GROWTH_SKILL_OPTIONS = [
+  'Leadership', 'Client handling', 'Site supervision', 'Project management',
+  'Material selection', 'Costing / estimation', 'Construction documentation',
+  'Schematic design', '3D visualization', 'AutoCAD', 'Revit', 'SketchUp',
+  'Team coordination', 'Presentation / pitching',
+];
+
+async function loadMyGrowthGoals() {
+  const snap = await db.collection('users').doc(currentUser.id).collection('growthGoals').get({ source: 'server' });
+  const goals = [];
+  snap.forEach((doc) => goals.push({ ...doc.data(), id: doc.id }));
+  return goals;
+}
+
+async function addGrowthGoal(skill) {
+  const trimmed = (skill || '').trim();
+  if (!trimmed) return { ok: false };
+  const goal = { id: genId(), skill: trimmed, status: 'learning', addedAt: new Date().toISOString(), achievedAt: null };
+  try {
+    await db.collection('users').doc(currentUser.id).collection('growthGoals').doc(goal.id).set(goal, { merge: true });
+    return { ok: true, goal };
+  } catch (e) {
+    console.error('❌ Save growth goal failed:', e);
+    alert('Could not save — check your connection and try again.');
+    return { ok: false, error: true };
+  }
+}
+
+// Reversible: ticking stamps achievedAt and moves the goal to "built";
+// unticking clears achievedAt and moves it back to "want to learn." No
+// confirmation step, no manager sign-off -- self-declared by design.
+async function toggleGrowthGoal(goalId, currentStatus) {
+  const goingAchieved = currentStatus !== 'achieved';
+  const patch = goingAchieved
+    ? { status: 'achieved', achievedAt: new Date().toISOString() }
+    : { status: 'learning', achievedAt: null };
+  try {
+    await db.collection('users').doc(currentUser.id).collection('growthGoals').doc(goalId).set({ id: goalId, ...patch }, { merge: true });
+    return { ok: true };
+  } catch (e) {
+    console.error('❌ Update growth goal failed:', e);
+    alert('Could not save — check your connection and try again.');
+    return { ok: false, error: true };
+  }
+}
+
+function renderGrowthGoalRow(goal, achieved) {
+  return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:${achieved ? '#EFF5E8' : '#F8F4EE'};">
+    <input type="checkbox" class="growth-toggle" data-goal="${goal.id}" data-status="${goal.status}" ${achieved ? 'checked' : ''}>
+    <span style="font-size:13px;${achieved ? 'color:#3A5A2E;' : 'color:#3D332A;'}">${goal.skill}</span>
+  </div>`;
+}
+
+async function renderMyGrowth() {
+  const learningEl = document.getElementById('growthLearningList');
+  const achievedEl = document.getElementById('growthAchievedList');
+  if (!learningEl || !achievedEl) return;
+
+  const sel = document.getElementById('growthSkillSelect');
+  if (sel && !sel.dataset.populated) {
+    sel.innerHTML = GROWTH_SKILL_OPTIONS.map((s) => `<option value="${s}">${s}</option>`).join('') + '<option value="__CUSTOM__">+ Add your own...</option>';
+    sel.dataset.populated = 'true';
+  }
+
+  const goals = await loadMyGrowthGoals();
+  const learning = goals.filter((g) => g.status !== 'achieved');
+  const achieved = goals.filter((g) => g.status === 'achieved');
+
+  // No nag, no prompt, no red mark -- an empty list is just an empty
+  // list. Not even a "get started!" hint, per the no-gamification rule.
+  learningEl.innerHTML = learning.length === 0
+    ? '<div style="color:#B0A89E;font-size:13px;padding:8px;">Nothing here yet.</div>'
+    : learning.map((g) => renderGrowthGoalRow(g, false)).join('');
+  achievedEl.innerHTML = achieved.length === 0
+    ? '<div style="color:#B0A89E;font-size:13px;padding:8px;">Nothing here yet.</div>'
+    : achieved.map((g) => renderGrowthGoalRow(g, true)).join('');
+
+  document.querySelectorAll('.growth-toggle').forEach((cb) => cb.addEventListener('change', async () => {
+    await toggleGrowthGoal(cb.dataset.goal, cb.dataset.status);
+    renderMyGrowth();
+  }));
+}
+
+document.getElementById('growthSkillSelect')?.addEventListener('change', function () {
+  const customInput = document.getElementById('growthSkillCustom');
+  if (!customInput) return;
+  customInput.style.display = this.value === '__CUSTOM__' ? 'inline-block' : 'none';
+  if (this.value === '__CUSTOM__') customInput.focus();
+});
+document.getElementById('growthAddBtn')?.addEventListener('click', async () => {
+  const sel = document.getElementById('growthSkillSelect');
+  const customInput = document.getElementById('growthSkillCustom');
+  const skill = sel.value === '__CUSTOM__' ? customInput.value : sel.value;
+  const result = await addGrowthGoal(skill);
+  if (result.ok) {
+    customInput.value = '';
+    customInput.style.display = 'none';
+    sel.value = GROWTH_SKILL_OPTIONS[0];
+    renderMyGrowth();
+  }
+});
 
 function renderProjectsBudget(){
   // V20: same all-time budget load as renderDashboard() -- no-op if
