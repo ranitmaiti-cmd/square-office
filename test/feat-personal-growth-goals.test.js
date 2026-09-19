@@ -276,7 +276,9 @@ function makeMockDb(seedByUser) {
     check('the nav-click router is byte-for-byte unchanged from main (mygrowth route already on main)', cur === main && main.includes("page==='mygrowth'"));
   }
   check('saveProject() is byte-for-byte unchanged', extractFunction(fullScript, 'saveProject') === extractFunction(mainFullScript, 'saveProject'));
-  check('renderLeaves() is byte-for-byte unchanged', extractFunction(fullScript, 'renderLeaves') === extractFunction(mainFullScript, 'renderLeaves'));
+  // V34 made renderLeaves()'s "used of X" / bar maths entitlement-aware; compare with that one change normalised away on both sides (holds before AND after V34 is on main).
+  const flatEnt = (s) => s.replace('const medEnt=user.medEntitlement??12,casEnt=user.casEntitlement??5,mU=medEnt-user.medLeft,cU=casEnt-user.casLeft;', 'const mU=12-user.medLeft,cU=5-user.casLeft;').split('${medEnt}').join('12').split('${casEnt}').join('5').split('medEnt').join('12').split('casEnt').join('5');
+  check('renderLeaves() is byte-for-byte unchanged (modulo V34 entitlement denominators)', flatEnt(extractFunction(fullScript, 'renderLeaves')) === flatEnt(extractFunction(mainFullScript, 'renderLeaves')));
   check('renderApprovals() is byte-for-byte unchanged', extractFunction(fullScript, 'renderApprovals') === extractFunction(mainFullScript, 'renderApprovals'));
   check('renderDashboard() is byte-for-byte unchanged', extractFunction(fullScript, 'renderDashboard') === extractFunction(mainFullScript, 'renderDashboard'));
   check('renderPlanner() is byte-for-byte unchanged', extractFunction(fullScript, 'renderPlanner') === extractFunction(mainFullScript, 'renderPlanner'));

@@ -1558,7 +1558,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-19.1'; // V33: Team Leave Bank STATUS badge now reflects BOTH medLeft and casLeft (worst state across the two buckets, names the bucket; casual Low line is <=1, medical <=3) -- display-only, see leaveBankStatus(). Prior: V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-19.2'; // V34: Team Leave Bank and the personal balance card now read each person's medEntitlement/casEntitlement (fallback 12 / 5) for the "/ X" denominators, "used of X" and bar maths, so pro-rated joiners (Taskiya 9 / 3.75) display correctly -- display-only, no balance logic touched. Prior: V33: Team Leave Bank STATUS badge now reflects BOTH medLeft and casLeft (worst state across the two buckets, names the bucket; casual Low line is <=1, medical <=3) -- display-only, see leaveBankStatus(). Prior: V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -9539,8 +9539,8 @@ document.getElementById('submitLeaveBtn').addEventListener('click', async ()=>{
 });
 function renderLeaves(){
   const user=users.find(u=>u.id===currentUser.id);
-  const mU=12-user.medLeft,cU=5-user.casLeft;
-  document.getElementById('leaveBalance').innerHTML=`<div class="balance-card"><div style="font-size:12px;color:#8A7E74;margin-bottom:6px;">🏥 Medical Leave</div><div class="balance-num" style="color:#A96E35;">${user.medLeft}</div><div class="balance-sub">${mU} used of 12</div><div class="bal-bar"><div class="bal-fill" style="width:${(mU/12)*100}%;background:#A96E35;"></div></div></div><div class="balance-card"><div style="font-size:12px;color:#8A7E74;margin-bottom:6px;">🌴 Casual Leave</div><div class="balance-num" style="color:#6E8F52;">${user.casLeft}</div><div class="balance-sub">${cU} used of 5</div><div class="bal-bar"><div class="bal-fill" style="width:${(cU/5)*100}%;background:#6E8F52;"></div></div></div>`;
+  const medEnt=user.medEntitlement??12,casEnt=user.casEntitlement??5,mU=medEnt-user.medLeft,cU=casEnt-user.casLeft;
+  document.getElementById('leaveBalance').innerHTML=`<div class="balance-card"><div style="font-size:12px;color:#8A7E74;margin-bottom:6px;">🏥 Medical Leave</div><div class="balance-num" style="color:#A96E35;">${user.medLeft}</div><div class="balance-sub">${mU} used of ${medEnt}</div><div class="bal-bar"><div class="bal-fill" style="width:${(mU/medEnt)*100}%;background:#A96E35;"></div></div></div><div class="balance-card"><div style="font-size:12px;color:#8A7E74;margin-bottom:6px;">🌴 Casual Leave</div><div class="balance-num" style="color:#6E8F52;">${user.casLeft}</div><div class="balance-sub">${cU} used of ${casEnt}</div><div class="bal-bar"><div class="bal-fill" style="width:${(cU/casEnt)*100}%;background:#6E8F52;"></div></div></div>`;
   const el=document.getElementById('myLeaveList');
   const my=leaveRequests.filter(l=>l.userId===currentUser.id).slice().reverse();
   if(!my.length){ el.innerHTML='<p style="color:#8A7E74;padding:16px;">No applications yet.</p>'; return; }
@@ -9734,11 +9734,15 @@ function renderTeamLeaveBank() {
     const casLeft = u.casLeft ?? 5;
     const casUsedMonth = usedCasMonth[u.id] || 0;
     const medLeft = u.medLeft ?? 12;
+    // V34: per-person entitlement (pro-rated joiners carry medEntitlement /
+    // casEntitlement on their user doc); everyone else falls back to 12 / 5.
+    const medEnt = u.medEntitlement ?? 12;
+    const casEnt = u.casEntitlement ?? 5;
 
-    const medUsedTotal = 12 - medLeft;
-    const medBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${medLeft<=2?'#C0554A':medLeft<=5?'#C4874A':'#A96E35'};border-radius:4px;height:6px;width:${Math.min(80,Math.round((medUsedTotal/12)*80))}px;"></div></div>`;
+    const medUsedTotal = medEnt - medLeft;
+    const medBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${medLeft<=2?'#C0554A':medLeft<=5?'#C4874A':'#A96E35'};border-radius:4px;height:6px;width:${Math.min(80,Math.round((medUsedTotal/medEnt)*80))}px;"></div></div>`;
     const casBarColor = casLeft < 0 ? '#C0554A' : casLeft === 0 ? '#C0554A' : casLeft <= 1 ? '#C4874A' : '#6E8F52';
-    const casBarWidth = casLeft < 0 ? 60 : Math.min(60, Math.round(((5-casLeft)/5)*60));
+    const casBarWidth = casLeft < 0 ? 60 : Math.min(60, Math.round(((casEnt-casLeft)/casEnt)*60));
     const casBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:60px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${casBarColor};border-radius:4px;height:6px;width:${casBarWidth}px;"></div></div>`;
 
     const status = leaveBankStatus(medLeft, casLeft);
@@ -9754,7 +9758,7 @@ function renderTeamLeaveBank() {
       <td style="padding:10px 12px;font-weight:600;font-size:13px;">${u.name}</td>
       <td style="padding:10px 12px;text-align:center;">
         <span style="font-size:13px;font-weight:700;color:#A96E35;">${fmtDays(medLeft)}</span>
-        <span style="font-size:11px;color:#B0A89E;"> / 12</span>
+        <span style="font-size:11px;color:#B0A89E;"> / ${medEnt}</span>
         ${medBar}
       </td>
       <td style="padding:10px 12px;text-align:center;">
@@ -9763,7 +9767,7 @@ function renderTeamLeaveBank() {
       </td>
       <td style="padding:10px 12px;text-align:center;">
         <span style="font-size:13px;font-weight:700;color:${casLeft<0?'#C0554A':casLeft===0?'#C0554A':casLeft<=1?'#C4874A':'#6E8F52'};">${fmtDays(casLeft)}</span>
-        <span style="font-size:11px;color:#B0A89E;"> / 5</span>
+        <span style="font-size:11px;color:#B0A89E;"> / ${casEnt}</span>
         ${casBar}
       </td>
       <td style="padding:10px 12px;text-align:center;">
