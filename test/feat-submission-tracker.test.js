@@ -401,7 +401,9 @@ function makeMockDb() {
   // ─────────────────────────────────────────────────────────────
   console.log('\n=== Isolation: unrelated systems byte-for-byte unchanged from main ===');
   check('saveProject() is byte-for-byte unchanged', extractFunction(fullScript, 'saveProject') === extractFunction(mainFullScript, 'saveProject'));
-  check('renderLeaves() is byte-for-byte unchanged', extractFunction(fullScript, 'renderLeaves') === extractFunction(mainFullScript, 'renderLeaves'));
+  // V34 made renderLeaves()'s "used of X" / bar maths entitlement-aware; compare with that one change normalised away on both sides (holds before AND after V34 is on main).
+  const flatEnt = (s) => s.replace('const medEnt=user.medEntitlement??12,casEnt=user.casEntitlement??5,mU=medEnt-user.medLeft,cU=casEnt-user.casLeft;', 'const mU=12-user.medLeft,cU=5-user.casLeft;').split('${medEnt}').join('12').split('${casEnt}').join('5').split('medEnt').join('12').split('casEnt').join('5');
+  check('renderLeaves() is byte-for-byte unchanged (modulo V34 entitlement denominators)', flatEnt(extractFunction(fullScript, 'renderLeaves')) === flatEnt(extractFunction(mainFullScript, 'renderLeaves')));
   check('saveTimeLog() is byte-for-byte unchanged', extractFunction(fullScript, 'saveTimeLog') === extractFunction(mainFullScript, 'saveTimeLog'));
   check('upsertTimeLog() is byte-for-byte unchanged', extractFunction(fullScript, 'upsertTimeLog') === extractFunction(mainFullScript, 'upsertTimeLog'));
   check('computeProjectStats() is byte-for-byte unchanged', extractFunction(fullScript, 'computeProjectStats') === extractFunction(mainFullScript, 'computeProjectStats'));

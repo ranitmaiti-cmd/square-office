@@ -113,7 +113,9 @@ function extractDivBlock(html, startMarker) {
   // codebase for the identical post-merge situation: assert plain
   // byte-identity now (both sides have the change), same as any other
   // isolation check.
-  check('renderLeaves() is byte-for-byte unchanged from main', extractFunction(fullScript, 'renderLeaves').src === extractFunction(mainFullScript, 'renderLeaves').src);
+  // V34 made renderLeaves()'s "used of X" / bar maths entitlement-aware; compare with that one change normalised away on both sides (holds before AND after V34 is on main).
+  const flatEnt = (s) => s.replace('const medEnt=user.medEntitlement??12,casEnt=user.casEntitlement??5,mU=medEnt-user.medLeft,cU=casEnt-user.casLeft;', 'const mU=12-user.medLeft,cU=5-user.casLeft;').split('${medEnt}').join('12').split('${casEnt}').join('5').split('medEnt').join('12').split('casEnt').join('5');
+  check('renderLeaves() is byte-for-byte unchanged from main (modulo V34 entitlement denominators)', flatEnt(extractFunction(fullScript, 'renderLeaves').src) === flatEnt(extractFunction(mainFullScript, 'renderLeaves').src));
   check('the submitLeaveBtn handler is byte-for-byte unchanged',
     extractBlockFrom(fullScript, "getElementById('submitLeaveBtn').addEventListener('click'") ===
     extractBlockFrom(mainFullScript, "getElementById('submitLeaveBtn').addEventListener('click'"));

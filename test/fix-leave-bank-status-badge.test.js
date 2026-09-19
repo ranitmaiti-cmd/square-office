@@ -12,8 +12,8 @@
 //  - the REAL renderTeamLeaveBank() (extracted, executed in a vm) renders
 //    the expected badge for every person in the live bank
 //  - display-only: no db/write call in either function
-//  - isolation: with the helper removed, the badge block reverted, and the
-//    APP_VERSION line normalised, the whole script is byte-identical to main
+//  - isolation: the helper and the badge block are byte-identical to main's
+//    (written to hold before and after later edits to the same renderer)
 //
 // Run with: node test/fix-leave-bank-status-badge.test.js
 'use strict';
@@ -128,29 +128,21 @@ check('renderTeamLeaveBank() touches no db write', !/\.set\(|\.update\(|\.delete
 
 // ─────────────────────────────────────────────────────────────
 console.log('\n=== isolation vs main ===');
+// V33 is on main now, so "diff vs main" can no longer mean "what V33 added".
+// These hold both before and after later edits to renderTeamLeaveBank():
+// the helper and the badge block must stay byte-identical to main's.
+check('leaveBankStatus() is byte-for-byte identical to main', helperSrc === extractFunction(mainScript, 'leaveBankStatus'));
+const badgeOf = (fn) => {
+  const a2 = fn.indexOf('const status = leaveBankStatus(');
+  const b2 = fn.indexOf('>${status.label}</span>`;', fn.indexOf("status.state === 'low'"));
+  return a2 > 0 && b2 > a2 ? fn.slice(a2, b2) : null;
+};
 const mainRender = extractFunction(mainScript, 'renderTeamLeaveBank');
-// 1. the only difference inside renderTeamLeaveBank is the badge block
-const badgeStart = renderSrc.indexOf('const status = leaveBankStatus(');
-const badgeEnd = renderSrc.indexOf(';\n', renderSrc.indexOf('status.state === \'low\'')) ; // end of statusBadge statement
-const mainBadgeStart = mainRender.indexOf('const statusBadge = medLeft < 0');
-const mainBadgeEnd = mainRender.indexOf(';\n', mainRender.indexOf('>OK</span>`'));
-check('located the badge block in both versions', badgeStart > 0 && mainBadgeStart > 0);
-const renderReverted = renderSrc.slice(0, badgeStart) + mainRender.slice(mainBadgeStart, mainBadgeEnd + 1) + renderSrc.slice(renderSrc.indexOf(';\n', renderSrc.indexOf('>${status.label}</span>`;', badgeStart)) + 1);
-check('renderTeamLeaveBank() differs from main ONLY in the badge block', renderReverted === mainRender);
-
-// 2. whole script: remove helper, restore main's render, normalise APP_VERSION line -> equals main
-const helperBlockStart = fullScript.indexOf('// V33 (Team Leave Bank STATUS badge');
-const helperBlockEnd = fullScript.indexOf('// ═══', helperBlockStart);
-check('located the V33 helper block', helperBlockStart > 0 && helperBlockEnd > helperBlockStart);
-let reverted = fullScript.slice(0, helperBlockStart) + fullScript.slice(helperBlockEnd);
-reverted = reverted.replace(extractFunction(reverted, 'renderTeamLeaveBank'), () => mainRender);
-const versionLine = (s) => s.split('\n').find((l) => l.startsWith('const APP_VERSION'));
-reverted = reverted.replace(versionLine(reverted), () => versionLine(mainScript));
-check('entire script minus {helper, badge block, APP_VERSION line} is byte-identical to main', reverted === mainScript);
-
+check('located the badge block in both versions', !!badgeOf(renderSrc) && !!badgeOf(mainRender));
+check('the badge block in renderTeamLeaveBank() is byte-for-byte identical to main', badgeOf(renderSrc) === badgeOf(mainRender));
+check('the old medLeft-only badge is gone from both', !renderSrc.includes('const statusBadge = medLeft < 0') && !mainRender.includes('const statusBadge = medLeft < 0'));
 const bumped = /const APP_VERSION = '(\d{4}-\d{2}-\d{2}\.\d+)'/.exec(fullScript)[1];
-const mainVer = /const APP_VERSION = '(\d{4}-\d{2}-\d{2}\.\d+)'/.exec(mainScript)[1];
-check(`APP_VERSION bumped (${mainVer} -> ${bumped})`, bumped !== mainVer);
+check(`APP_VERSION is well-formed (${bumped})`, !!bumped);
 check('version.json matches APP_VERSION', JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'version.json'), 'utf8')).version === bumped);
 check('inline <script> still parses', (() => { try { new Function(fullScript); return true; } catch (e) { console.log('   ', e.message); return false; } })());
 
