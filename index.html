@@ -1558,7 +1558,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-16.4'; // V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-19.1'; // V33: Team Leave Bank STATUS badge now reflects BOTH medLeft and casLeft (worst state across the two buckets, names the bucket; casual Low line is <=1, medical <=3) -- display-only, see leaveBankStatus(). Prior: V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -9678,6 +9678,27 @@ function renderTeamLeave() {
   document.getElementById('teamLeaveSummary').innerHTML = summary;
 }
 
+// V33 (Team Leave Bank STATUS badge, 2026-09-19): the badge used to key
+// on medLeft alone, so a person with a healthy medical balance but a
+// negative/zero casual balance (Neha med 7 / cas -4, Taskiya med 12 /
+// cas 0) read "OK". It now takes the WORST state across both buckets and
+// names the bucket(s) responsible. Casual is a 5-day pool, so its "Low"
+// line is <=1 (medical, a 12-day pool, keeps <=3). Display-only: pure
+// function of the two stored balances, no reads, no writes.
+function leaveBankStatus(medLeft, casLeft) {
+  const rank = { ok: 0, low: 1, exhausted: 2, negative: 3 };
+  const medState = medLeft < 0 ? 'negative' : medLeft === 0 ? 'exhausted' : medLeft <= 3 ? 'low' : 'ok';
+  const casState = casLeft < 0 ? 'negative' : casLeft === 0 ? 'exhausted' : casLeft <= 1 ? 'low' : 'ok';
+  const worst = rank[medState] >= rank[casState] ? medState : casState;
+  if (worst === 'ok') return { state: 'ok', label: 'OK' };
+  const buckets = [];
+  if (medState === worst) buckets.push('med');
+  if (casState === worst) buckets.push('cas');
+  const bucketLabel = buckets.length === 2 ? 'med+cas' : buckets[0] === 'med' ? 'medical' : 'casual';
+  const word = worst === 'negative' ? 'Negative' : worst === 'exhausted' ? 'Exhausted' : 'Low';
+  return { state: worst, label: `${word} · ${bucketLabel}` };
+}
+
 // ═══════════════════════════════════════════════════════
 // V14.2.15: Team Leave Bank — admin view
 // ═══════════════════════════════════════════════════════
@@ -9720,13 +9741,14 @@ function renderTeamLeaveBank() {
     const casBarWidth = casLeft < 0 ? 60 : Math.min(60, Math.round(((5-casLeft)/5)*60));
     const casBar = `<div style="background:#E0D8CE;border-radius:4px;height:6px;width:60px;display:inline-block;vertical-align:middle;margin-left:6px;"><div style="background:${casBarColor};border-radius:4px;height:6px;width:${casBarWidth}px;"></div></div>`;
 
-    const statusBadge = medLeft < 0
-      ? `<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:700;">Negative</span>`
-      : medLeft === 0
-      ? `<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:600;">Exhausted</span>`
-      : medLeft <= 3
-      ? `<span style="font-size:11px;background:#FAF3EB;color:#C4874A;padding:2px 8px;border-radius:10px;">Low</span>`
-      : `<span style="font-size:11px;background:#EEF3E8;color:#5A7A3A;padding:2px 8px;border-radius:10px;">OK</span>`;
+    const status = leaveBankStatus(medLeft, casLeft);
+    const statusBadge = status.state === 'negative'
+      ? `<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:700;">${status.label}</span>`
+      : status.state === 'exhausted'
+      ? `<span style="font-size:11px;background:#FBF0EE;color:#C0554A;padding:2px 8px;border-radius:10px;font-weight:600;">${status.label}</span>`
+      : status.state === 'low'
+      ? `<span style="font-size:11px;background:#FAF3EB;color:#C4874A;padding:2px 8px;border-radius:10px;">${status.label}</span>`
+      : `<span style="font-size:11px;background:#EEF3E8;color:#5A7A3A;padding:2px 8px;border-radius:10px;">${status.label}</span>`;
 
     return `<tr style="border-bottom:1px solid #F7F5F2;">
       <td style="padding:10px 12px;font-weight:600;font-size:13px;">${u.name}</td>

@@ -269,8 +269,11 @@ function makeMockDb(seedByUser) {
   {
     const cur = extractBlockFrom(fullScript, "item.addEventListener('click',function(){");
     const main = extractBlockFrom(mainFullScript, "item.addEventListener('click',function(){");
-    const stripped = cur.replace(/\n\s*if\(page==='mygrowth'\)\s*renderMyGrowth\(\);/, '');
-    check('the nav-click router is unchanged from main except the one new mygrowth route', stripped === main);
+    // V32 shipped to main (2026-09-16), so main's router already contains the
+    // mygrowth route -- a "strip it, compare to main" check would compare
+    // against its own former self and false-fail forever. Same post-merge
+    // staleness this codebase has hit before: assert plain byte-identity.
+    check('the nav-click router is byte-for-byte unchanged from main (mygrowth route already on main)', cur === main && main.includes("page==='mygrowth'"));
   }
   check('saveProject() is byte-for-byte unchanged', extractFunction(fullScript, 'saveProject') === extractFunction(mainFullScript, 'saveProject'));
   check('renderLeaves() is byte-for-byte unchanged', extractFunction(fullScript, 'renderLeaves') === extractFunction(mainFullScript, 'renderLeaves'));
