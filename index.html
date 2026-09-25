@@ -566,6 +566,12 @@ textarea.form-control{min-height:70px;resize:vertical;}
            renderAppraisal() (+ its local getApQtr/computeScores/apQtrOffset/
            apAdminScores) removed together; see FINDINGS-2026-08-10.md. -->
       <div class="nav-item" data-page="leaves"><span class="nav-icon">◌</span>Leave & HR</div>
+      <!-- V35 (WFH Request/Approval Workflow, Half 1): one page for
+           everyone -- eligible staff see a request form + their own
+           history; admins additionally see the pending-approval queue and
+           the approved-WFH log. Never admin-only, since eligible non-admins
+           use the same page for their own requests. -->
+      <div class="nav-item" data-page="wfh"><span class="nav-icon">🏠</span>WFH</div>
       <div class="nav-item" data-page="teamleave"><span class="nav-icon">◫</span>Team Leave</div>
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
       <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">◈</span>Manage</div>
@@ -720,6 +726,38 @@ textarea.form-control{min-height:70px;resize:vertical;}
           </div>
         </div>
         <div id="projectsBudgetList"></div>
+      </div>
+
+      <!-- V35 (WFH Request/Approval Workflow, Half 1): workflow only --
+           this build does NOT touch runAttendanceAutoDeduction() or any
+           leave-deduction code. Own store (wfhRequests), own page, gated
+           by wfhEligible per user; admins additionally see the approval
+           queue and the approved log with a read-only zero-work flag. -->
+      <div class="page" id="page-wfh">
+        <div class="section-header">
+          <h2 class="page-title" style="margin:0;">🏠 Work From Home</h2>
+        </div>
+        <div id="wfhNotEligible" style="display:none;color:#8A7E74;font-size:13px;padding:16px;background:#F7F4EF;border-radius:8px;">
+          You're not eligible for WFH requests. Contact an admin if you think this is wrong.
+        </div>
+        <div id="wfhEligibleSection" style="display:none;">
+          <div style="background:#F7F4EF;padding:10px 12px;border-radius:8px;margin-bottom:16px;">
+            <div style="font-size:11px;font-weight:700;color:#5C4F42;margin-bottom:6px;">Request a WFH day</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input type="date" class="form-control" id="wfhDateInput" style="max-width:180px;">
+              <button type="button" class="btn btn-primary btn-sm" id="wfhRequestBtn">Request</button>
+            </div>
+            <div style="font-size:11px;color:#8A7E74;margin-top:6px;">Must be requested at least 1 day in advance.</div>
+          </div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#5C4F42;">My WFH requests</div>
+          <div id="wfhMyList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;"></div>
+        </div>
+        <div id="wfhAdminSection" style="display:none;">
+          <div style="font-weight:700;font-size:14px;margin:20px 0 8px;color:#5C4F42;">Pending WFH approvals</div>
+          <div id="wfhPendingList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;"></div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#5C4F42;">Approved WFH log</div>
+          <div id="wfhApprovedList" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
       </div>
 
       <!-- V32 (Personal Growth Goals): PRIVATE, self-owned, self-marked.
@@ -1558,7 +1596,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-19.2'; // V34: Team Leave Bank and the personal balance card now read each person's medEntitlement/casEntitlement (fallback 12 / 5) for the "/ X" denominators, "used of X" and bar maths, so pro-rated joiners (Taskiya 9 / 3.75) display correctly -- display-only, no balance logic touched. Prior: V33: Team Leave Bank STATUS badge now reflects BOTH medLeft and casLeft (worst state across the two buckets, names the bucket; casual Low line is <=1, medical <=3) -- display-only, see leaveBankStatus(). Prior: V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-25.1'; // V35.1: WFH month-limit fix -- requestWfh() now blocks a NEW request once the target calendar month already has an APPROVED WFH day for that person (multiple PENDING requests in the same month remain allowed as long as none is approved yet). Shares the exact same month-matching logic with the approval-time check via a new wfhApprovedInMonth() helper -- both are pure string-month comparisons against every wfhRequests doc, with NO reference to today's date, so a PAST approved day in the month blocks a new request/approval exactly the same as a future one (confirmed already correct on the approval side; this fix only adds the missing request-side check). Prior: V35: WFH Request/Approval Workflow, Half 1 -- request/approval/tracking only. Own collection (wfhRequests), own page, wfhEligible flag on user docs. Enforces eligibility + >=1-day advance at request time, 1-per-calendar-month + max-2-per-date (FCFS by approval order) at approval time. WFH never writes to leaveRequests or medLeft/casLeft -- zero leave-bank impact. Zero-work tracking is read-only, cross-referenced against timeLogs for display, never auto-penalizing. Does NOT touch runAttendanceAutoDeduction() or any leave-deduction/entitlement code -- teaching the engine to skip an approved WFH day is a separate, later build. Prior: V34: Team Leave Bank and the personal balance card now read each person's medEntitlement/casEntitlement (fallback 12 / 5) for the "/ X" denominators, "used of X" and bar maths, so pro-rated joiners (Taskiya 9 / 3.75) display correctly -- display-only, no balance logic touched. Prior: V33: Team Leave Bank STATUS badge now reflects BOTH medLeft and casLeft (worst state across the two buckets, names the bucket; casual Low line is <=1, medical <=3) -- display-only, see leaveBankStatus(). Prior: V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -1683,6 +1721,15 @@ let leaveRequests = [];
 // actualDate) and the founder-only KPI (by projectId). One store, two
 // reads.
 let submissionsData = [];
+// V35 (WFH Request/Approval Workflow, Half 1 -- workflow only, NOT the
+// auto-deduction integration): own Firestore collection, loaded the same
+// way as leaveRequests/submissionsData -- granular writes only, never part
+// of the dataToSave batch payload. Doc shape: { id, userId, userName, date,
+// status:'pending'|'approved'|'rejected', requestedAt, approvedBy,
+// approvedAt }. runAttendanceAutoDeduction() does NOT read this array in
+// this build -- teaching the engine to skip an approved WFH day is a
+// separate, later build (the engine session).
+let wfhRequests = [];
 let changeRequests= [];
 let notifications = [];
 
@@ -3730,6 +3777,14 @@ async function loadData() {
       submissionsData = [];
       submissionsSnapshot.forEach(doc => { submissionsData.push({ ...doc.data(), id: doc.id }); });
       console.log('✅ Loaded submissions from server:', submissionsData.length);
+
+      // V35 (WFH Request/Approval Workflow): own collection, loaded the same
+      // way as submissions -- granular writes only, never part of the
+      // dataToSave batch payload below.
+      const wfhRequestsSnapshot = await db.collection("wfhRequests").get({source:'server'});
+      wfhRequests = [];
+      wfhRequestsSnapshot.forEach(doc => { wfhRequests.push({ ...doc.data(), id: doc.id }); });
+      console.log('✅ Loaded WFH requests from server:', wfhRequests.length);
 
       // Fallback: Migrate old structure if subcollections empty
       if (projectsData.length === 0 && data.projectsData) {
@@ -6527,6 +6582,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='leaves')     { renderLeaves(); renderHrInfo(); } // 2026-09-12 tab merge: HR Info folded into Leave & HR, both render side by side, neither touched internally
     if(page==='teamleave')  { renderTeamLeave(); renderTeamLeaveBank(); }
     if(page==='approvals')  renderApprovals();
+    if(page==='wfh')        renderWfh();
     if(page==='mygrowth')   renderMyGrowth();
     if(page==='manage')       renderManage();
     if(page==='hourstracker') renderHoursTracker();
@@ -8715,6 +8771,180 @@ function renderQuarterWins() {
 }
 
 // ═══════════════════════════════════════════════════════
+// V35 (WFH Request/Approval Workflow, 2026-09-24) -- HALF 1: the request,
+// approval and tracking workflow ONLY. This build deliberately does NOT
+// modify runAttendanceAutoDeduction() or any leave-deduction/entitlement
+// code -- the engine learning to skip an approved WFH day is a separate,
+// later build. Own Firestore collection (wfhRequests), own page, zero
+// leaveRequests/medLeft/casLeft writes anywhere in this section.
+//
+// Policy, all enforced here (not by Firestore rules):
+//   1. Eligibility -- only wfhEligible:true users may request. Checked at
+//      request time.
+//   2. 1 approved WFH per calendar month per person. Checked at APPROVAL
+//      time (a second pending request can exist; only one can ever be
+//      approved for the same month).
+//   3. >=1 day advance notice -- the requested date must be strictly
+//      after today. Checked at request time.
+//   4. Max 2 approved WFH per calendar date, team-wide. Checked at
+//      APPROVAL time, first-come-first-served by approval order (not
+//      request order) -- the slot is claimed the moment an admin clicks
+//      Approve, not when the employee submits.
+// Zero-work tracking (visibility only, never enforcement): an approved
+// WFH day is cross-referenced against timeLogs for that user+date purely
+// for display in the admin's approved-WFH log ("no work logged"). This
+// NEVER auto-penalizes, auto-deducts, or writes anything back -- it's a
+// read-only flag computed at render time.
+
+async function saveWfhDoc(doc) {
+  try {
+    await db.collection('wfhRequests').doc(doc.id).set(doc, { merge: true });
+    return { ok: true };
+  } catch (e) {
+    console.error('❌ Save WFH request failed:', e);
+    alert('Could not save — check your connection and try again.');
+    return { ok: false, error: true };
+  }
+}
+
+// Calendar-month key, e.g. '2026-08', from a 'YYYY-MM-DD' date string --
+// pure string slicing, no Date object, so no timezone-shift risk.
+function wfhMonthKey(dateStr) { return (dateStr || '').slice(0, 7); }
+
+// Shared by both the request-time and approval-time month check. Deliberately
+// a pure string-month comparison against every doc in wfhRequests -- it does
+// NOT compare against today's date in any way, so a PAST approved day in the
+// same calendar month counts exactly the same as a future one. `excludeId`
+// lets the approval-time caller exclude the doc it's currently deciding on;
+// pass null at request time, since the doc doesn't exist yet.
+function wfhApprovedInMonth(userId, dateStr, excludeId) {
+  const monthKey = wfhMonthKey(dateStr);
+  return wfhRequests.some((w) => w.id !== excludeId && w.userId === userId && w.status === 'approved' && wfhMonthKey(w.date) === monthKey);
+}
+
+async function requestWfh(dateStr) {
+  if (!currentUser?.wfhEligible) return { ok: false, reason: 'Not eligible for WFH.' };
+  const today = fmt(new Date());
+  if (!dateStr || dateStr <= today) {
+    return { ok: false, reason: 'WFH must be requested at least 1 day in advance.' };
+  }
+  // Blocks a NEW request once the target month already has an APPROVED WFH
+  // day for this person -- multiple PENDING requests in the same month are
+  // still allowed as long as none of them has been approved yet (e.g. filing
+  // alternates before any is decided).
+  if (wfhApprovedInMonth(currentUser.id, dateStr, null)) {
+    return { ok: false, reason: `You already have an approved WFH day in ${wfhMonthKey(dateStr)}.` };
+  }
+  const doc = {
+    id: genId(),
+    userId: currentUser.id,
+    userName: currentUser.name,
+    date: dateStr,
+    status: 'pending',
+    requestedAt: new Date().toISOString(),
+    approvedBy: null,
+    approvedAt: null,
+  };
+  const result = await saveWfhDoc(doc);
+  if (result.ok) wfhRequests.push(doc);
+  return { ok: result.ok, doc };
+}
+
+// Policy checks 2 and 4 -- both re-evaluated fresh at approval time
+// against the CURRENT in-memory wfhRequests array (same discipline as the
+// existing leave approve handler, which checks live state, not a cached
+// snapshot from request time).
+function wfhApprovalBlockedReason(wfhDoc) {
+  if (wfhApprovedInMonth(wfhDoc.userId, wfhDoc.date, wfhDoc.id)) {
+    return `${wfhDoc.userName} already has an approved WFH day in ${wfhMonthKey(wfhDoc.date)}.`;
+  }
+  const approvedSameDate = wfhRequests.filter((w) => w.id !== wfhDoc.id && w.status === 'approved' && w.date === wfhDoc.date).length;
+  if (approvedSameDate >= 2) return `${wfhDoc.date} already has 2 approved WFH requests (max per date).`;
+  return null;
+}
+
+async function approveWfhRequest(id) {
+  const wfhDoc = wfhRequests.find((w) => w.id === id);
+  if (!wfhDoc || wfhDoc.status !== 'pending') return { ok: false, reason: 'Request no longer pending.' };
+  const blocked = wfhApprovalBlockedReason(wfhDoc);
+  if (blocked) { alert(`Cannot approve — ${blocked}`); return { ok: false, reason: blocked }; }
+  const patch = { status: 'approved', approvedBy: currentUser.name, approvedAt: new Date().toISOString() };
+  const result = await saveWfhDoc({ ...wfhDoc, ...patch });
+  if (result.ok) Object.assign(wfhDoc, patch);
+  return result;
+}
+
+async function rejectWfhRequest(id) {
+  const wfhDoc = wfhRequests.find((w) => w.id === id);
+  if (!wfhDoc || wfhDoc.status !== 'pending') return { ok: false, reason: 'Request no longer pending.' };
+  const patch = { status: 'rejected', approvedBy: currentUser.name, approvedAt: new Date().toISOString() };
+  const result = await saveWfhDoc({ ...wfhDoc, ...patch });
+  if (result.ok) Object.assign(wfhDoc, patch);
+  return result;
+}
+
+function wfhRequestCard(w, { showActions }) {
+  const badgeClass = w.status === 'approved' ? 'badge-approved' : w.status === 'rejected' ? 'badge-rejected' : 'badge-pending';
+  const actions = showActions
+    ? `<div style="display:flex;gap:8px;margin-top:8px;"><button class="btn btn-success btn-sm wfh-approve" data-id="${w.id}">✓ Approve</button><button class="btn btn-danger btn-sm wfh-reject" data-id="${w.id}">✗ Reject</button></div>`
+    : '';
+  return `<div class="approval-card"><div style="display:flex;justify-content:space-between;align-items:start;"><div><div style="font-weight:700;">🏠 WFH · ${w.userName}</div><div style="font-size:11px;color:#8A7E74;">${w.date}</div></div><span class="badge ${badgeClass}">${w.status}</span></div>${actions}</div>`;
+}
+
+function wfhWorkedFlag(userId, dateStr) {
+  const worked = timeLogs.some((l) => l.userId === userId && l.date === dateStr);
+  return worked
+    ? `<span style="font-size:11px;color:#5A7A3A;">✓ Work logged</span>`
+    : `<span style="font-size:11px;color:#C0554A;">⚠ No work logged</span>`;
+}
+
+function renderWfh() {
+  const notEligibleEl = document.getElementById('wfhNotEligible');
+  const eligibleEl = document.getElementById('wfhEligibleSection');
+  const adminEl = document.getElementById('wfhAdminSection');
+  const eligible = !!currentUser?.wfhEligible;
+  notEligibleEl.style.display = eligible ? 'none' : 'block';
+  eligibleEl.style.display = eligible ? 'block' : 'none';
+  adminEl.style.display = currentUser?.isAdmin ? 'block' : 'none';
+
+  if (eligible) {
+    const mine = wfhRequests.filter((w) => w.userId === currentUser.id).slice().sort((a, b) => b.date.localeCompare(a.date));
+    const myListEl = document.getElementById('wfhMyList');
+    myListEl.innerHTML = mine.length
+      ? mine.map((w) => wfhRequestCard(w, { showActions: false })).join('')
+      : `<div style="color:#B0A89E;font-size:13px;padding:16px;text-align:center;">No WFH requests yet.</div>`;
+  }
+
+  if (currentUser?.isAdmin) {
+    const pending = wfhRequests.filter((w) => w.status === 'pending').slice().sort((a, b) => a.date.localeCompare(b.date));
+    const pendingListEl = document.getElementById('wfhPendingList');
+    pendingListEl.innerHTML = pending.length
+      ? pending.map((w) => wfhRequestCard(w, { showActions: true })).join('')
+      : `<div style="color:#B0A89E;font-size:13px;padding:16px;text-align:center;">No pending WFH requests.</div>`;
+    pendingListEl.querySelectorAll('.wfh-approve').forEach((btn) => {
+      btn.onclick = async () => { await approveWfhRequest(btn.dataset.id); renderWfh(); };
+    });
+    pendingListEl.querySelectorAll('.wfh-reject').forEach((btn) => {
+      btn.onclick = async () => { await rejectWfhRequest(btn.dataset.id); renderWfh(); };
+    });
+
+    const approved = wfhRequests.filter((w) => w.status === 'approved').slice().sort((a, b) => b.date.localeCompare(a.date));
+    const approvedListEl = document.getElementById('wfhApprovedList');
+    approvedListEl.innerHTML = approved.length
+      ? approved.map((w) => `<div class="approval-card"><div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="font-weight:700;">${w.userName}</div><div style="font-size:11px;color:#8A7E74;">${w.date}</div></div>${wfhWorkedFlag(w.userId, w.date)}</div></div>`).join('')
+      : `<div style="color:#B0A89E;font-size:13px;padding:16px;text-align:center;">No approved WFH days yet.</div>`;
+  }
+}
+
+document.getElementById('wfhRequestBtn')?.addEventListener('click', async () => {
+  const dateStr = document.getElementById('wfhDateInput').value;
+  const result = await requestWfh(dateStr);
+  if (!result.ok) { alert(result.reason || 'Could not submit request.'); return; }
+  document.getElementById('wfhDateInput').value = '';
+  renderWfh();
+});
+
+// ═══════════════════════════════════════════════════════
 // V32 (Personal Growth Goals, 2026-09-16): a PRIVATE, self-owned
 // skill-growth checklist. This is the whole feature's frame, enforced
 // STRUCTURALLY, not by policy:
@@ -10014,10 +10244,15 @@ function renderManage(){
     item.innerHTML=`<div style="flex:1;"><div style="font-weight:600;">${u.name}${u.isAdmin?` <span class="admin-badge">ADMIN</span>`:''}</div><div style="font-size:11px;color:#8A7E74;">${u.email}</div></div>
       <div style="display:flex;align-items:center;gap:6px;margin-right:10px;">
         <span style="font-size:10px;color:#8A7E74;font-weight:600;">₹</span>
-        <input type="number" placeholder="Monthly salary" value="${u.monthlySalary||''}" 
+        <input type="number" placeholder="Monthly salary" value="${u.monthlySalary||''}"
           style="width:110px;border:1px solid #E0D8CE;border-radius:5px;padding:3px 6px;font-size:11px;color:#3D332A;"
           onchange="(async()=>{const idx=users.findIndex(x=>x.id==='${u.id}');if(idx>-1){users[idx].monthlySalary=parseInt(this.value)||0;await saveUser(users[idx]);showToast('Salary updated',1500);}})()" />
-      </div>`;
+      </div>
+      <label style="display:flex;align-items:center;gap:4px;margin-right:10px;font-size:11px;color:#8A7E74;cursor:pointer;" title="Eligible to request WFH days">
+        <input type="checkbox" ${u.wfhEligible ? 'checked' : ''}
+          onchange="(async()=>{const idx=users.findIndex(x=>x.id==='${u.id}');if(idx>-1){users[idx].wfhEligible=this.checked;await saveUser(users[idx]);showToast('WFH eligibility updated',1500);}})()" />
+        WFH
+      </label>`;
     const btn=document.createElement('button'); btn.className='btn btn-danger btn-sm'; btn.textContent='Delete';
     btn.onclick = async () => {
       if (u.id === currentUser.id) { alert("Can't delete yourself"); return; }
@@ -10111,7 +10346,7 @@ document.getElementById('addUserBtn').addEventListener('click', async ()=>{
   const name=document.getElementById('newUserName').value.trim(),email=document.getElementById('newUserEmail').value.trim().toLowerCase(),pass=document.getElementById('newUserPass').value.trim();
   if(!name||!email||!pass){ alert('Fill all fields'); return; }
   if(users.find(u=>u.email===email)){ alert('Email exists'); return; }
-  const newUser = {id:genId(),name,email,password:pass,isAdmin:false,medLeft:12,casLeft:5};
+  const newUser = {id:genId(),name,email,password:pass,isAdmin:false,medLeft:12,casLeft:5,wfhEligible:false};
   users.push(newUser);
   document.getElementById('newUserName').value=''; document.getElementById('newUserEmail').value=''; document.getElementById('newUserPass').value='';
   // V14.3.2: persist JUST this user's document via saveUser() — no wholesale array

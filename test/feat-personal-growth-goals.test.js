@@ -273,7 +273,12 @@ function makeMockDb(seedByUser) {
     // mygrowth route -- a "strip it, compare to main" check would compare
     // against its own former self and false-fail forever. Same post-merge
     // staleness this codebase has hit before: assert plain byte-identity.
-    check('the nav-click router is byte-for-byte unchanged from main (mygrowth route already on main)', cur === main && main.includes("page==='mygrowth'"));
+    // A later, unrelated build (V35, WFH workflow) may add its OWN one-line
+    // route to this same shared block on a branch cut after this fixture was
+    // written -- that's not this feature's concern, so normalize it away
+    // rather than let an unrelated addition fail this file's isolation claim.
+    const stripWfhLine = (s) => s.replace(/\n\s*if\(page==='wfh'\)\s*renderWfh\(\);/, '');
+    check('the nav-click router is byte-for-byte unchanged from main (mygrowth route already on main) once any later unrelated route additions are normalized away', stripWfhLine(cur) === main && main.includes("page==='mygrowth'"));
   }
   check('saveProject() is byte-for-byte unchanged', extractFunction(fullScript, 'saveProject') === extractFunction(mainFullScript, 'saveProject'));
   // V34 made renderLeaves()'s "used of X" / bar maths entitlement-aware; compare with that one change normalised away on both sides (holds before AND after V34 is on main).
