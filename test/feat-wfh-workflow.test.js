@@ -23,6 +23,17 @@
 //    renderLeaves() are all byte-for-byte unchanged from main -- this is
 //    the safety gate proving the pay engine was not touched
 //
+// V35.1 (2026-09-25) added: requestWfh() now ALSO blocks a new request once
+// the target month already has an APPROVED WFH day for that person (found
+// missing during preview testing -- the approval-time block always worked,
+// but nothing stopped un-approvable pending requests from piling up).
+// Pending-only months still allow more requests. The month check
+// (wfhApprovedInMonth(), shared by both request- and approval-time) is a
+// pure calendar-month string match with NO "future only" filtering, so a
+// PAST approved day earlier in the month blocks exactly like a future one
+// -- confirmed for both the pre-existing approval-time check and the new
+// request-time one.
+//
 // Run with: node test/feat-wfh-workflow.test.js
 'use strict';
 
@@ -117,6 +128,7 @@ function makeSandbox({ currentUser, users = [], wfhRequests = [], timeLogs = [],
   vm.runInContext(extractFunction(fullScript, 'fmt'), sandbox);
   vm.runInContext(extractFunction(fullScript, 'saveWfhDoc'), sandbox);
   vm.runInContext(extractFunction(fullScript, 'wfhMonthKey'), sandbox);
+  vm.runInContext(extractFunction(fullScript, 'wfhApprovedInMonth'), sandbox);
   vm.runInContext(extractFunction(fullScript, 'requestWfh'), sandbox);
   vm.runInContext(extractFunction(fullScript, 'wfhApprovalBlockedReason'), sandbox);
   vm.runInContext(extractFunction(fullScript, 'approveWfhRequest'), sandbox);
@@ -166,6 +178,85 @@ console.log('\n=== 2. >=1-day advance notice (request time) ===');
   const noDate = makeSandbox({ currentUser: u, nowStr: TODAY });
   const noDateResult = await run(noDate.sandbox, `requestWfh('')`);
   check('empty date is refused, not silently accepted', noDateResult.ok === false);
+}
+
+// ─────────────────────────────────────────────────────────────
+console.log('\n=== 2b. V35.1: month-limit enforced at REQUEST time too (middle ground) ===');
+{
+  const u = { id: 'u13', name: 'Month Block Test', wfhEligible: true };
+
+  // Already has an APPROVED day this month (future, relative to "today") --
+  // a new request for a different day in the same month must be refused.
+  const withApprovedFuture = [
+    { id: 'e1', userId: 'u13', userName: 'Month Block Test', date: '2026-09-28', status: 'approved', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
+  ];
+  const { sandbox: sb1 } = makeSandbox({ currentUser: u, wfhRequests: withApprovedFuture, nowStr: TODAY });
+  const r1 = await run(sb1, `requestWfh('${TOMORROW}')`);
+  check('new request refused when the month already has an approved day (future)', r1.ok === false && /already have an approved WFH/i.test(r1.reason || ''));
+  check('the refused request writes nothing new to wfhRequests', run(sb1, 'wfhRequests.length') === 1);
+
+  // Ranit's edge case: the approved day is in the PAST relative to "today"
+  // (already used, e.g. 24 Sept when today is the 25th) -- must STILL block,
+  // since the check is a pure calendar-month match, not a "future only" one.
+  const withApprovedPast = [
+    { id: 'e2', userId: 'u13', userName: 'Month Block Test', date: '2026-09-24', status: 'approved', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
+  ];
+  const { sandbox: sb2 } = makeSandbox({ currentUser: u, wfhRequests: withApprovedPast, nowStr: TODAY });
+  const r2 = await run(sb2, `requestWfh('${TOMORROW}')`);
+  check("a PAST approved day earlier in the same month still blocks a new request (Ranit's edge case)", r2.ok === false && /already have an approved WFH/i.test(r2.reason || ''));
+
+  // Only PENDING requests exist so far this month -- a new request must
+  // still be allowed (multiple alternates can coexist until one is approved).
+  const withOnlyPending = [
+    { id: 'e3', userId: 'u13', userName: 'Month Block Test', date: '2026-09-26', status: 'pending', requestedAt: '', approvedBy: null, approvedAt: null },
+  ];
+  const { sandbox: sb3 } = makeSandbox({ currentUser: u, wfhRequests: withOnlyPending, nowStr: TODAY });
+  const r3 = await run(sb3, `requestWfh('${TOMORROW}')`);
+  check('a second request is ALLOWED while the existing one for the month is still only pending (not yet approved)', r3.ok === true);
+  check('both pending requests now coexist for the month', run(sb3, 'wfhRequests.filter(w=>w.status===\'pending\').length') === 2);
+
+  // A rejected request does not count as approved and must not block.
+  const withRejected = [
+    { id: 'e4', userId: 'u13', userName: 'Month Block Test', date: '2026-09-05', status: 'rejected', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
+  ];
+  const { sandbox: sb4 } = makeSandbox({ currentUser: u, wfhRequests: withRejected, nowStr: TODAY });
+  const r4 = await run(sb4, `requestWfh('${TOMORROW}')`);
+  check('a REJECTED request in the same month does not block a new request', r4.ok === true);
+
+  // A different person's approved day in the same month must not block.
+  const withOthersApproved = [
+    { id: 'e5', userId: 'someone-else', userName: 'Someone Else', date: '2026-09-28', status: 'approved', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
+  ];
+  const { sandbox: sb5 } = makeSandbox({ currentUser: u, wfhRequests: withOthersApproved, nowStr: TODAY });
+  const r5 = await run(sb5, `requestWfh('${TOMORROW}')`);
+  check("a DIFFERENT person's approved day in the same month does not block this person's request", r5.ok === true);
+
+  // An approved day in a DIFFERENT month must not block.
+  const withOtherMonth = [
+    { id: 'e6', userId: 'u13', userName: 'Month Block Test', date: '2026-08-15', status: 'approved', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
+  ];
+  const { sandbox: sb6 } = makeSandbox({ currentUser: u, wfhRequests: withOtherMonth, nowStr: TODAY });
+  const r6 = await run(sb6, `requestWfh('${TOMORROW}')`);
+  check('an approved day in a DIFFERENT calendar month does not block this request', r6.ok === true);
+}
+
+// ─────────────────────────────────────────────────────────────
+console.log("\n=== 2c. V35.1: the approval-time check ALSO counts past-approved days in the month (Ranit's edge case, confirmed already correct) ===");
+{
+  // This reproduces exactly the reported scenario: an approved day earlier
+  // in September, then a pending request later in the SAME month for the
+  // SAME person -- approval must still be blocked, proving the existing
+  // wfhApprovalBlockedReason()/wfhApprovedInMonth() logic never special-cases
+  // "only future dates count."
+  const admin = { id: 'admin', name: 'Admin User', isAdmin: true };
+  const scenario = [
+    { id: 'f1', userId: 'u14', userName: 'Past Approved Test', date: '2026-09-24', status: 'approved', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
+    { id: 'f2', userId: 'u14', userName: 'Past Approved Test', date: '2026-09-30', status: 'pending', requestedAt: '', approvedBy: null, approvedAt: null },
+  ];
+  const { sandbox, alerts } = makeSandbox({ currentUser: admin, wfhRequests: scenario });
+  const result = await run(sandbox, `approveWfhRequest('f2')`);
+  check('approving a later-in-month request is blocked by an EARLIER (already-past) approved day in the same month', result.ok === false && /already has an approved WFH/i.test(result.reason || ''));
+  check('the block reason is shown as an alert', alerts.length === 1);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -274,7 +365,7 @@ console.log('\n=== 7. Zero-work flag: read-only display, never blocks or writes 
 // ─────────────────────────────────────────────────────────────
 console.log("\n=== 8. Structural: no leaveRequests/medLeft/casLeft writes anywhere in the WFH functions' source ===");
 {
-  for (const name of ['saveWfhDoc', 'requestWfh', 'wfhApprovalBlockedReason', 'approveWfhRequest', 'rejectWfhRequest', 'wfhWorkedFlag', 'wfhRequestCard', 'wfhMonthKey']) {
+  for (const name of ['saveWfhDoc', 'requestWfh', 'wfhApprovedInMonth', 'wfhApprovalBlockedReason', 'approveWfhRequest', 'rejectWfhRequest', 'wfhWorkedFlag', 'wfhRequestCard', 'wfhMonthKey']) {
     const fnSrc = extractFunction(fullScript, name);
     check(`${name}() never references leaveRequests`, !fnSrc.includes('leaveRequests'));
     check(`${name}() never references medLeft or casLeft`, !/medLeft|casLeft/.test(fnSrc));

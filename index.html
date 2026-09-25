@@ -1596,7 +1596,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-24.1'; // V35: WFH Request/Approval Workflow, Half 1 -- request/approval/tracking only. Own collection (wfhRequests), own page, wfhEligible flag on user docs. Enforces eligibility + >=1-day advance at request time, 1-per-calendar-month + max-2-per-date (FCFS by approval order) at approval time. WFH never writes to leaveRequests or medLeft/casLeft -- zero leave-bank impact. Zero-work tracking is read-only, cross-referenced against timeLogs for display, never auto-penalizing. Does NOT touch runAttendanceAutoDeduction() or any leave-deduction/entitlement code -- teaching the engine to skip an approved WFH day is a separate, later build. Prior: V34: Team Leave Bank and the personal balance card now read each person's medEntitlement/casEntitlement (fallback 12 / 5) for the "/ X" denominators, "used of X" and bar maths, so pro-rated joiners (Taskiya 9 / 3.75) display correctly -- display-only, no balance logic touched. Prior: V33: Team Leave Bank STATUS badge now reflects BOTH medLeft and casLeft (worst state across the two buckets, names the bucket; casual Low line is <=1, medical <=3) -- display-only, see leaveBankStatus(). Prior: V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-09-25.1'; // V35.1: WFH month-limit fix -- requestWfh() now blocks a NEW request once the target calendar month already has an APPROVED WFH day for that person (multiple PENDING requests in the same month remain allowed as long as none is approved yet). Shares the exact same month-matching logic with the approval-time check via a new wfhApprovedInMonth() helper -- both are pure string-month comparisons against every wfhRequests doc, with NO reference to today's date, so a PAST approved day in the month blocks a new request/approval exactly the same as a future one (confirmed already correct on the approval side; this fix only adds the missing request-side check). Prior: V35: WFH Request/Approval Workflow, Half 1 -- request/approval/tracking only. Own collection (wfhRequests), own page, wfhEligible flag on user docs. Enforces eligibility + >=1-day advance at request time, 1-per-calendar-month + max-2-per-date (FCFS by approval order) at approval time. WFH never writes to leaveRequests or medLeft/casLeft -- zero leave-bank impact. Zero-work tracking is read-only, cross-referenced against timeLogs for display, never auto-penalizing. Does NOT touch runAttendanceAutoDeduction() or any leave-deduction/entitlement code -- teaching the engine to skip an approved WFH day is a separate, later build. Prior: V34: Team Leave Bank and the personal balance card now read each person's medEntitlement/casEntitlement (fallback 12 / 5) for the "/ X" denominators, "used of X" and bar maths, so pro-rated joiners (Taskiya 9 / 3.75) display correctly -- display-only, no balance logic touched. Prior: V33: Team Leave Bank STATUS badge now reflects BOTH medLeft and casLeft (worst state across the two buckets, names the bucket; casual Low line is <=1, medical <=3) -- display-only, see leaveBankStatus(). Prior: V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -8811,11 +8811,29 @@ async function saveWfhDoc(doc) {
 // pure string slicing, no Date object, so no timezone-shift risk.
 function wfhMonthKey(dateStr) { return (dateStr || '').slice(0, 7); }
 
+// Shared by both the request-time and approval-time month check. Deliberately
+// a pure string-month comparison against every doc in wfhRequests -- it does
+// NOT compare against today's date in any way, so a PAST approved day in the
+// same calendar month counts exactly the same as a future one. `excludeId`
+// lets the approval-time caller exclude the doc it's currently deciding on;
+// pass null at request time, since the doc doesn't exist yet.
+function wfhApprovedInMonth(userId, dateStr, excludeId) {
+  const monthKey = wfhMonthKey(dateStr);
+  return wfhRequests.some((w) => w.id !== excludeId && w.userId === userId && w.status === 'approved' && wfhMonthKey(w.date) === monthKey);
+}
+
 async function requestWfh(dateStr) {
   if (!currentUser?.wfhEligible) return { ok: false, reason: 'Not eligible for WFH.' };
   const today = fmt(new Date());
   if (!dateStr || dateStr <= today) {
     return { ok: false, reason: 'WFH must be requested at least 1 day in advance.' };
+  }
+  // Blocks a NEW request once the target month already has an APPROVED WFH
+  // day for this person -- multiple PENDING requests in the same month are
+  // still allowed as long as none of them has been approved yet (e.g. filing
+  // alternates before any is decided).
+  if (wfhApprovedInMonth(currentUser.id, dateStr, null)) {
+    return { ok: false, reason: `You already have an approved WFH day in ${wfhMonthKey(dateStr)}.` };
   }
   const doc = {
     id: genId(),
@@ -8837,11 +8855,9 @@ async function requestWfh(dateStr) {
 // existing leave approve handler, which checks live state, not a cached
 // snapshot from request time).
 function wfhApprovalBlockedReason(wfhDoc) {
-  const monthKey = wfhMonthKey(wfhDoc.date);
-  const alreadyApprovedThisMonth = wfhRequests.some((w) =>
-    w.id !== wfhDoc.id && w.userId === wfhDoc.userId && w.status === 'approved' && wfhMonthKey(w.date) === monthKey
-  );
-  if (alreadyApprovedThisMonth) return `${wfhDoc.userName} already has an approved WFH day in ${monthKey}.`;
+  if (wfhApprovedInMonth(wfhDoc.userId, wfhDoc.date, wfhDoc.id)) {
+    return `${wfhDoc.userName} already has an approved WFH day in ${wfhMonthKey(wfhDoc.date)}.`;
+  }
   const approvedSameDate = wfhRequests.filter((w) => w.id !== wfhDoc.id && w.status === 'approved' && w.date === wfhDoc.date).length;
   if (approvedSameDate >= 2) return `${wfhDoc.date} already has 2 approved WFH requests (max per date).`;
   return null;
