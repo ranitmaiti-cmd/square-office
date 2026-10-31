@@ -1597,7 +1597,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-10-31.2'; // V37: WFH required reason (stored + shown on My/Pending/Approved) + Cancel/revert of an approved WFH day
+const APP_VERSION = '2026-10-31.3'; // V37.1: requester can cancel (withdraw) their own pending WFH request, on top of V37 (required WFH reason + cancel/revert of an approved day)
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -9053,16 +9053,22 @@ async function rejectWfhRequest(id) {
 // requester may cancel only their OWN approved day and only before the day
 // arrives (date > today, same cut-off as requesting); an admin may revert any
 // approved day (e.g. correcting an approval, including a past one).
+// A requester may also withdraw their OWN still-pending request (any date;
+// admins decide other people's pending requests with Approve/Reject instead).
+// A pending request never holds a slot -- the month and date checks count only
+// status === 'approved' -- so withdrawing one frees nothing and needs no re-check.
 function wfhCanCancel(w) {
-  if (!w || w.status !== 'approved' || !currentUser) return false;
+  if (!w || !currentUser) return false;
+  if (w.status === 'pending') return w.userId === currentUser.id;
+  if (w.status !== 'approved') return false;
   if (currentUser.isAdmin) return true;
   return w.userId === currentUser.id && w.date > fmt(new Date());
 }
 
 async function cancelWfhRequest(id) {
   const wfhDoc = wfhRequests.find((w) => w.id === id);
-  if (!wfhDoc || wfhDoc.status !== 'approved') return { ok: false, reason: 'Only an approved WFH day can be cancelled.' };
-  if (!wfhCanCancel(wfhDoc)) return { ok: false, reason: 'You can only cancel your own WFH day before the day arrives.' };
+  if (!wfhDoc || (wfhDoc.status !== 'approved' && wfhDoc.status !== 'pending')) return { ok: false, reason: 'Only a pending or approved WFH request can be cancelled.' };
+  if (!wfhCanCancel(wfhDoc)) return { ok: false, reason: 'You can only cancel your own WFH request (an approved day only before the day arrives).' };
   const patch = { status: 'cancelled', cancelledBy: currentUser.name, cancelledAt: new Date().toISOString() };
   const result = await saveWfhDoc({ ...wfhDoc, ...patch });
   if (result.ok) Object.assign(wfhDoc, patch);
@@ -9085,13 +9091,14 @@ function wfhRequestCard(w, { showActions, showCancel }) {
   const actions = showActions
     ? `<div style="display:flex;gap:8px;margin-top:8px;"><button class="btn btn-success btn-sm wfh-approve" data-id="${w.id}">✓ Approve</button><button class="btn btn-danger btn-sm wfh-reject" data-id="${w.id}">✗ Reject</button></div>`
     : (showCancel && wfhCanCancel(w)
-      ? `<div style="margin-top:8px;"><button class="btn btn-danger btn-sm wfh-cancel" data-id="${w.id}">Cancel WFH</button></div>`
+      ? `<div style="margin-top:8px;"><button class="btn btn-danger btn-sm wfh-cancel" data-id="${w.id}">${w.status === 'pending' ? 'Cancel request' : 'Cancel WFH'}</button></div>`
       : '');
   return `<div class="approval-card"><div style="display:flex;justify-content:space-between;align-items:start;"><div><div style="font-weight:700;">🏠 WFH · ${w.userName}</div><div style="font-size:11px;color:#8A7E74;">${w.date}</div>${wfhReasonLine(w)}</div><span class="badge ${badgeClass}">${w.status}</span></div>${actions}</div>`;
 }
 
 async function wfhHandleCancel(id) {
-  if (!confirm('Cancel this WFH day? The slot will be freed.')) return;
+  const target = wfhRequests.find((w) => w.id === id);
+  if (!confirm(target && target.status === 'pending' ? 'Withdraw this WFH request?' : 'Cancel this WFH day? The slot will be freed.')) return;
   const r = await cancelWfhRequest(id);
   if (!r.ok) alert(r.reason || 'Could not cancel.');
   renderWfh();

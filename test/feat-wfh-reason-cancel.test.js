@@ -206,6 +206,71 @@ const TOMORROW = '2026-09-25';
     check('cancelled day disappears from the Approved log', domC.getElementById('wfhApprovedList').innerHTML.includes('No approved WFH days yet'));
   }
 
+  console.log('\n=== 4b. Requester cancels (withdraws) their own PENDING request ===');
+  {
+    const pend = (over) => ({ id: 'q1', userId: 'a1', userName: 'Alice', date: '2026-09-30', status: 'pending', reason: 'r', ...over });
+
+    let t = makeSandbox({ user: ALICE, requests: [pend()] });
+    let r = await run(t.sb, `cancelWfhRequest('q1')`);
+    check('requester cancels own pending request -> ok, status cancelled', r.ok && t.sb.wfhRequests[0].status === 'cancelled');
+    check('doc kept (not deleted) with cancelledBy/At and original reason', t.writes.wfhRequests.q1.status === 'cancelled' && t.writes.wfhRequests.q1.cancelledBy === 'Alice' && !!t.writes.wfhRequests.q1.cancelledAt && t.writes.wfhRequests.q1.reason === 'r');
+
+    t = makeSandbox({ user: ALICE, requests: [pend({ date: '2026-09-10' })] });
+    r = await run(t.sb, `cancelWfhRequest('q1')`);
+    check('withdrawing a pending request is allowed regardless of its date', r.ok);
+
+    t = makeSandbox({ user: BOB, requests: [pend()] });
+    r = await run(t.sb, `cancelWfhRequest('q1')`);
+    check("another non-admin cannot cancel someone else's pending request", !r.ok && t.sb.wfhRequests[0].status === 'pending');
+
+    t = makeSandbox({ user: ADMIN, requests: [pend()] });
+    r = await run(t.sb, `cancelWfhRequest('q1')`);
+    check("an admin does not cancel another person's pending request via Cancel (they Approve/Reject)", !r.ok && t.sb.wfhRequests[0].status === 'pending');
+
+    t = makeSandbox({ user: ADMIN, requests: [pend({ userId: 'ad', userName: 'Admin' })] });
+    r = await run(t.sb, `cancelWfhRequest('q1')`);
+    check('an admin CAN withdraw their own pending request', r.ok && t.sb.wfhRequests[0].status === 'cancelled');
+
+    t = makeSandbox({ user: ALICE, requests: [pend({ status: 'rejected' }), pend({ id: 'q2', status: 'cancelled' })] });
+    check('rejected / already-cancelled requests are not cancellable', !run(t.sb, 'wfhCanCancel(wfhRequests[0])') && !run(t.sb, 'wfhCanCancel(wfhRequests[1])'));
+
+    // Drops out of the pending approvals queue; requester sees a cancelled badge.
+    const domAdmin = fakeDom();
+    t = makeSandbox({ user: ADMIN, requests: [pend(), pend({ id: 'q3', userId: 'b1', userName: 'Bob' })], dom: domAdmin });
+    run(t.sb, 'renderWfh()');
+    check('BEFORE: both pending requests are in the approvals queue', domAdmin.getElementById('wfhPendingList').innerHTML.includes('Alice') && domAdmin.getElementById('wfhPendingList').innerHTML.includes('Bob'));
+    // Alice withdraws in her own session; admin tab sees the same shared doc state.
+    const domAlice = fakeDom();
+    const ta = makeSandbox({ user: ALICE, requests: [pend(), pend({ id: 'q3', userId: 'b1', userName: 'Bob' })], dom: domAlice });
+    run(ta.sb, 'renderWfh()');
+    check('requester sees a Cancel request button on her pending card', domAlice.getElementById('wfhMyList').innerHTML.includes('Cancel request'));
+    await run(ta.sb, `cancelWfhRequest('q1')`);
+    run(ta.sb, 'renderWfh()');
+    const mineHtml = domAlice.getElementById('wfhMyList').innerHTML;
+    check('requester now sees a cancelled badge and no cancel button', mineHtml.includes('>cancelled<') && !mineHtml.includes('wfh-cancel'));
+    // Re-render the admin view from the post-cancel data.
+    const domAdmin2 = fakeDom();
+    const tb = makeSandbox({ user: ADMIN, requests: [pend({ status: 'cancelled' }), pend({ id: 'q3', userId: 'b1', userName: 'Bob' })], dom: domAdmin2 });
+    run(tb.sb, 'renderWfh()');
+    const pendHtml = domAdmin2.getElementById('wfhPendingList').innerHTML;
+    check('AFTER: the cancelled request is gone from the pending queue (Bob remains)', !pendHtml.includes('Alice') && pendHtml.includes('Bob'));
+
+    // A cancelled request can no longer be approved.
+    t = makeSandbox({ user: ADMIN, requests: [pend({ status: 'cancelled' })] });
+    const ap = await run(t.sb, `approveWfhRequest('q1')`);
+    check('a cancelled request cannot be approved ("no longer pending")', !ap.ok && t.sb.wfhRequests[0].status === 'cancelled');
+
+    // Pending holds no slot: cancelling changes neither slot count (confirmed, not assumed).
+    t = makeSandbox({ user: ALICE, requests: [pend()] });
+    const monthBefore = run(t.sb, `wfhApprovedInMonth('a1','2026-09-30',null)`);
+    const dateBefore = run(t.sb, `wfhRequests.filter(w => w.status === 'approved' && w.date === '2026-09-30').length`);
+    await run(t.sb, `cancelWfhRequest('q1')`);
+    check('pending request held no month slot before, none after (both false)', monthBefore === false && run(t.sb, `wfhApprovedInMonth('a1','2026-09-30',null)`) === false);
+    check('pending request held no date slot before, none after (both 0)', dateBefore === 0 && run(t.sb, `wfhRequests.filter(w => w.status === 'approved' && w.date === '2026-09-30').length`) === 0);
+    const again = await run(t.sb, `requestWfh('2026-09-30', 'again')`);
+    check('a new request for the same day can be filed after withdrawing', again.ok);
+  }
+
   console.log('\n=== 5. Isolation: pay / leave / attendance / WFH-policy code untouched (pinned hashes) ===');
   {
     const PINS = {
