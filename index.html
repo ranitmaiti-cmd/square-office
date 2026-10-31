@@ -1596,7 +1596,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-09-25.1'; // V35.1: WFH month-limit fix -- requestWfh() now blocks a NEW request once the target calendar month already has an APPROVED WFH day for that person (multiple PENDING requests in the same month remain allowed as long as none is approved yet). Shares the exact same month-matching logic with the approval-time check via a new wfhApprovedInMonth() helper -- both are pure string-month comparisons against every wfhRequests doc, with NO reference to today's date, so a PAST approved day in the month blocks a new request/approval exactly the same as a future one (confirmed already correct on the approval side; this fix only adds the missing request-side check). Prior: V35: WFH Request/Approval Workflow, Half 1 -- request/approval/tracking only. Own collection (wfhRequests), own page, wfhEligible flag on user docs. Enforces eligibility + >=1-day advance at request time, 1-per-calendar-month + max-2-per-date (FCFS by approval order) at approval time. WFH never writes to leaveRequests or medLeft/casLeft -- zero leave-bank impact. Zero-work tracking is read-only, cross-referenced against timeLogs for display, never auto-penalizing. Does NOT touch runAttendanceAutoDeduction() or any leave-deduction/entitlement code -- teaching the engine to skip an approved WFH day is a separate, later build. Prior: V34: Team Leave Bank and the personal balance card now read each person's medEntitlement/casEntitlement (fallback 12 / 5) for the "/ X" denominators, "used of X" and bar maths, so pro-rated joiners (Taskiya 9 / 3.75) display correctly -- display-only, no balance logic touched. Prior: V33: Team Leave Bank STATUS badge now reflects BOTH medLeft and casLeft (worst state across the two buckets, names the bucket; casual Low line is <=1, medical <=3) -- display-only, see leaveBankStatus(). Prior: V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
+const APP_VERSION = '2026-10-31.1'; // V36: clients/budgetTemplates/typologies clobber fix -- the three shared lists left saveData()'s wholesale squareDB payload (a tab whose load failed -- loadData()'s catch still marks it loaded -- kept its initial in-memory defaults and wrote them over the real lists, consistent with 2026-10-27: clients reset to the 5 demo names, templates to [] and typologies to defaults in one write). clients/typologies now persist via arrayUnion/arrayRemove of a single name (a stale tab physically cannot drop or reset the rest); templates via a targeted .update on explicit Save; the project modal and Manage Templates re-read the server copy on open; "add client" is case-insensitive and reuses the existing spelling (sugam -> SUGAM); backup-restore persists the lists explicitly. Prior: V35.1: WFH month-limit fix -- requestWfh() now blocks a NEW request once the target calendar month already has an APPROVED WFH day for that person (multiple PENDING requests in the same month remain allowed as long as none is approved yet). Shares the exact same month-matching logic with the approval-time check via a new wfhApprovedInMonth() helper -- both are pure string-month comparisons against every wfhRequests doc, with NO reference to today's date, so a PAST approved day in the month blocks a new request/approval exactly the same as a future one (confirmed already correct on the approval side; this fix only adds the missing request-side check). Prior: V35: WFH Request/Approval Workflow, Half 1 -- request/approval/tracking only. Own collection (wfhRequests), own page, wfhEligible flag on user docs. Enforces eligibility + >=1-day advance at request time, 1-per-calendar-month + max-2-per-date (FCFS by approval order) at approval time. WFH never writes to leaveRequests or medLeft/casLeft -- zero leave-bank impact. Zero-work tracking is read-only, cross-referenced against timeLogs for display, never auto-penalizing. Does NOT touch runAttendanceAutoDeduction() or any leave-deduction/entitlement code -- teaching the engine to skip an approved WFH day is a separate, later build. Prior: V34: Team Leave Bank and the personal balance card now read each person's medEntitlement/casEntitlement (fallback 12 / 5) for the "/ X" denominators, "used of X" and bar maths, so pro-rated joiners (Taskiya 9 / 3.75) display correctly -- display-only, no balance logic touched. Prior: V33: Team Leave Bank STATUS badge now reflects BOTH medLeft and casLeft (worst state across the two buckets, names the bucket; casual Low line is <=1, medical <=3) -- display-only, see leaveBankStatus(). Prior: V32: Personal Growth Goals -- a PRIVATE, self-owned skill-growth checklist. No admin/founder view exists anywhere (not on this page, not on Dashboard, not in Studio Health) -- structurally, not by policy: goals live at users/{currentUser.id}/growthGoals/{goalId}, a subcollection under the person's OWN user doc, and every read/write function hardcodes currentUser.id as the only path segment -- none of them accept a userId/targetUser parameter at all, so there is no argument, admin or not, that could point at someone else's goals. Self-declared, no score/rating/manager-confirmation, no gamification (no streaks/%/nudges/"haven't updated" warnings) -- ticking a goal just stamps achievedAt and moves it to "built," unticking clears it back to "want to learn," reversible, silent, no other feedback. Curated 14-skill starter list plus free-text "add your own." New low-key "Personal" nav section, own page (page-mygrowth), with a persistent "This is private to you" line visible on every view. See FINDINGS-2026-08-10.md.
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -2272,6 +2272,156 @@ async function saveHolidaysGranular() {
   } catch(e) {
     console.error('❌ Save holidays failed:', e);
     alert('Could not save the holiday change — check your connection and try again.');
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// V36 (clients / budgetTemplates / typologies clobber fix, 2026-10-31).
+// These three shared lists used to ride in saveData()'s wholesale squareDB
+// payload, rewritten in full by EVERY open tab on its periodic save. And
+// loadData()'s catch sets dataLoaded = true even when the load FAILED
+// ("Allow saves even if load fails"), so a tab whose first server read
+// failed keeps its INITIAL in-memory defaults and writes them over the real
+// lists on its next save. That is the code path consistent with the
+// 2026-10-27 reset -- `clients` to the 5 demo names, `budgetTemplates` to []
+// and `typologies` to the built-in defaults in ONE write (visible in the
+// dailyBackup_* docs). The specific tab was not identified; the path is real
+// either way. Same last-write-wins hazard V25 already removed for holidays.
+//
+// Now none of the three is in saveData()'s payload. Writes are targeted:
+//   - clients / typologies: arrayUnion / arrayRemove of ONE name, so a stale
+//     or half-loaded tab physically cannot drop or reset the rest of the
+//     list -- the write only ever mentions the single name being changed.
+//   - budgetTemplates: edited as a unit in the Manage Templates modal, so it
+//     is a targeted .update({ budgetTemplates }) on explicit Save only (the
+//     modal re-reads the server copy first, so Save never starts from a
+//     stale draft).
+// "Add client" is case-insensitive and reuses the existing spelling, so
+// SUGAM / sugam can never both exist.
+// ═══════════════════════════════════════════════════════
+function normListName(s) { return (s || '').trim().toLowerCase(); }
+
+// Existing canonical spelling of `name` in `list` (case- and surrounding-
+// whitespace-insensitive), or null.
+function findNameCaseInsensitive(list, name) {
+  const k = normListName(name);
+  if (!k) return null;
+  const hit = list.find((x) => normListName(x) === k);
+  return hit === undefined ? null : hit;
+}
+
+// Alphabetical copy for display -- arrayUnion appends, so storage order is
+// not guaranteed sorted; every render sorts instead of trusting storage.
+function sortedClients() { return [...clients].sort(); }
+
+// Re-reads the SERVER copy of the three shared lists and replaces the
+// in-memory arrays -- only with a value the server actually returned as an
+// array, never with undefined/missing, so a failed or empty read can never
+// blank what this tab already has.
+async function refreshSharedListsFromServer() {
+  try {
+    const snap = await db.collection('companyData').doc('squareDB').get({ source: 'server' });
+    const data = snap.exists ? snap.data() : null;
+    if (!data) return false;
+    if (Array.isArray(data.clients)) clients = [...data.clients];
+    if (Array.isArray(data.typologies)) typologies = [...data.typologies];
+    if (Array.isArray(data.budgetTemplates)) budgetTemplates = data.budgetTemplates;
+    return true;
+  } catch (e) {
+    console.warn('Could not refresh shared lists from server:', e);
+    return false;
+  }
+}
+
+// Adds a client. Re-reads the server list first so the duplicate check runs
+// against the real list, not a stale in-memory copy; on a case-insensitive
+// match it writes NOTHING and returns the existing spelling.
+async function addClientGranular(rawName) {
+  const trimmed = (rawName || '').trim();
+  if (!trimmed) return { ok: false, name: null, created: false };
+  await refreshSharedListsFromServer();
+  const existing = findNameCaseInsensitive(clients, trimmed);
+  if (existing !== null) return { ok: true, name: existing, created: false };
+  if (staleVersionLockout) return { ok: false, name: null, created: false };
+  try {
+    await db.collection('companyData').doc('squareDB').update({
+      clients: firebase.firestore.FieldValue.arrayUnion(trimmed),
+    });
+    clients.push(trimmed);
+    return { ok: true, name: trimmed, created: true };
+  } catch (e) {
+    console.error('❌ Add client failed:', e);
+    alert('Could not save the new client — check your connection and try again.');
+    return { ok: false, name: null, created: false };
+  }
+}
+
+async function removeClientGranular(name) {
+  if (staleVersionLockout) return { ok: false };
+  try {
+    await db.collection('companyData').doc('squareDB').update({
+      clients: firebase.firestore.FieldValue.arrayRemove(name),
+    });
+    clients = clients.filter((c) => c !== name);
+    return { ok: true };
+  } catch (e) {
+    console.error('❌ Remove client failed:', e);
+    alert('Could not remove the client — check your connection and try again.');
+    return { ok: false };
+  }
+}
+
+async function addTypologyGranular(name) {
+  if (staleVersionLockout) return { ok: false };
+  try {
+    await db.collection('companyData').doc('squareDB').update({
+      typologies: firebase.firestore.FieldValue.arrayUnion(name),
+    });
+    typologies.push(name);
+    return { ok: true };
+  } catch (e) {
+    console.error('❌ Add typology failed:', e);
+    alert('Could not save the new typology — check your connection and try again.');
+    return { ok: false };
+  }
+}
+
+async function removeTypologyGranular(name) {
+  if (staleVersionLockout) return { ok: false };
+  try {
+    await db.collection('companyData').doc('squareDB').update({
+      typologies: firebase.firestore.FieldValue.arrayRemove(name),
+    });
+    typologies = typologies.filter((t) => t !== name);
+    return { ok: true };
+  } catch (e) {
+    console.error('❌ Remove typology failed:', e);
+    alert('Could not remove the typology — check your connection and try again.');
+    return { ok: false };
+  }
+}
+
+async function saveBudgetTemplatesGranular() {
+  if (staleVersionLockout) return { ok: false };
+  try {
+    await db.collection('companyData').doc('squareDB').update({ budgetTemplates });
+    return { ok: true };
+  } catch (e) {
+    console.error('❌ Save budget templates failed:', e);
+    alert('Could not save the templates — check your connection and try again.');
+    return { ok: false };
+  }
+}
+
+// Backup-restore only: a deliberate, user-confirmed REPLACE of whole lists
+// ("This will REPLACE all current data"). Not used by any routine edit.
+async function saveSharedListsReplace() {
+  if (staleVersionLockout) return;
+  try {
+    await db.collection('companyData').doc('squareDB').update({ clients, typologies, budgetTemplates });
+  } catch (e) {
+    console.error('❌ Restore shared lists failed:', e);
+    alert('Could not save the restored client/typology/template lists — check your connection and try again.');
   }
 }
 
@@ -3645,8 +3795,16 @@ async function saveData() {
       // reference data, mutated only through the canManageHolidays()-gated UI, so they
       // are now written granularly via saveHolidaysGranular() -- exactly the carve-out
       // already made for leaveRequests (V14.2.6) and casLeft/medLeft (V14.2.40c).
+      // V36: `clients`, `typologies` and `budgetTemplates` removed from this
+      // payload for the same reason -- a tab whose load failed (loadData()'s
+      // catch still sets dataLoaded = true) writes its initial in-memory
+      // defaults over the real lists on its next periodic save (consistent
+      // with the 2026-10-27 wipe). They persist only through their own
+      // targeted writers (addClientGranular() etc.).
+      // NOTE: `changeRequests` still rides this payload with the same
+      // exposure (initial value []) -- deliberately out of V36's scope.
       const dataToSave = {
-        clients, typologies, changeRequests, budgetTemplates,
+        changeRequests,
         timestamp: saveTimestamp,
         instanceId: instanceId,
         savedBy: currentUser?.name || 'Unknown',
@@ -9172,12 +9330,17 @@ async function handlePhaseStatusUndo(projectId, phase, action) {
   renderProjectsBudget();
 }
 
-function openProjectModal(projId){
+async function openProjectModal(projId){
+  // V36: re-read the server copy of the shared lists first, so the client
+  // dropdown and the Distribute template select reflect what is actually
+  // stored, never a stale/half-loaded in-memory copy. Falls back silently to
+  // the in-memory lists if the read fails.
+  await refreshSharedListsFromServer();
   const proj=projId?projectsData.find(p=>p.id===projId):null;
   document.getElementById('projModalTitle').textContent=projId?'Edit Project':'New Project';
   document.getElementById('pName').value=proj?.name||'';
   const clientSel=document.getElementById('pClientSelect');
-  clientSel.innerHTML='<option value="">Select client...</option>'+clients.map(c=>`<option value="${c}">${c}</option>`).join('')+'<option value="__NEW__">+ Add New Client</option>';
+  clientSel.innerHTML='<option value="">Select client...</option>'+sortedClients().map(c=>`<option value="${c}">${c}</option>`).join('')+'<option value="__NEW__">+ Add New Client</option>';
   if(proj?.client) clientSel.value=proj.client;
   document.getElementById('pNewClientDiv').style.display='none'; document.getElementById('pNewClient').value='';
   document.getElementById('pStart').value=proj?.startDate||fmt(new Date()); document.getElementById('pEnd').value=proj?.endDate||'';
@@ -9204,9 +9367,14 @@ document.getElementById('saveProjBtn').addEventListener('click', async function(
   const name=document.getElementById('pName').value.trim();
   let client=document.getElementById('pClientSelect').value;
   if(client==='__NEW__'){
-    client=document.getElementById('pNewClient').value.trim();
-    if(!client){ alert('Enter the new client name'); return; }
-    if(!clients.includes(client)){ clients.push(client); clients.sort(); }
+    const typedClient=document.getElementById('pNewClient').value.trim();
+    if(!typedClient){ alert('Enter the new client name'); return; }
+    // V36: case-insensitive against the SERVER list; any case of an existing
+    // client reuses its existing spelling (typing "sugam" selects "SUGAM"),
+    // and a genuinely new name is persisted with arrayUnion, not a wholesale save.
+    const added=await addClientGranular(typedClient);
+    if(!added.ok){ return; }
+    client=added.name;
   }
   if(!name||!client){ alert('Project name and client are required'); return; }
   const phases={};
@@ -9302,8 +9470,11 @@ function renderBudgetTemplatesFields() {
   });
 }
 
-document.getElementById('pManageTemplatesLink').addEventListener('click', (e) => {
+document.getElementById('pManageTemplatesLink').addEventListener('click', async (e) => {
   e.preventDefault();
+  // V36: start the draft from the SERVER copy, so a Save can never write a
+  // stale in-memory templates array back over the stored one.
+  await refreshSharedListsFromServer();
   // Deep-copy into the draft -- edits here never touch the live
   // budgetTemplates array (or Firestore) until Save Templates commits them.
   budgetTemplatesDraft = budgetTemplates.map(t => ({ id: t.id, name: t.name, pcts: { ...t.pcts } }));
@@ -9317,7 +9488,7 @@ document.getElementById('addBudgetTemplateBtn').addEventListener('click', () => 
   renderBudgetTemplatesFields();
 });
 
-document.getElementById('saveBudgetTemplatesBtn').addEventListener('click', () => {
+document.getElementById('saveBudgetTemplatesBtn').addEventListener('click', async () => {
   // V17: enforce "must sum to 100%" here, at commit time -- Distribute
   // itself trusts whatever's in budgetTemplates, so a bad template can
   // only ever get there through this explicit, validated save.
@@ -9327,9 +9498,9 @@ document.getElementById('saveBudgetTemplatesBtn').addEventListener('click', () =
     if (sum !== 100) { alert(`"${t.name}" sums to ${sum}%, not 100%. Fix it before saving.`); return; }
   }
   budgetTemplates = budgetTemplatesDraft.map(t => ({ id: t.id, name: t.name.trim(), pcts: { ...t.pcts } }));
-  // Same persistence path as holidays -- mutate the in-memory array, let
-  // the existing autoSave()->saveData() cycle write companyData/squareDB.
-  autoSave();
+  // V36: persisted by its own targeted writer, not the wholesale
+  // saveData() payload (see saveBudgetTemplatesGranular()).
+  await saveBudgetTemplatesGranular();
   populateDistributeTemplateSelect();
   closeModal('budgetTemplatesModal');
 });
@@ -10322,19 +10493,21 @@ function renderManage(){
     item.appendChild(btn); ul.appendChild(item);
   });
   const cl=document.getElementById('clientsList'); cl.innerHTML='';
-  clients.forEach((c,i)=>{
+  sortedClients().forEach((c)=>{
     const item=document.createElement('div'); item.className='list-item';
     const span=document.createElement('span'); span.textContent=c; span.style.fontSize='13px';
     const btn=document.createElement('button'); btn.className='btn btn-danger btn-sm'; btn.textContent='×';
-    btn.onclick=()=>{ const inUse=projectsData.some(p=>p.client===c); if(inUse){ alert('Cannot delete – client is used in projects'); return; } clients.splice(i,1); autoSave(); renderManage(); };
+    // V36: in-use check is case-insensitive too, and removal is a targeted
+    // arrayRemove of THIS name (not a wholesale list save).
+    btn.onclick=async ()=>{ const inUse=projectsData.some(p=>normListName(p.client)===normListName(c)); if(inUse){ alert('Cannot delete – client is used in projects'); return; } await removeClientGranular(c); renderManage(); };
     item.appendChild(span); item.appendChild(btn); cl.appendChild(item);
   });
   const tl=document.getElementById('typologyList'); tl.innerHTML='';
-  typologies.forEach((t,i)=>{
+  typologies.forEach((t)=>{
     const item=document.createElement('div'); item.className='list-item';
     const span=document.createElement('span'); span.textContent=t; span.style.fontSize='13px';
     const btn=document.createElement('button'); btn.className='btn btn-danger btn-sm'; btn.textContent='×';
-    btn.onclick=()=>{ typologies.splice(i,1); autoSave(); renderManage(); };
+    btn.onclick=async ()=>{ await removeTypologyGranular(t); renderManage(); };
     item.appendChild(span); item.appendChild(btn); tl.appendChild(item);
   });
   
@@ -10357,20 +10530,24 @@ document.getElementById('addUserBtn').addEventListener('click', async ()=>{
   } catch(e) { console.error('Failed to add user:', e); alert('Save failed — please try again'); }
   renderManage();
 });
-document.getElementById('addClientBtn').addEventListener('click',()=>{
+document.getElementById('addClientBtn').addEventListener('click',async ()=>{
   const v=document.getElementById('newClient').value.trim();
   if(!v) return; // Silently ignore empty input
-  if(clients.includes(v)){ alert('Client already exists'); return; }
-  clients.push(v); clients.sort(); document.getElementById('newClient').value='';
-  skipNextConflictCheck = true; // V12.1: Skip conflict for adding new client
-  autoSave(); renderManage();
+  // V36: case-insensitive against the SERVER list; a targeted arrayUnion
+  // write, never a wholesale list save.
+  const added=await addClientGranular(v);
+  if(!added.ok) return;
+  if(!added.created){ alert(`Client already exists as "${added.name}"`); return; }
+  document.getElementById('newClient').value='';
+  renderManage();
 });
-document.getElementById('addTypologyBtn').addEventListener('click',()=>{
+document.getElementById('addTypologyBtn').addEventListener('click',async ()=>{
   const v=document.getElementById('newTypology').value.trim();
   if(!v||typologies.includes(v)){ alert(v?'Already exists':'Enter a name'); return; }
-  typologies.push(v); document.getElementById('newTypology').value='';
-  skipNextConflictCheck = true; // V12.1: Skip conflict for adding new typology
-  autoSave(); renderManage();
+  const added=await addTypologyGranular(v);
+  if(!added.ok) return;
+  document.getElementById('newTypology').value='';
+  renderManage();
 });
 
 // ═══════════════════════════════════════════════════════
@@ -10443,7 +10620,8 @@ document.getElementById('importFileInput').addEventListener('change', (e) => {
 
       await saveData();
       await saveHolidaysGranular(); // V25: holidays left saveData()'s payload -- persist it explicitly on restore too
-      
+      await saveSharedListsReplace(); // V36: clients/typologies/budgetTemplates left saveData()'s payload too -- a restore must persist them explicitly
+
       alert(`✅ Data restored successfully!\n\nBackup from: ${new Date(backup.exportDate).toLocaleString()}\n\nPlease refresh the page.`);
       
       location.reload();

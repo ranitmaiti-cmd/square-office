@@ -113,10 +113,17 @@ function extractBlockFrom(source, anchor) {
 
   check('dataToSave literal has NO `holidays` key', !/\bholidays\b/.test(dtsBody));
 
-  for (const key of ['clients', 'typologies', 'changeRequests', 'budgetTemplates',
+  // V36 moved `clients`, `typologies` and `budgetTemplates` out of this payload
+  // too (same last-write-wins hazard as holidays) -- they are no longer
+  // "still intact" here by design; see fix-clients-templates-clobber.test.js
+  // for the positive proof that they persist through their own writers.
+  for (const key of ['changeRequests',
     'timestamp', 'instanceId', 'savedBy', 'projectCount', 'timeLogCount',
     'planEntryCount', 'leaveRequestCount']) {
     check(`dataToSave literal still has \`${key}\``, new RegExp(`\\b${key}\\b`).test(dtsBody));
+  }
+  for (const key of ['clients', 'typologies', 'budgetTemplates']) {
+    check(`dataToSave literal NO LONGER has \`${key}\` (V36 carve-out)`, !new RegExp(`\\b${key}\\b`).test(dtsBody));
   }
 
   check('saveData() still writes squareDB via .update() (not .set())',

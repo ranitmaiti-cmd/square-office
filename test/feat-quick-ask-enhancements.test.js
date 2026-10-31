@@ -189,9 +189,20 @@ function extractDivBlock(html, startMarker) {
     }
     return elements[id];
   }
+  // Pin "now" to the fixture's own reference day (the comments in this file
+  // reason from 2026-09-23). Without this, the extracted app code reads the
+  // REAL clock, so the hard-coded 2026 holiday list silently rots as the
+  // calendar moves on (next holiday stops being Gandhi Birthday, "this month"
+  // stops being September, etc.) -- a time-bomb, not a regression.
+  const PINNED_NOW = '2026-09-23T10:00:00';
+  const RealDate = Date;
+  class PinnedDate extends RealDate {
+    constructor(...a) { if (a.length === 0) { super(PINNED_NOW); } else { super(...a); } }
+    static now() { return new RealDate(PINNED_NOW).getTime(); }
+  }
   function makeSandbox(elements, hrInfoPoliciesCacheValue, todayForFmt) {
     return {
-      console, Date,
+      console, Date: PinnedDate,
       document: { getElementById: (id) => el(elements, id) },
       currentUser: { id: 'u1', name: 'Alice' },
       users: [{ id: 'u1', name: 'Alice', medLeft: 4, casLeft: 3.5 }, { id: 'u2', name: 'Bob', medLeft: 99, casLeft: 77 }],
