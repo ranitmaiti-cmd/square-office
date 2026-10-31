@@ -148,13 +148,13 @@ console.log('=== 1. Eligibility gate (request time) ===');
 {
   const notEligible = { id: 'u1', name: 'Not Eligible', wfhEligible: false };
   const { sandbox } = makeSandbox({ currentUser: notEligible, nowStr: TODAY });
-  const result = await run(sandbox, `requestWfh('${TOMORROW}')`);
+  const result = await run(sandbox, `requestWfh('${TOMORROW}', 'reason')`);
   check('non-eligible user is refused', result.ok === false && /not eligible/i.test(result.reason || ''));
   check('nothing was written for a refused request', run(sandbox, 'wfhRequests.length') === 0);
 
   const eligible = { id: 'u2', name: 'Eligible User', wfhEligible: true };
   const { sandbox: sb2 } = makeSandbox({ currentUser: eligible, nowStr: TODAY });
-  const ok = await run(sb2, `requestWfh('${TOMORROW}')`);
+  const ok = await run(sb2, `requestWfh('${TOMORROW}', 'reason')`);
   check('eligible user with a future date succeeds', ok.ok === true && ok.doc.status === 'pending');
 }
 
@@ -164,19 +164,19 @@ console.log('\n=== 2. >=1-day advance notice (request time) ===');
   const u = { id: 'u3', name: 'Advance Test', wfhEligible: true };
 
   const same = makeSandbox({ currentUser: u, nowStr: TODAY });
-  const sameResult = await run(same.sandbox, `requestWfh('2026-09-24')`);
+  const sameResult = await run(same.sandbox, `requestWfh('2026-09-24', 'reason')`);
   check('same-day request is refused', sameResult.ok === false && /advance/i.test(sameResult.reason || ''));
 
   const past = makeSandbox({ currentUser: u, nowStr: TODAY });
-  const pastResult = await run(past.sandbox, `requestWfh('2026-09-01')`);
+  const pastResult = await run(past.sandbox, `requestWfh('2026-09-01', 'reason')`);
   check('past-date request is refused', pastResult.ok === false);
 
   const future = makeSandbox({ currentUser: u, nowStr: TODAY });
-  const futureResult = await run(future.sandbox, `requestWfh('${TOMORROW}')`);
+  const futureResult = await run(future.sandbox, `requestWfh('${TOMORROW}', 'reason')`);
   check('next-day request (exactly 1 day advance) succeeds', futureResult.ok === true);
 
   const noDate = makeSandbox({ currentUser: u, nowStr: TODAY });
-  const noDateResult = await run(noDate.sandbox, `requestWfh('')`);
+  const noDateResult = await run(noDate.sandbox, `requestWfh('', 'reason')`);
   check('empty date is refused, not silently accepted', noDateResult.ok === false);
 }
 
@@ -191,7 +191,7 @@ console.log('\n=== 2b. V35.1: month-limit enforced at REQUEST time too (middle g
     { id: 'e1', userId: 'u13', userName: 'Month Block Test', date: '2026-09-28', status: 'approved', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
   ];
   const { sandbox: sb1 } = makeSandbox({ currentUser: u, wfhRequests: withApprovedFuture, nowStr: TODAY });
-  const r1 = await run(sb1, `requestWfh('${TOMORROW}')`);
+  const r1 = await run(sb1, `requestWfh('${TOMORROW}', 'reason')`);
   check('new request refused when the month already has an approved day (future)', r1.ok === false && /already have an approved WFH/i.test(r1.reason || ''));
   check('the refused request writes nothing new to wfhRequests', run(sb1, 'wfhRequests.length') === 1);
 
@@ -202,7 +202,7 @@ console.log('\n=== 2b. V35.1: month-limit enforced at REQUEST time too (middle g
     { id: 'e2', userId: 'u13', userName: 'Month Block Test', date: '2026-09-24', status: 'approved', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
   ];
   const { sandbox: sb2 } = makeSandbox({ currentUser: u, wfhRequests: withApprovedPast, nowStr: TODAY });
-  const r2 = await run(sb2, `requestWfh('${TOMORROW}')`);
+  const r2 = await run(sb2, `requestWfh('${TOMORROW}', 'reason')`);
   check("a PAST approved day earlier in the same month still blocks a new request (Ranit's edge case)", r2.ok === false && /already have an approved WFH/i.test(r2.reason || ''));
 
   // Only PENDING requests exist so far this month -- a new request must
@@ -211,7 +211,7 @@ console.log('\n=== 2b. V35.1: month-limit enforced at REQUEST time too (middle g
     { id: 'e3', userId: 'u13', userName: 'Month Block Test', date: '2026-09-26', status: 'pending', requestedAt: '', approvedBy: null, approvedAt: null },
   ];
   const { sandbox: sb3 } = makeSandbox({ currentUser: u, wfhRequests: withOnlyPending, nowStr: TODAY });
-  const r3 = await run(sb3, `requestWfh('${TOMORROW}')`);
+  const r3 = await run(sb3, `requestWfh('${TOMORROW}', 'reason')`);
   check('a second request is ALLOWED while the existing one for the month is still only pending (not yet approved)', r3.ok === true);
   check('both pending requests now coexist for the month', run(sb3, 'wfhRequests.filter(w=>w.status===\'pending\').length') === 2);
 
@@ -220,7 +220,7 @@ console.log('\n=== 2b. V35.1: month-limit enforced at REQUEST time too (middle g
     { id: 'e4', userId: 'u13', userName: 'Month Block Test', date: '2026-09-05', status: 'rejected', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
   ];
   const { sandbox: sb4 } = makeSandbox({ currentUser: u, wfhRequests: withRejected, nowStr: TODAY });
-  const r4 = await run(sb4, `requestWfh('${TOMORROW}')`);
+  const r4 = await run(sb4, `requestWfh('${TOMORROW}', 'reason')`);
   check('a REJECTED request in the same month does not block a new request', r4.ok === true);
 
   // A different person's approved day in the same month must not block.
@@ -228,7 +228,7 @@ console.log('\n=== 2b. V35.1: month-limit enforced at REQUEST time too (middle g
     { id: 'e5', userId: 'someone-else', userName: 'Someone Else', date: '2026-09-28', status: 'approved', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
   ];
   const { sandbox: sb5 } = makeSandbox({ currentUser: u, wfhRequests: withOthersApproved, nowStr: TODAY });
-  const r5 = await run(sb5, `requestWfh('${TOMORROW}')`);
+  const r5 = await run(sb5, `requestWfh('${TOMORROW}', 'reason')`);
   check("a DIFFERENT person's approved day in the same month does not block this person's request", r5.ok === true);
 
   // An approved day in a DIFFERENT month must not block.
@@ -236,7 +236,7 @@ console.log('\n=== 2b. V35.1: month-limit enforced at REQUEST time too (middle g
     { id: 'e6', userId: 'u13', userName: 'Month Block Test', date: '2026-08-15', status: 'approved', requestedAt: '', approvedBy: 'Admin User', approvedAt: '' },
   ];
   const { sandbox: sb6 } = makeSandbox({ currentUser: u, wfhRequests: withOtherMonth, nowStr: TODAY });
-  const r6 = await run(sb6, `requestWfh('${TOMORROW}')`);
+  const r6 = await run(sb6, `requestWfh('${TOMORROW}', 'reason')`);
   check('an approved day in a DIFFERENT calendar month does not block this request', r6.ok === true);
 }
 
@@ -336,7 +336,7 @@ console.log('\n=== 6. WFH never touches the leave bank ===');
   const admin = { id: 'admin', name: 'Admin User', isAdmin: true, medLeft: 12, casLeft: 5 };
   const eligible = { id: 'u10', name: 'Bank Test', wfhEligible: true, medLeft: 12, casLeft: 5 };
   const { sandbox, dbCalls } = makeSandbox({ currentUser: eligible, users: [admin, eligible], nowStr: TODAY });
-  await run(sandbox, `requestWfh('${TOMORROW}')`);
+  await run(sandbox, `requestWfh('${TOMORROW}', 'reason')`);
   sandbox.currentUser = admin;
   const wid = run(sandbox, 'wfhRequests[0].id');
   await run(sandbox, `approveWfhRequest('${wid}')`);

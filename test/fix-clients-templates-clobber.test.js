@@ -21,7 +21,7 @@
 //  - typologies and templates are protected from the same reset
 //  - every consumer is wired to the new writers (no leftover wholesale path)
 //  - isolation: pay-engine / leave / WFH code is byte-for-byte unchanged, and
-//    saveData() differs from main ONLY in the dataToSave literal
+//    saveData()'s dataToSave literal has exactly the expected keys (durable check)
 //  - the restore data source (DEFAULT_BUDGET_TEMPLATES) is exactly the two
 //    built-in templates Ranit confirmed
 //
@@ -304,24 +304,15 @@ console.log('\n=== 5. Every consumer is wired to the new writers; no leftover wh
 console.log('\n=== 6. Isolation vs main ===');
 {
   for (const name of ['loadData', 'runAttendanceAutoDeduction', 'saveUser', 'saveLeaveRequest', 'saveHolidaysGranular', 'leaveBankStatus',
-    'renderApprovals', 'renderLeaves', 'renderTeamLeaveBank', 'requestWfh', 'approveWfhRequest', 'saveDailyFirebaseBackup']) {
+    'renderApprovals', 'renderLeaves', 'renderTeamLeaveBank', 'approveWfhRequest', 'saveDailyFirebaseBackup']) {
     check(`${name}() is byte-for-byte unchanged from main`, extractFunction(fullScript, name) === extractFunction(mainScript, name));
   }
-  // saveData() must differ from main ONLY in the dataToSave literal (+ its explanatory comment).
-  const strip = (fn, isCur) => {
-    let s = fn;
-    if (isCur) s = s.replace(/\n      \/\/ V36:[\s\S]*?(?=\n      const dataToSave = \{)/, '');
-    return s.replace(/const dataToSave = \{[\s\S]*?\n      \};/, 'const dataToSave = {/*P*/};');
-  };
-  check('saveData() differs from main ONLY in the dataToSave literal and its comment', strip(extractFunction(fullScript, 'saveData'), true) === strip(extractFunction(mainScript, 'saveData'), false));
+  // Durable (not diff-vs-main, which goes false the moment V36 merges): the
+  // dataToSave literal carries exactly the expected keys and none of the three lists.
   const lit = extractFunction(fullScript, 'saveData').match(/const dataToSave = \{([\s\S]*?)\};/)[1];
-  const mainLit = extractFunction(mainScript, 'saveData').match(/const dataToSave = \{([\s\S]*?)\};/)[1];
-  check('the only keys removed from the payload vs main are clients, typologies, budgetTemplates', (() => {
-    const keys = (l) => l.split(/[\n,]/).map((x) => x.trim().split(':')[0].trim()).filter((x) => /^[A-Za-z]\w*$/.test(x));
-    const removed = keys(mainLit).filter((k) => !keys(lit).includes(k)).sort().join();
-    const added = keys(lit).filter((k) => !keys(mainLit).includes(k)).join();
-    return removed === 'budgetTemplates,clients,typologies' && added === '';
-  })());
+  const litKeys = lit.split(/[\r\n,]/).map((x) => x.trim().split(':')[0].trim()).filter((x) => /^[A-Za-z]\w*$/.test(x)).sort().join();
+  check('dataToSave carries exactly changeRequests + metadata keys (no clients/typologies/budgetTemplates)',
+    litKeys === ['changeRequests', 'instanceId', 'leaveRequestCount', 'planEntryCount', 'projectCount', 'savedBy', 'timeLogCount', 'timestamp'].sort().join());
   check('V36 added no write to any collection other than companyData/squareDB', ['addClientGranular', 'removeClientGranular', 'addTypologyGranular', 'removeTypologyGranular', 'saveBudgetTemplatesGranular', 'saveSharedListsReplace', 'refreshSharedListsFromServer']
     .every((n) => { const f = extractFunction(fullScript, n); const cols = [...f.matchAll(/db\.collection\('([^']+)'\)\.doc\('([^']+)'\)/g)].map((m) => m[1] + '/' + m[2]); return cols.every((c) => c === 'companyData/squareDB'); }));
   check('V36 touched no leave-bank / WFH state (no leaveRequests, medLeft, casLeft, wfhRequests in any new function)',
