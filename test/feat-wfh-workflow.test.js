@@ -383,26 +383,21 @@ for (const name of [
 }
 
 {
+  // WFH shipped to main (2026-09-25), so a "differs from main ONLY by the
+  // wfhEligible block" comparison would compare main against itself and --
+  // worse -- breaks the moment any LATER feature legitimately edits the same
+  // shared function (V36 changes the clients/typology lists inside
+  // renderManage()). Assert what this feature durably owns instead: the
+  // checkbox block is present in renderManage(), and new users default to
+  // wfhEligible:false.
   const cur = extractFunction(fullScript, 'renderManage');
-  const marker = '\n      <label style="display:flex;align-items:center;gap:4px;margin-right:10px;font-size:11px;color:#8A7E74;cursor:pointer;" title="Eligible to request WFH days">';
-  const idx = cur.indexOf(marker);
-  const endMarker = '</label>';
-  const endIdx = cur.indexOf(endMarker, idx) + endMarker.length;
-  assert.ok(idx > 0 && endIdx > idx, 'could not locate the wfhEligible checkbox block in renderManage()');
-  const stripped = cur.slice(0, idx) + cur.slice(endIdx);
-  // Normalize trailing-space-before-newline: the editing tool used for this
-  // build strips a pre-existing trailing space on the untouched salary-input
-  // line above the inserted block (whitespace-only, same class of
-  // normalization as this codebase's existing CRLF-vs-LF norm() helper).
-  const trimTrailingWs = (s) => s.replace(/[ \t]+\n/g, '\n');
-  check('renderManage() differs from main ONLY by the wfhEligible checkbox block', trimTrailingWs(stripped) === trimTrailingWs(extractFunction(mainFullScript, 'renderManage')));
+  check('renderManage() contains the wfhEligible checkbox block', cur.includes('title="Eligible to request WFH days"') && cur.includes('users[idx].wfhEligible=this.checked'));
+  check('the wfhEligible checkbox saves via the unmodified saveUser()', /users\[idx\]\.wfhEligible=this\.checked;await saveUser\(users\[idx\]\)/.test(cur));
 }
 
 {
   const cur = fullScript.match(/document\.getElementById\('addUserBtn'\)\.addEventListener\('click', async \(\)=>\{[\s\S]*?\n\}\);/)[0];
-  const mainBlock = mainFullScript.match(/document\.getElementById\('addUserBtn'\)\.addEventListener\('click', async \(\)=>\{[\s\S]*?\n\}\);/)[0];
-  const strippedCur = cur.replace(',wfhEligible:false', '');
-  check('addUserBtn handler differs from main ONLY by the wfhEligible:false default', strippedCur === mainBlock);
+  check('the addUserBtn handler defaults new users to wfhEligible:false', cur.includes(',wfhEligible:false}'));
 }
 
 console.log('\n=== 10. Full-script structural checks ===');
@@ -411,8 +406,7 @@ check('the nav router gained exactly one new line for the wfh page', /if\(page==
 check('a nav-item for data-page="wfh" exists and is not admin-only', /<div class="nav-item" data-page="wfh">/.test(src) && !/<div class="nav-item admin-only" data-page="wfh"/.test(src));
 check('page-wfh markup exists', src.includes('id="page-wfh"'));
 const bumped = /const APP_VERSION = '(\d{4}-\d{2}-\d{2}\.\d+)'/.exec(fullScript)[1];
-const mainVer = /const APP_VERSION = '(\d{4}-\d{2}-\d{2}\.\d+)'/.exec(mainFullScript)[1];
-check(`APP_VERSION bumped (${mainVer} -> ${bumped})`, bumped !== mainVer);
+check(`APP_VERSION is well-formed (${bumped})`, !!bumped);
 check('version.json matches APP_VERSION', JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'version.json'), 'utf8')).version === bumped);
 check('inline <script> still parses', (() => { try { new Function(fullScript); return true; } catch (e) { console.log('    parse error:', e.message); return false; } })());
 

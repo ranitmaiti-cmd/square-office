@@ -247,11 +247,13 @@ console.log('\n=== Manage Templates: editing the draft never mutates the LIVE bu
 {
   const alerts = [];
   let autoSaveCalled = false;
+  let granularSaveCalled = false;
   const liveTemplatesBefore = JSON.parse(JSON.stringify(vm.runInContext('DEFAULT_BUDGET_TEMPLATES', buildSandbox())));
   const sandbox = {
     console, Object, Math,
     alert: (msg) => alerts.push(msg),
     autoSave: () => { autoSaveCalled = true; },
+    saveBudgetTemplatesGranular: async () => { granularSaveCalled = true; return { ok: true }; }, // V36: the real persistence path
     document: { getElementById: () => ({ innerHTML: '' }), querySelectorAll: () => [] },
   };
   vm.createContext(sandbox);
@@ -270,18 +272,21 @@ console.log('\n=== Manage Templates: editing the draft never mutates the LIVE bu
   await vm.runInContext('__handler_saveBudgetTemplatesBtn', sandbox)();
   check('an invalid (not-100%) template blocks the save with an alert', alerts.some(a => /100%/.test(a)));
   check('autoSave() was NOT called when validation fails', autoSaveCalled === false);
+  check('the targeted templates writer was NOT called when validation fails', granularSaveCalled === false);
   const liveAfterBlockedSave = vm.runInContext('budgetTemplates', sandbox);
   check('the live budgetTemplates is STILL unchanged after a blocked save', JSON.stringify(liveAfterBlockedSave) === JSON.stringify(liveTemplatesBefore));
 }
 
-console.log('\n=== Manage Templates: a VALID draft (sums to 100%) commits to the live array and calls autoSave() ===');
+console.log('\n=== Manage Templates: a VALID draft (sums to 100%) commits to the live array and via the targeted writer (V36: NOT autoSave) ===');
 {
   const alerts = [];
   let autoSaveCalled = false;
+  let granularSaveCalled = false;
   const sandbox = {
     console, Object, Math,
     alert: (msg) => alerts.push(msg),
     autoSave: () => { autoSaveCalled = true; },
+    saveBudgetTemplatesGranular: async () => { granularSaveCalled = true; return { ok: true }; },
     closeModal: () => {},
     document: { getElementById: () => ({ innerHTML: '' }) },
   };
@@ -294,7 +299,8 @@ console.log('\n=== Manage Templates: a VALID draft (sums to 100%) commits to the
   vm.runInContext(saveTemplatesBtnHandlerSrc, sandbox);
   await vm.runInContext('__handler_saveBudgetTemplatesBtn', sandbox)();
   check('no validation alert fired for a valid 100%-summing template', alerts.length === 0);
-  check('autoSave() WAS called -- same persistence path as holidays', autoSaveCalled === true);
+  check('the targeted saveBudgetTemplatesGranular() WAS called (V36: templates left the wholesale saveData() payload)', granularSaveCalled === true);
+  check('autoSave() was NOT called -- templates no longer ride the wholesale squareDB save', autoSaveCalled === false);
   const committed = vm.runInContext('budgetTemplates', sandbox);
   check('the live budgetTemplates now holds the committed template', committed.length === 1 && committed[0].name === 'My Template'); // trimmed
 }
