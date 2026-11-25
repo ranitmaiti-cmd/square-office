@@ -572,6 +572,7 @@ textarea.form-control{min-height:70px;resize:vertical;}
            the approved-WFH log. Never admin-only, since eligible non-admins
            use the same page for their own requests. -->
       <div class="nav-item" data-page="wfh"><span class="nav-icon">🏠</span>WFH</div>
+      <div class="nav-item" data-page="discrepancies"><span class="nav-icon">📝</span>Discrepancies</div>
       <div class="nav-item" data-page="teamleave"><span class="nav-icon">◫</span>Team Leave</div>
       <div class="nav-item" data-page="approvals"><span class="nav-icon">✓</span>Approvals<span class="nav-badge" id="approvalBadge" style="display:none;">0</span></div>
       <div class="nav-item admin-only" data-page="manage" style="display:none;"><span class="nav-icon">◈</span>Manage</div>
@@ -758,6 +759,45 @@ textarea.form-control{min-height:70px;resize:vertical;}
           <div id="wfhPendingList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;"></div>
           <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#5C4F42;">Approved WFH log</div>
           <div id="wfhApprovedList" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+      </div>
+      <!-- V38 (Discrepancy Log, Version A): log + approval workflow ONLY. Members
+           raise a structured discrepancy (missed time / extra time / correction /
+           other); HR approves or rejects it. Approving records the decision and
+           nothing else -- it never edits a timeLog, hours, leave or pay. Own
+           store (discrepancies), own page, open to everyone; admins additionally
+           see the pending queue and the resolved log. -->
+      <div class="page" id="page-discrepancies">
+        <div class="section-header">
+          <h2 class="page-title" style="margin:0;">📝 Discrepancy Log</h2>
+        </div>
+        <div style="font-size:12px;color:#8A7E74;margin-bottom:12px;">For anything not captured in OMS (missed log, extra time, corrections). HR reviews at month-end. Approval records the decision only &mdash; it does not change any time log or hours.</div>
+        <div style="background:#F7F4EF;padding:10px 12px;border-radius:8px;margin-bottom:16px;">
+          <div style="font-size:11px;font-weight:700;color:#5C4F42;margin-bottom:6px;">Raise a discrepancy</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+            <input type="date" class="form-control" id="discDateInput" style="max-width:170px;">
+            <select class="form-control" id="discTypeInput" style="max-width:170px;">
+              <option value="Missed log">Missed log</option>
+              <option value="Extra time">Extra time</option>
+              <option value="Correction">Correction</option>
+              <option value="Other">Other</option>
+            </select>
+            <select class="form-control" id="discProjectInput" style="max-width:240px;"><option value="N/A">N/A</option></select>
+            <input type="text" class="form-control" id="discHoursInput" maxlength="40" placeholder="Hours / duration" style="max-width:150px;">
+          </div>
+          <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
+            <textarea class="form-control" id="discDescInput" maxlength="1000" rows="2" placeholder="Description (required)" style="flex:1;min-width:240px;"></textarea>
+            <button type="button" class="btn btn-primary btn-sm" id="discRaiseBtn" disabled>Raise</button>
+          </div>
+          <div style="font-size:11px;color:#8A7E74;margin-top:6px;">Date and description are required.</div>
+        </div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#5C4F42;">My discrepancies</div>
+        <div id="discMyList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;"></div>
+        <div id="discAdminSection" style="display:none;">
+          <div style="font-weight:700;font-size:14px;margin:20px 0 8px;color:#5C4F42;">Pending discrepancies</div>
+          <div id="discPendingList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;"></div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#5C4F42;">Resolved log (approved &amp; rejected)</div>
+          <div id="discResolvedList" style="display:flex;flex-direction:column;gap:8px;"></div>
         </div>
       </div>
 
@@ -1597,7 +1637,7 @@ db.enablePersistence({ synchronizeTabs: true }).then(() => {
 // see checkForNewVersion(). Team leaves this tab open all day, so nothing
 // about a new deploy reaches an already-running tab unless something inside
 // it actively checks and acts.
-const APP_VERSION = '2026-10-31.3'; // V37.1: requester can cancel (withdraw) their own pending WFH request, on top of V37 (required WFH reason + cancel/revert of an approved day)
+const APP_VERSION = '2026-11-25.1'; // V38: Discrepancy Log (Version A) -- members raise missed/extra/correction items, HR approves/rejects; records the decision only, never touches timeLogs/leave/pay
 
 // V14.3.20: FIX 5 -- the dashboard auto-refresh (every 30s) and its render
 // calls were logging unconditionally, flooding the console and burying every
@@ -6742,6 +6782,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
     if(page==='teamleave')  { renderTeamLeave(); renderTeamLeaveBank(); }
     if(page==='approvals')  renderApprovals();
     if(page==='wfh')        renderWfh();
+    if(page==='discrepancies') renderDiscrepancies();
     if(page==='mygrowth')   renderMyGrowth();
     if(page==='manage')       renderManage();
     if(page==='hourstracker') renderHoursTracker();
@@ -9176,6 +9217,224 @@ document.getElementById('wfhRequestBtn')?.addEventListener('click', async () => 
   document.getElementById('wfhReasonInput').value = '';
   wfhUpdateRequestBtn();
   renderWfh();
+});
+
+// ═══════════════════════════════════════════════════════
+// V38 (Discrepancy Log, Version A, 2026-11-25): a documented-record workflow
+// that replaces the email-to-HR process for time not captured in OMS.
+// LOG + APPROVAL ONLY. Approving or rejecting writes the decision onto the
+// discrepancy doc and NOTHING else: it never creates or edits a timeLog,
+// hours, leave, attendance or pay data, and never calls the auto-deduction.
+// Own Firestore collection (discrepancies), own page, granular per-doc writes,
+// not part of saveData()'s payload and not loaded by loadData() (read fresh
+// from the server whenever the page opens, so a review never acts on a
+// stale-tab copy). The fixture proves the "writes nothing else" claim.
+// ═══════════════════════════════════════════════════════
+let discrepancies = [];
+const DISC_TYPES = ['Missed log', 'Extra time', 'Correction', 'Other'];
+
+async function saveDiscrepancyDoc(doc) {
+  try {
+    await db.collection('discrepancies').doc(doc.id).set(doc, { merge: true });
+    return { ok: true };
+  } catch (e) {
+    console.error('❌ Save discrepancy failed:', e);
+    alert('Could not save — check your connection and try again.');
+    return { ok: false, error: true };
+  }
+}
+
+// Replaces the in-memory list only on a successful server read; a failed read
+// leaves it as it was and returns false.
+async function refreshDiscrepanciesFromServer() {
+  try {
+    const snap = await db.collection('discrepancies').get({ source: 'server' });
+    const list = [];
+    snap.forEach((d) => list.push({ ...d.data(), id: d.id }));
+    discrepancies = list;
+    return true;
+  } catch (e) {
+    console.error('Could not load discrepancies from server:', e);
+    return false;
+  }
+}
+
+// One fresh server read of a single doc, used before every status transition so
+// a cancel / approve / reject never acts on a stale in-memory status.
+async function fetchDiscrepancyFresh(id) {
+  try {
+    const snap = await db.collection('discrepancies').doc(id).get({ source: 'server' });
+    return snap.exists ? { ...snap.data(), id: snap.id } : null;
+  } catch (e) {
+    console.error('Could not read discrepancy from server:', e);
+    return undefined;
+  }
+}
+
+async function raiseDiscrepancy({ date, type, project, hours, description }) {
+  if (!currentUser) return { ok: false, reason: 'Not signed in.' };
+  if (!date) return { ok: false, reason: 'Please choose the date of the discrepancy.' };
+  const desc = (description || '').trim();
+  if (!desc) return { ok: false, reason: 'Please describe the discrepancy.' };
+  if (!DISC_TYPES.includes(type)) return { ok: false, reason: 'Please choose a valid type.' };
+  const doc = {
+    id: genId(),
+    userId: currentUser.id,
+    userName: currentUser.name,
+    date,
+    type,
+    project: (project || '').trim() || 'N/A',
+    hours: (hours || '').trim(),
+    description: desc,
+    status: 'pending',
+    raisedAt: new Date().toISOString(),
+    reviewedBy: null,
+    reviewedAt: null,
+    reviewNote: '',
+  };
+  const result = await saveDiscrepancyDoc(doc);
+  if (result.ok) discrepancies.push(doc);
+  return { ok: result.ok, doc };
+}
+
+// Requester withdraws their OWN pending discrepancy. Status -> 'cancelled', doc
+// kept for audit. Frees nothing: a discrepancy holds no slot or balance.
+async function cancelDiscrepancy(id) {
+  if (!currentUser) return { ok: false, reason: 'Not signed in.' };
+  const fresh = await fetchDiscrepancyFresh(id);
+  if (fresh === undefined) return { ok: false, reason: 'Could not reach the server — try again.' };
+  if (!fresh) return { ok: false, reason: 'Discrepancy not found.' };
+  if (fresh.userId !== currentUser.id) return { ok: false, reason: 'You can only cancel your own discrepancy.' };
+  if (fresh.status !== 'pending') return { ok: false, reason: 'Only a pending discrepancy can be cancelled.' };
+  const patch = { status: 'cancelled', reviewedBy: null, reviewedAt: null };
+  const result = await saveDiscrepancyDoc({ ...fresh, ...patch });
+  if (result.ok) {
+    const mem = discrepancies.find((d) => d.id === id);
+    if (mem) Object.assign(mem, fresh, patch);
+  }
+  return result;
+}
+
+// HR/admin decision. Records status + who/when/note on the discrepancy doc ONLY.
+async function reviewDiscrepancy(id, decision, note) {
+  if (!currentUser?.isAdmin) return { ok: false, reason: 'Only HR/admin can review discrepancies.' };
+  if (decision !== 'approved' && decision !== 'rejected') return { ok: false, reason: 'Invalid decision.' };
+  const fresh = await fetchDiscrepancyFresh(id);
+  if (fresh === undefined) return { ok: false, reason: 'Could not reach the server — try again.' };
+  if (!fresh) return { ok: false, reason: 'Discrepancy not found.' };
+  if (fresh.status !== 'pending') return { ok: false, reason: 'This discrepancy is no longer pending.' };
+  const patch = { status: decision, reviewedBy: currentUser.name, reviewedAt: new Date().toISOString(), reviewNote: (note || '').trim() };
+  const result = await saveDiscrepancyDoc({ ...fresh, ...patch });
+  if (result.ok) {
+    const mem = discrepancies.find((d) => d.id === id);
+    if (mem) Object.assign(mem, fresh, patch);
+  }
+  return result;
+}
+
+// Free text lands in innerHTML, so every user-supplied field is escaped.
+function discEsc(t) {
+  return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function discCard(d, { showReview, showCancel }) {
+  const badgeClass = d.status === 'approved' ? 'badge-approved' : (d.status === 'rejected' || d.status === 'cancelled') ? 'badge-rejected' : 'badge-pending';
+  let actions = '';
+  if (showReview && d.status === 'pending') {
+    actions = `<div style="display:flex;gap:8px;margin-top:8px;"><button class="btn btn-success btn-sm disc-approve" data-id="${discEsc(d.id)}">✓ Approve</button><button class="btn btn-danger btn-sm disc-reject" data-id="${discEsc(d.id)}">✗ Reject</button></div>`;
+  } else if (showCancel && d.status === 'pending' && currentUser && d.userId === currentUser.id) {
+    actions = `<div style="margin-top:8px;"><button class="btn btn-danger btn-sm disc-cancel" data-id="${discEsc(d.id)}">Cancel request</button></div>`;
+  }
+  const hours = d.hours ? ` · ${discEsc(d.hours)}` : '';
+  const review = (d.status === 'approved' || d.status === 'rejected')
+    ? `<div style="font-size:11px;color:#8A7E74;margin-top:4px;">${discEsc(d.status)} by ${discEsc(d.reviewedBy || '')}${d.reviewNote ? ' — ' + discEsc(d.reviewNote) : ''}</div>`
+    : '';
+  return `<div class="approval-card"><div style="display:flex;justify-content:space-between;align-items:start;"><div><div style="font-weight:700;">📝 ${discEsc(d.type)} · ${discEsc(d.userName)}</div><div style="font-size:11px;color:#8A7E74;">${discEsc(d.date)} · ${discEsc(d.project)}${hours}</div><div style="font-size:12px;color:#5C4F42;margin-top:4px;white-space:pre-wrap;">${discEsc(d.description)}</div>${review}</div><span class="badge ${badgeClass}">${discEsc(d.status)}</span></div>${actions}</div>`;
+}
+
+async function discHandleCancel(id) {
+  if (!confirm('Withdraw this discrepancy?')) return;
+  const r = await cancelDiscrepancy(id);
+  if (!r.ok) alert(r.reason || 'Could not cancel.');
+  renderDiscrepancies({ skipRefresh: true });
+}
+
+async function discHandleReview(id, decision) {
+  let note = '';
+  if (decision === 'rejected') {
+    const n = prompt('Reason for rejection (optional):', '');
+    if (n === null) return;
+    note = n;
+  }
+  const r = await reviewDiscrepancy(id, decision, note);
+  if (!r.ok) alert(r.reason || 'Could not save the decision.');
+  renderDiscrepancies({ skipRefresh: true });
+}
+
+function discFillProjects() {
+  const sel = document.getElementById('discProjectInput');
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="N/A">N/A</option>' + projectsData.map((p) => `<option value="${discEsc(p.name)}">${discEsc(p.name)}</option>`).join('');
+  if (keep) sel.value = keep;
+}
+
+function discUpdateRaiseBtn() {
+  const btn = document.getElementById('discRaiseBtn');
+  if (!btn) return;
+  btn.disabled = !(document.getElementById('discDateInput').value && document.getElementById('discDescInput').value.trim());
+}
+
+async function renderDiscrepancies(opts) {
+  if (!(opts && opts.skipRefresh)) await refreshDiscrepanciesFromServer();
+  discFillProjects();
+  discUpdateRaiseBtn();
+  const adminEl = document.getElementById('discAdminSection');
+  adminEl.style.display = currentUser?.isAdmin ? 'block' : 'none';
+
+  const mine = discrepancies.filter((d) => currentUser && d.userId === currentUser.id).slice().sort((a, b) => (b.raisedAt || '').localeCompare(a.raisedAt || ''));
+  const myEl = document.getElementById('discMyList');
+  myEl.innerHTML = mine.length
+    ? mine.map((d) => discCard(d, { showReview: false, showCancel: true })).join('')
+    : `<div style="color:#B0A89E;font-size:13px;padding:16px;text-align:center;">No discrepancies raised yet.</div>`;
+  myEl.querySelectorAll('.disc-cancel').forEach((btn) => { btn.onclick = () => discHandleCancel(btn.dataset.id); });
+
+  if (currentUser?.isAdmin) {
+    const pending = discrepancies.filter((d) => d.status === 'pending').slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const pendEl = document.getElementById('discPendingList');
+    pendEl.innerHTML = pending.length
+      ? pending.map((d) => discCard(d, { showReview: true, showCancel: false })).join('')
+      : `<div style="color:#B0A89E;font-size:13px;padding:16px;text-align:center;">No pending discrepancies.</div>`;
+    pendEl.querySelectorAll('.disc-approve').forEach((btn) => { btn.onclick = () => discHandleReview(btn.dataset.id, 'approved'); });
+    pendEl.querySelectorAll('.disc-reject').forEach((btn) => { btn.onclick = () => discHandleReview(btn.dataset.id, 'rejected'); });
+
+    const resolved = discrepancies.filter((d) => d.status === 'approved' || d.status === 'rejected').slice().sort((a, b) => (b.reviewedAt || '').localeCompare(a.reviewedAt || ''));
+    const resEl = document.getElementById('discResolvedList');
+    resEl.innerHTML = resolved.length
+      ? resolved.map((d) => discCard(d, { showReview: false, showCancel: false })).join('')
+      : `<div style="color:#B0A89E;font-size:13px;padding:16px;text-align:center;">Nothing resolved yet.</div>`;
+  }
+}
+
+document.getElementById('discDateInput')?.addEventListener('input', discUpdateRaiseBtn);
+document.getElementById('discDateInput')?.addEventListener('change', discUpdateRaiseBtn);
+document.getElementById('discDescInput')?.addEventListener('input', discUpdateRaiseBtn);
+
+document.getElementById('discRaiseBtn')?.addEventListener('click', async () => {
+  const result = await raiseDiscrepancy({
+    date: document.getElementById('discDateInput').value,
+    type: document.getElementById('discTypeInput').value,
+    project: document.getElementById('discProjectInput').value,
+    hours: document.getElementById('discHoursInput').value,
+    description: document.getElementById('discDescInput').value,
+  });
+  if (!result.ok) { alert(result.reason || 'Could not raise the discrepancy.'); return; }
+  document.getElementById('discDateInput').value = '';
+  document.getElementById('discHoursInput').value = '';
+  document.getElementById('discDescInput').value = '';
+  document.getElementById('discTypeInput').value = 'Missed log';
+  document.getElementById('discProjectInput').value = 'N/A';
+  renderDiscrepancies({ skipRefresh: true });
 });
 
 // ═══════════════════════════════════════════════════════

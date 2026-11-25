@@ -277,7 +277,7 @@ function makeMockDb(seedByUser) {
     // route to this same shared block on a branch cut after this fixture was
     // written -- that's not this feature's concern, so normalize it away
     // rather than let an unrelated addition fail this file's isolation claim.
-    const stripWfhLine = (s) => s.replace(/\n\s*if\(page==='wfh'\)\s*renderWfh\(\);/, '');
+    const stripWfhLine = (s) => s.replace(/\n\s*if\(page==='wfh'\)\s*renderWfh\(\);/, '').replace(/\n\s*if\(page==='discrepancies'\)\s*renderDiscrepancies\(\);/, '');
     check('the nav-click router is byte-for-byte unchanged from main (mygrowth route already on main) once any later unrelated route additions are normalized away', stripWfhLine(cur) === stripWfhLine(main) && main.includes("page==='mygrowth'"));
   }
   check('saveProject() is byte-for-byte unchanged', extractFunction(fullScript, 'saveProject') === extractFunction(mainFullScript, 'saveProject'));
